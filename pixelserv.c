@@ -4,7 +4,7 @@
 * single pixel http string from http://proxytunnel.sourceforge.net/pixelserv.php
 */
 
-#define VERSION "V35.HZ1"
+#define VERSION "V35.HZ2"
 
 #define BACKLOG 30              // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 2048	     // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -293,7 +293,7 @@ void signal_handler(int sig)  // common signal handler
 #   endif
 #  endif  // TEXT_REPLY
 #  ifdef REDIRECT
-           , rdr
+      , rdr
 #  endif // REDIRECT
       );
 
@@ -462,7 +462,7 @@ int main (int argc, char *argv[]) // program start
   static unsigned char httpnull_jpg[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/jpeg\r\n"
-	"Content-length: 159\r\n"
+  "Content-length: 159\r\n"
   "Connection: close\r\n"
   "\r\n"
   "\xff\xd8"   // SOI, Start Of Image
@@ -477,33 +477,33 @@ int main (int argc, char *argv[]) // program start
   "\xff\xdb"  // DQT
   "\x00\x43"  // length of section 3+64
   "\x00"    // 0 QT 8 bit
-	"\xff\xff\xff\xff\xff\xff\xff\xff"
-	"\xff\xff\xff\xff\xff\xff\xff\xff"
-	"\xff\xff\xff\xff\xff\xff\xff\xff"
-	"\xff\xff\xff\xff\xff\xff\xff\xff"
-	"\xff\xff\xff\xff\xff\xff\xff\xff"
-	"\xff\xff\xff\xff\xff\xff\xff\xff"
-	"\xff\xff\xff\xff\xff\xff\xff\xff"
-	"\xff\xff\xff\xff\xff\xff\xff\xff"
-	"\xff\xc0"	// SOF
-	"\x00\x0b"	// length 11
-	"\x08\x00\x01\x00\x01\x01\x01\x11\x00"
-	"\xff\xc4"	// DHT Define Huffman Table
-	"\x00\x14"	// length 20
-	"\x00\x01"	// DC table 1
-	"\x00\x00\x00\x00\x00\x00\x00\x00"
-	"\x00\x00\x00\x00\x00\x00\x00\x03"
-	"\xff\xc4"	// DHT
-	"\x00\x14"	// length 20
-	"\x10\x01"	// AC table 1
-	"\x00\x00\x00\x00\x00\x00\x00\x00"
-	"\x00\x00\x00\x00\x00\x00\x00\x00"
+  "\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xff\xff\xff\xff\xff\xff\xff"
+  "\xff\xc0"	// SOF
+  "\x00\x0b"	// length 11
+  "\x08\x00\x01\x00\x01\x01\x01\x11\x00"
+  "\xff\xc4"	// DHT Define Huffman Table
+  "\x00\x14"	// length 20
+  "\x00\x01"	// DC table 1
+  "\x00\x00\x00\x00\x00\x00\x00\x00"
+  "\x00\x00\x00\x00\x00\x00\x00\x03"
+  "\xff\xc4"	// DHT
+  "\x00\x14"	// length 20
+  "\x10\x01"	// AC table 1
+  "\x00\x00\x00\x00\x00\x00\x00\x00"
+  "\x00\x00\x00\x00\x00\x00\x00\x00"
   "\xff\xda"  // SOS, Start of Scan
   "\x00\x08"  // length 8
   "\x01"    // 1 component
   "\x01\x00"
   "\x00\x3f\x00"  // Ss 0, Se 63, AhAl 0
-	"\x37" // image
+  "\x37" // image
   "\xff\xd9";  // EOI, End Of image
 
 static unsigned char httpnull_swf[] =
@@ -898,7 +898,12 @@ static unsigned char SSL_no[] =
             rsize = sizeof SSL_no - 1;
           } else {
 # endif
+# ifdef REDIRECT
+            char *req = strtok_r(buf, "\r\n", &bufptr);
+            char *method = strtok(req, " ");
+# else
             char *method = strtok(buf, " ");
+# endif
             if (method == NULL) {
               MYLOG(LOG_ERR, "null method");
             } else {
@@ -922,7 +927,8 @@ static unsigned char SSL_no[] =
                 } else {
 #ifdef REDIRECT
                   /* pick out encoded urls (usually advert redirects) */
-                  if (do_redirect && strstr(path, "=http") && strchr(path, '%')) {
+//                  if (do_redirect && strstr(path, "=http") && strchr(path, '%')) {
+                  if (do_redirect && strcasestr(path, "=http")) {
                     char *decoded = malloc(strlen(path)+1);
                     urldecode(decoded, path);
                     /* double decode */
@@ -935,13 +941,13 @@ static unsigned char SSL_no[] =
                     /* WORKAROUND: google analytics block - request bomb on pages with conversion callbacks (see in chrome) */
                     if (url) {
                       char *tok = NULL;
-                      bufptr = NULL;
-                      for (tok = strtok_r(path, "\r\n", &bufptr); tok; tok = strtok_r(NULL, "\r\n", &bufptr)) {
+                      for (tok = strtok_r(NULL, "\r\n", &bufptr); tok; tok = strtok_r(NULL, "\r\n", &bufptr)) {
                         char *hkey = strtok(tok, ":");
                         char *hvalue = strtok(NULL, "\r\n");
                         if (strstr(hkey, "Referer") && strstr(hvalue, url)) {
                           url = NULL;
                           TESTPRINT("Not redirecting likely callback URL: %s:%s\n", hkey, hvalue);
+                          break;
                         }
                       }
                     }
@@ -1020,7 +1026,14 @@ static unsigned char SSL_no[] =
         TESTPRINT("Sending a gif response\n");
 #endif  // TEXT_REPLY
         rv = send(new_fd, response, rsize, 0);
-
+#ifdef REDIRECT
+        if (status == SEND_REDIRECT) {
+          // free memory allocated by asprintf()
+          free(location);
+          location = NULL;
+          response = NULL;
+        }
+#endif
         /* check for error message, but don't bother checking that all bytes sent */
         if (rv < 0) {
           MYLOG(LOG_WARNING, "send: %m");
@@ -1099,4 +1112,5 @@ V34 add MULTIPORT option to also listen by default on https port 443
 V34.1 minor changes like bigger buffer, added ip/port info in abort msgs etc by opav @ https://github.com/opav/pixelserv-openwrt
 V35 Make user change failures non fatal, smaller swf file, investigate jpg structure, revert to more compatible 169 byte version
 V35.HZ1 merge in a bunch of h0tw1r3 changes (mainly REDIRECT feature) in attempt to bring the forks back together
+V35.HZ2 fix botched merge of redirect code, prevent memory leak, optimize self-redirect check loop
 */

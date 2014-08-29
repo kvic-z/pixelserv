@@ -21,7 +21,7 @@ LDFLAGS="-Wl,--gc-sections"
 STRIP="mipsel-uclibc-strip -s -R .note -R .comment -R .gnu.version -R .gnu.version_r"
 
 #tomato
-OPTS="-DDO_COUNT -DTEXT_REPLY -DDROP_ROOT -DNULLSERV_REPLIES -DSSL_RESP -DMULTIPORT -DIF_MODE"
+OPTS="-DDO_COUNT -DTEXT_REPLY -DDROP_ROOT -DNULLSERV_REPLIES -DSSL_RESP -DMULTIPORT -DIF_MODE -DREDIRECT"
 # -DIF_MODE "-i br0" responsible for failures when gui changes made
 # -DREAD_FILE -DREAD_GIF over-ridden by -DNULLSERV_REPLIES
 # -DVERBOSE"
