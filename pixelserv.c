@@ -4,7 +4,7 @@
 * single pixel http string from http://proxytunnel.sourceforge.net/pixelserv.php
 */
 
-#define VERSION "V35.HZ2"
+#define VERSION "V35.HZ3"
 
 #define BACKLOG 30              // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 2048	     // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -180,6 +180,7 @@ enum responsetypes {
   SEND_JPG,
   SEND_PNG,
   SEND_SWF,
+  SEND_ICO,
   SEND_BAD,
 #ifdef REDIRECT
   SEND_SSL,
@@ -200,6 +201,7 @@ volatile sig_atomic_t bad = 0;
 volatile sig_atomic_t jpg = 0;
 volatile sig_atomic_t png = 0;
 volatile sig_atomic_t swf = 0;
+volatile sig_atomic_t ico = 0;
 #  endif
 # ifdef SSL_RESP
 volatile sig_atomic_t ssl = 0;
@@ -251,6 +253,10 @@ void signal_handler(int sig)  // common signal handler
           case SEND_SWF :
             swf++;
             break;
+
+          case SEND_ICO :
+            ico++;
+            break;
 #  endif  // NULLSERV_REPLIES
 #  ifdef SSL_RESP
           case SEND_SSL :
@@ -273,7 +279,7 @@ void signal_handler(int sig)  // common signal handler
 #  ifdef TEXT_REPLY
       " %d bad, %d txt"
 #   ifdef NULLSERV_REPLIES
-      ", %d jpg, %d png, %d swf"
+      ", %d jpg, %d png, %d swf %d ico"
 #   endif
 #   ifdef SSL_RESP
       ", %d ssl"
@@ -286,7 +292,7 @@ void signal_handler(int sig)  // common signal handler
 #  ifdef TEXT_REPLY
       , bad, txt
 #   ifdef NULLSERV_REPLIES
-      , jpg, png, swf
+      , jpg, png, swf, ico
 #   endif
 #   ifdef SSL_RESP
       , ssl
@@ -522,6 +528,22 @@ static unsigned char httpnull_swf[] =
   "\x00\x00\x00"  // black
   "\x40\x00"  // tag type 1 = show frame
   "\x00\x00";  // tag type 0 - end file
+
+static unsigned char httpnull_ico[] =
+  "HTTP/1.1 200 OK\r\n"
+  "Content-type: image/x-icon\r\n"
+  "Content-length: 70\r\n"
+  "Connection: close\r\n"
+  "\r\n"
+  "\x00\x00\x01\x00\x01\x00\x01\x01"
+  "\x00\x00\x01\x00\x18\x00\x30\x00"
+  "\x00\x00\x16\x00\x00\x00\x28\x00"
+  "\x00\x00\x01\x00\x00\x00\x02\x00"
+  "\x00\x00\x01\x00\x18\x00\x00\x00"
+  "\x00\x00\x00\x00\x00\x00\x00\x00"
+  "\x00\x00\x00\x00\x00\x00\x00\x00"
+  "\x00\x00\x00\x00\x00\x00\x00\x00"
+  "\xff\x00\x00\x00\x00\x00";
 # endif
 
 # ifdef SSL_RESP
@@ -995,6 +1017,10 @@ static unsigned char SSL_no[] =
                           status = SEND_SWF;
                           response = httpnull_swf;
                           rsize = sizeof httpnull_swf - 1;
+                        } else if (!strcasecmp(ext, ".ico") ) {
+                          status = SEND_ICO;
+                          response = httpnull_ico;
+                          rsize = sizeof httpnull_ico - 1;
                         }
 # else
                         if ( !strncasecmp(ext, ".js", 3) ) {  /* .jsx ?*/
@@ -1113,4 +1139,5 @@ V34.1 minor changes like bigger buffer, added ip/port info in abort msgs etc by 
 V35 Make user change failures non fatal, smaller swf file, investigate jpg structure, revert to more compatible 169 byte version
 V35.HZ1 merge in a bunch of h0tw1r3 changes (mainly REDIRECT feature) in attempt to bring the forks back together
 V35.HZ2 fix botched merge of redirect code, prevent memory leak, optimize self-redirect check loop
+V35.HZ3 add .ico response, mainly to support favicon requests
 */
