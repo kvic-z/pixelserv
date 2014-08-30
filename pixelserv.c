@@ -4,7 +4,7 @@
 * single pixel http string from http://proxytunnel.sourceforge.net/pixelserv.php
 */
 
-#define VERSION "V35.HZ5"
+#define VERSION "V35.HZ6"
 
 #define BACKLOG 30              // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 2048	     // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -449,7 +449,8 @@ int main (int argc, char *argv[]) // program start
   static const unsigned char httpstats4[] =
   "</body></html>\r\n";
 
-  static const unsigned int statsbaselen = sizeof httpstats3 + sizeof httpstats4;
+  // note: the -2 is to avoid counting the line ending
+  static const unsigned int statsbaselen = sizeof httpstats3 + sizeof httpstats4 - 2;
 #endif
 
 #ifdef REDIRECT
@@ -1245,4 +1246,5 @@ V35.HZ2 fix botched merge of redirect code, prevent memory leak, optimize self-r
 V35.HZ3 add .ico response, mainly to support favicon requests
 V35.HZ4 add stats response URL feature, fix stats typo
 V35.HZ5 fixed stats response HTML output, log send() errors to syslog
+V35.HZ6 fix length of stats response
 */
