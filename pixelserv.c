@@ -4,7 +4,7 @@
 * single pixel http string from http://proxytunnel.sourceforge.net/pixelserv.php
 */
 
-#define VERSION "V35.HZ4"
+#define VERSION "V35.HZ5"
 
 #define BACKLOG 30              // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 2048	     // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -1031,12 +1031,13 @@ static unsigned char SSL_no[] =
                   status = SEND_STATS;
                   char* stat_string = get_stats(1);
                   asprintf((char**)(&response),
-                           "%s%d%s%s%s",
+                           "%s%d%s%s%s%s",
                            httpstats1,
                            statsbaselen + strlen(stat_string),
                            httpstats2,
+                           httpstats3,
                            stat_string,
-                           httpstats3);
+                           httpstats4);
                   free(stat_string);
                   rsize = strlen((char*)response);
 # endif
@@ -1164,6 +1165,7 @@ static unsigned char SSL_no[] =
         /* check for error message, but don't bother checking that all bytes sent */
         if (rv < 0) {
           MYLOG(LOG_WARNING, "send: %m");
+          syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %s", status, strerror(errno));
           status = EXIT_FAILURE;
         }
       }
@@ -1242,4 +1244,5 @@ V35.HZ1 merge in a bunch of h0tw1r3 changes (mainly REDIRECT feature) in attempt
 V35.HZ2 fix botched merge of redirect code, prevent memory leak, optimize self-redirect check loop
 V35.HZ3 add .ico response, mainly to support favicon requests
 V35.HZ4 add stats response URL feature, fix stats typo
+V35.HZ5 fixed stats response HTML output, log send() errors to syslog
 */
