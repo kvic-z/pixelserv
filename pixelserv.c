@@ -4,7 +4,7 @@
 * single pixel http string from http://proxytunnel.sourceforge.net/pixelserv.php
 */
 
-#define VERSION "V35.HZ3"
+#define VERSION "V35.HZ4"
 
 #define BACKLOG 30              // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 2048	     // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -24,6 +24,13 @@
 
 #ifdef DROP_ROOT
 # define DEFAULT_USER "nobody"  // nobody used by dnsmasq
+#endif
+
+#ifdef STATS_REPLY
+# ifndef DO_COUNT
+#  define DO_COUNT
+# endif
+# define DEFAULT_STATS_URL "/servstats"
 #endif
 
 # define _GNU_SOURCE            // asprintf()
@@ -182,12 +189,13 @@ enum responsetypes {
   SEND_SWF,
   SEND_ICO,
   SEND_BAD,
-#ifdef REDIRECT
-  SEND_SSL,
-  SEND_REDIRECT
-#else
-  SEND_SSL
+#ifdef STATS_REPLY
+  SEND_STATS,
 #endif
+#ifdef REDIRECT
+  SEND_REDIRECT,
+#endif
+  SEND_SSL
 };
 
 #ifdef DO_COUNT
@@ -207,10 +215,61 @@ volatile sig_atomic_t ico = 0;
 volatile sig_atomic_t ssl = 0;
 # endif
 # endif  // TEXT_REPLY
+# ifdef STATS_REPLY
+volatile sig_atomic_t sta = 0; // so meta!
+# endif // STATS_REPLY
 # ifdef REDIRECT
 volatile sig_atomic_t rdr = 0;
 # endif // REDIRECT
 #endif  // DO_COUNT
+
+#ifdef DO_COUNT
+// stats string generator
+// note that caller is expected to call free()
+//  on the return value when done using it
+// also, the purpose of sta_offset is to allow
+//  accounting for an in-progess status response
+inline char* get_stats(int sta_offset)
+{
+  char* retbuf = NULL;
+
+  asprintf(&retbuf, "%d req, %d err, %d gif,"
+# ifdef TEXT_REPLY
+    " %d bad, %d txt"
+#  ifdef NULLSERV_REPLIES
+    ", %d jpg, %d png, %d swf, %d ico"
+#  endif
+#  ifdef SSL_RESP
+    ", %d ssl"
+#  endif
+# endif  // TEXT_REPLY
+# ifdef STATS_REPLY
+    ", %d sta"
+# endif // STATS_REPLY
+# ifdef REDIRECT
+    ", %d rdr"
+# endif // REDIRECT
+    , count, err, gif
+# ifdef TEXT_REPLY
+    , bad, txt
+#  ifdef NULLSERV_REPLIES
+    , jpg, png, swf, ico
+#  endif
+#  ifdef SSL_RESP
+    , ssl
+#  endif
+# endif  // TEXT_REPLY
+# ifdef STATS_REPLY
+    , sta + sta_offset
+# endif // STATS_REPLY
+# ifdef REDIRECT
+    , rdr
+# endif // REDIRECT
+  );
+
+  return retbuf;
+}
+#endif // DO_COUNT
 
 void signal_handler(int sig)  // common signal handler
 {
@@ -228,6 +287,11 @@ void signal_handler(int sig)  // common signal handler
           case SEND_GIF :
             gif++;
             break;
+# ifdef STATS_REPLY
+          case SEND_STATS :
+            sta++;
+            break;
+# endif // STATS_REPLY
 # ifdef REDIRECT
           case SEND_REDIRECT:
             rdr++;
@@ -275,38 +339,15 @@ void signal_handler(int sig)  // common signal handler
     signal(sig, SIG_IGN);  // Ignore this signal while we are quiting
 # ifdef DO_COUNT
   case SIGUSR1 :
-    syslog(LOG_INFO, "%d req, %d err, %d gif,"
-#  ifdef TEXT_REPLY
-      " %d bad, %d txt"
-#   ifdef NULLSERV_REPLIES
-      ", %d jpg, %d png, %d swf %d ico"
-#   endif
-#   ifdef SSL_RESP
-      ", %d ssl"
-#   endif
-#  endif  // TEXT_REPLY
-#  ifdef REDIRECT
-           ", %d rdr"
-#  endif // REDIRECT
-      , count, err, gif
-#  ifdef TEXT_REPLY
-      , bad, txt
-#   ifdef NULLSERV_REPLIES
-      , jpg, png, swf, ico
-#   endif
-#   ifdef SSL_RESP
-      , ssl
-#   endif
-#  endif  // TEXT_REPLY
-#  ifdef REDIRECT
-      , rdr
-#  endif // REDIRECT
-      );
+    {
+      char* stats_string = get_stats(0);
+      syslog(LOG_INFO, "%s", stats_string);
+      free(stats_string);
+    }
 
     if (sig == SIGUSR1) {
       return;
     }
-
 # endif  // DO_COUNT
     syslog(LOG_NOTICE, "exit on SIGTERM");
     exit(EXIT_SUCCESS);
@@ -365,6 +406,10 @@ int main (int argc, char *argv[]) // program start
   struct passwd *pw;
 #endif
 
+#ifdef STATS_REPLY
+  char* stats_url = DEFAULT_STATS_URL;
+#endif
+
 #ifdef REDIRECT
   int do_redirect = 0;
 
@@ -385,6 +430,27 @@ int main (int argc, char *argv[]) // program start
   struct stat file_stat;
   FILE *fp;
 #endif // READ_FILE
+
+#ifdef STATS_REPLY
+  // response pieces
+  static const unsigned char httpstats1[] =
+  "HTTP/1.1 200 OK\r\n"
+  "Content-type: text/html\r\n"
+  "Content-length: ";
+  // total content length goes between these two strings
+  static const unsigned char httpstats2[] =
+  "\r\n"
+  "Connection: close\r\n"
+  "\r\n";
+  // split here because we care about the length of what follows
+  static const unsigned char httpstats3[] =
+  "<!DOCTYPE html><html><head><title>nullserv statistics</title></head><body>";
+  // stats text goes between these two strings
+  static const unsigned char httpstats4[] =
+  "</body></html>\r\n";
+
+  static const unsigned int statsbaselen = sizeof httpstats3 + sizeof httpstats4;
+#endif
 
 #ifdef REDIRECT
 # ifdef TEXT_REPLY
@@ -577,7 +643,13 @@ static unsigned char SSL_no[] =
   /* command line arguments processing */
   for (i = 1; i < argc; i++)  {
     if (argv[i][0] == '-') {
-      if ( (i + 1) < argc ) {
+#ifdef REDIRECT
+      if (argv[i][1] == 'r') { // doesn't require a subsequent argument
+        do_redirect = 1;
+        continue;
+      }
+#endif
+      if ( (i + 1) < argc ) { // arguments that require a subsequent argument
         switch (argv[i][1]) {
 #ifdef IF_MODE
         case 'n' :
@@ -609,14 +681,14 @@ static unsigned char SSL_no[] =
           fname = argv[++i];
           break;
 #endif  // READ_FILE
+#ifdef STATS_REPLY
+        case 's' :
+          stats_url = argv[++i];
+          break;
+#endif
         default :
           error = 1;
         }
-#ifdef REDIRECT
-      } else if (argv[i][1] == 'r') {
-          do_redirect = 1;
-          break;
-#endif
       } else {
         error = 1;
       }
@@ -625,17 +697,21 @@ static unsigned char SSL_no[] =
       use_ip = 1;
     } else {
       error = 1;  // fix bug with 2 IP like args
-    }
-  }
+    } // -
+  } // for
 
   if (error) {
 #ifndef TINY
     printf("Usage:%s"
            " [IP No/hostname (all)]"
 # ifdef PORT_MODE
-           " [-p port (80)"
+           " [-p port ("
+           DEFAULT_PORT
+           ")"
 # ifdef MULTIPORT
-           " & (443)"
+           " & ("
+           SECOND_PORT
+           ")"
 # endif
            "]"
 # endif
@@ -645,9 +721,14 @@ static unsigned char SSL_no[] =
 # ifdef DROP_ROOT
            " [-u user (\"nobody\")]"
 # endif // DROP_ROOT
-#ifdef REDIRECT
-           " [-r redirect encoded path (tracker links)]"
-#endif // REDIRECT
+# ifdef STATS_REPLY
+           " [-s /relative_stats_URL ("
+           DEFAULT_STATS_URL
+           ")"
+# endif // STATS_REPLY
+# ifdef REDIRECT
+           " [-r (redirect encoded path in tracker links)]"
+# endif // REDIRECT
 # ifdef READ_FILE
            " [-f response.bin]"
 #  ifdef READ_GIF
@@ -816,7 +897,6 @@ static unsigned char SSL_no[] =
   }
 #endif
 
-
 #ifdef MULTIPORT
   for (i = 0; i < num_ports; i++) {
     port = ports[i];
@@ -939,15 +1019,29 @@ static unsigned char SSL_no[] =
               } else {
                 status = DEFAULT_REPLY;  // send default from here
                 /* trim up to non path chars */
-#ifdef REDIRECT
+# ifdef REDIRECT
                 char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
-#else
+# else
                 char *path = strtok(NULL, " ?#;=");	// "?;#:*<>[]='\"\\,|!~()"
-#endif // REDIRECT
+# endif // REDIRECT
                 if (path == NULL) {
                   MYLOG(LOG_ERR, "null path");
+# ifdef STATS_REPLY
+                } else if (!strcmp(path, stats_url)) {
+                  status = SEND_STATS;
+                  char* stat_string = get_stats(1);
+                  asprintf((char**)(&response),
+                           "%s%d%s%s%s",
+                           httpstats1,
+                           statsbaselen + strlen(stat_string),
+                           httpstats2,
+                           stat_string,
+                           httpstats3);
+                  free(stat_string);
+                  rsize = strlen((char*)response);
+# endif
                 } else {
-#ifdef REDIRECT
+# ifdef REDIRECT
                   /* pick out encoded urls (usually advert redirects) */
 //                  if (do_redirect && strstr(path, "=http") && strchr(path, '%')) {
                   if (do_redirect && strcasestr(path, "=http")) {
@@ -983,10 +1077,10 @@ static unsigned char SSL_no[] =
                     url = NULL;
                   } else {
                     char *file = strrchr(strtok(path, "?#;="), '/');
-#else
+# else
                     TESTPRINT("path: '%s'\n",path);
                     char *file = strrchr(path, '/');
-#endif // REDIRECT
+# endif // REDIRECT
                     if (file == NULL) {
                       MYLOG(LOG_ERR, "invalid file path %s", path);
                     } else {
@@ -1052,6 +1146,13 @@ static unsigned char SSL_no[] =
         TESTPRINT("Sending a gif response\n");
 #endif  // TEXT_REPLY
         rv = send(new_fd, response, rsize, 0);
+#ifdef STATS_REPLY
+        if (status == SEND_STATS) {
+          // free memory allocated by asprintf()
+          free(response);
+          response = NULL;
+        }
+#endif // STATS_REPLY
 #ifdef REDIRECT
         if (status == SEND_REDIRECT) {
           // free memory allocated by asprintf()
@@ -1059,7 +1160,7 @@ static unsigned char SSL_no[] =
           location = NULL;
           response = NULL;
         }
-#endif
+#endif // REDIRECT
         /* check for error message, but don't bother checking that all bytes sent */
         if (rv < 0) {
           MYLOG(LOG_WARNING, "send: %m");
@@ -1140,4 +1241,5 @@ V35 Make user change failures non fatal, smaller swf file, investigate jpg struc
 V35.HZ1 merge in a bunch of h0tw1r3 changes (mainly REDIRECT feature) in attempt to bring the forks back together
 V35.HZ2 fix botched merge of redirect code, prevent memory leak, optimize self-redirect check loop
 V35.HZ3 add .ico response, mainly to support favicon requests
+V35.HZ4 add stats response URL feature, fix stats typo
 */
