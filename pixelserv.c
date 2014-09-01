@@ -4,13 +4,14 @@
 * single pixel http string from http://proxytunnel.sourceforge.net/pixelserv.php
 */
 
-#define VERSION "V35.HZ6"
+#define VERSION "V35.HZ7"
 
 #define BACKLOG 30              // how many pending connections queue will hold
-#define CHAR_BUF_SIZE 2048	     // surprising how big requests can be with cookies and lengthy yahoo url!
+#define CHAR_BUF_SIZE 2048	    // surprising how big requests can be with cookies and lengthy yahoo url!
 
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
+#define DEFAULT_TIMEOUT 10      // default timeout for select() calls, in seconds
 
 #ifdef MULTIPORT
 # ifndef PORT_MODE
@@ -31,6 +32,7 @@
 #  define DO_COUNT
 # endif
 # define DEFAULT_STATS_URL "/servstats"
+# define DEFAULT_STATS_TEXT_URL "/servstats.txt"
 #endif
 
 # define _GNU_SOURCE            // asprintf()
@@ -189,13 +191,22 @@ enum responsetypes {
   SEND_SWF,
   SEND_ICO,
   SEND_BAD,
+#ifdef SSL_RESP
+  SEND_SSL,
+#endif
 #ifdef STATS_REPLY
   SEND_STATS,
+  SEND_STATSTEXT,
 #endif
 #ifdef REDIRECT
   SEND_REDIRECT,
 #endif
-  SEND_SSL
+  SEND_NO_EXT,
+  SEND_UNK_EXT,
+  SEND_NO_URL,
+  SEND_BAD_PATH,
+  FAIL_TIMEOUT,
+  FAIL_CLOSED
 };
 
 #ifdef DO_COUNT
@@ -217,11 +228,30 @@ volatile sig_atomic_t ssl = 0;
 # endif  // TEXT_REPLY
 # ifdef STATS_REPLY
 volatile sig_atomic_t sta = 0; // so meta!
+volatile sig_atomic_t stt = 0;
 # endif // STATS_REPLY
 # ifdef REDIRECT
 volatile sig_atomic_t rdr = 0;
 # endif // REDIRECT
+volatile sig_atomic_t tmo = 0;
+volatile sig_atomic_t cls = 0;
+volatile sig_atomic_t nou = 0;
+volatile sig_atomic_t pth = 0;
+volatile sig_atomic_t nfe = 0;
+volatile sig_atomic_t ufe = 0;
 #endif  // DO_COUNT
+
+// generate version string
+// note that caller is expected to call free()
+//  on the return value when done using it
+inline char* get_version(char* program_name)
+{
+  char* retbuf = NULL;
+
+  asprintf(&retbuf, "%s version: %s compiled: %s from %s", program_name, VERSION, __DATE__ " " __TIME__, __FILE__);
+
+  return retbuf;
+}
 
 #ifdef DO_COUNT
 // stats string generator
@@ -229,11 +259,12 @@ volatile sig_atomic_t rdr = 0;
 //  on the return value when done using it
 // also, the purpose of sta_offset is to allow
 //  accounting for an in-progess status response
-inline char* get_stats(int sta_offset)
+// similarly, stt_offset is for in-progress status.txt response
+inline char* get_stats(int sta_offset, int stt_offset)
 {
   char* retbuf = NULL;
 
-  asprintf(&retbuf, "%d req, %d err, %d gif,"
+  asprintf(&retbuf, "%d req, %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif,"
 # ifdef TEXT_REPLY
     " %d bad, %d txt"
 #  ifdef NULLSERV_REPLIES
@@ -244,12 +275,12 @@ inline char* get_stats(int sta_offset)
 #  endif
 # endif  // TEXT_REPLY
 # ifdef STATS_REPLY
-    ", %d sta"
+    ", %d sta, %d stt"
 # endif // STATS_REPLY
 # ifdef REDIRECT
     ", %d rdr"
 # endif // REDIRECT
-    , count, err, gif
+    , count, err, tmo, cls, nou, pth, nfe, ufe, gif
 # ifdef TEXT_REPLY
     , bad, txt
 #  ifdef NULLSERV_REPLIES
@@ -260,7 +291,7 @@ inline char* get_stats(int sta_offset)
 #  endif
 # endif  // TEXT_REPLY
 # ifdef STATS_REPLY
-    , sta + sta_offset
+    , sta + sta_offset, stt + stt_offset
 # endif // STATS_REPLY
 # ifdef REDIRECT
     , rdr
@@ -280,52 +311,32 @@ void signal_handler(int sig)  // common signal handler
 #ifdef DO_COUNT
       if ( WIFEXITED(status) ) {
         switch ( WEXITSTATUS(status) ) {
-          case EXIT_FAILURE :
-            err++;
-            break;
-
-          case SEND_GIF :
-            gif++;
-            break;
+          case EXIT_FAILURE:   err++; break;
+          case FAIL_TIMEOUT:   tmo++; break;
+          case FAIL_CLOSED:    cls++; break;
+          case SEND_NO_URL:    nou++; break;
+          case SEND_BAD_PATH:  pth++; break;
+          case SEND_NO_EXT:    nfe++; break;
+          case SEND_UNK_EXT:   ufe++; break;
+          case SEND_GIF:       gif++; break;
 # ifdef STATS_REPLY
-          case SEND_STATS :
-            sta++;
-            break;
+          case SEND_STATS:     sta++; break;
+          case SEND_STATSTEXT: stt++; break;
 # endif // STATS_REPLY
 # ifdef REDIRECT
-          case SEND_REDIRECT:
-            rdr++;
-            break;
+          case SEND_REDIRECT:  rdr++; break;
 # endif // REDIRECT
 # ifdef TEXT_REPLY
-          case SEND_BAD :
-            bad++;
-            break;
-
-          case SEND_TXT :
-            txt++;
-            break;
+          case SEND_BAD:       bad++; break;
+          case SEND_TXT:       txt++; break;
 #  ifdef NULLSERV_REPLIES
-          case SEND_JPG :
-            jpg++;
-            break;
-
-          case SEND_PNG :
-            png++;
-            break;
-
-          case SEND_SWF :
-            swf++;
-            break;
-
-          case SEND_ICO :
-            ico++;
-            break;
+          case SEND_JPG:       jpg++; break;
+          case SEND_PNG:       png++; break;
+          case SEND_SWF:       swf++; break;
+          case SEND_ICO:       ico++; break;
 #  endif  // NULLSERV_REPLIES
 #  ifdef SSL_RESP
-          case SEND_SSL :
-            ssl++;
-            break;
+          case SEND_SSL:       ssl++; break;
 #  endif
 # endif  // TEXT_REPLY
         }
@@ -340,7 +351,7 @@ void signal_handler(int sig)  // common signal handler
 # ifdef DO_COUNT
   case SIGUSR1 :
     {
-      char* stats_string = get_stats(0);
+      char* stats_string = get_stats(0, 0);
       syslog(LOG_INFO, "%s", stats_string);
       free(stats_string);
     }
@@ -376,6 +387,7 @@ int main (int argc, char *argv[]) // program start
 #ifdef TEST
   char s[INET6_ADDRSTRLEN];
 #endif
+  time_t select_timeout = DEFAULT_TIMEOUT;
   int rv;
   char *ip_addr = DEFAULT_IP;
   int use_ip = 0;
@@ -408,6 +420,7 @@ int main (int argc, char *argv[]) // program start
 
 #ifdef STATS_REPLY
   char* stats_url = DEFAULT_STATS_URL;
+  char* stats_text_url = DEFAULT_STATS_TEXT_URL;
 #endif
 
 #ifdef REDIRECT
@@ -432,7 +445,7 @@ int main (int argc, char *argv[]) // program start
 #endif // READ_FILE
 
 #ifdef STATS_REPLY
-  // response pieces
+  // HTML response pieces
   static const unsigned char httpstats1[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: text/html\r\n"
@@ -451,6 +464,20 @@ int main (int argc, char *argv[]) // program start
 
   // note: the -2 is to avoid counting the line ending
   static const unsigned int statsbaselen = sizeof httpstats3 + sizeof httpstats4 - 2;
+
+  // TXT response pieces
+  static const unsigned char txtstats1[] =
+  "HTTP/1.1 200 OK\r\n"
+  "Content-type: text/plain\r\n"
+  "Content-length: ";
+  // total content length goes between these two strings
+  static const unsigned char txtstats2[] =
+  "\r\n"
+  "Connection: close\r\n"
+  "\r\n";
+  // split here because we care about the length of what follows
+  static const unsigned char txtstats3[] =
+  "\r\n";
 #endif
 
 #ifdef REDIRECT
@@ -599,18 +626,30 @@ static unsigned char httpnull_swf[] =
 static unsigned char httpnull_ico[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/x-icon\r\n"
+  "Cache-Control: max-age=2592000\r\n"
   "Content-length: 70\r\n"
   "Connection: close\r\n"
   "\r\n"
-  "\x00\x00\x01\x00\x01\x00\x01\x01"
-  "\x00\x00\x01\x00\x18\x00\x30\x00"
-  "\x00\x00\x16\x00\x00\x00\x28\x00"
-  "\x00\x00\x01\x00\x00\x00\x02\x00"
-  "\x00\x00\x01\x00\x18\x00\x00\x00"
-  "\x00\x00\x00\x00\x00\x00\x00\x00"
-  "\x00\x00\x00\x00\x00\x00\x00\x00"
-  "\x00\x00\x00\x00\x00\x00\x00\x00"
-  "\xff\x00\x00\x00\x00\x00";
+  "\x00\x00" // reserved 0
+  "\x01\x00" // ico
+  "\x01\x00" // 1 image
+  "\x01\x01\x00" // 1 x 1 x >8bpp colour
+  "\x00" // reserved 0
+  "\x01\x00" // 1 colour plane
+  "\x20\x00" // 32 bits per pixel
+  "\x30\x00\x00\x00" // size 48 bytes
+  "\x16\x00\x00\x00" // start of image 22 bytes in
+  "\x28\x00\x00\x00" // size of DIB header 40 bytes
+  "\x01\x00\x00\x00" // width
+  "\x02\x00\x00\x00" // height
+  "\x01\x00" // colour planes
+  "\x20\x00" // bits per pixel
+  "\x00\x00\x00\x00" // no compression
+  "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+  "\x00\x00\x00\x00" // end of header
+  "\x00\x00\x00\x00" // Colour table
+  "\x00\x00\x00\x00" // XOR B G R
+  "\x80\xF8\x9C\x41"; // AND ?
 # endif
 
 # ifdef SSL_RESP
@@ -642,7 +681,7 @@ static unsigned char SSL_no[] =
   int status = EXIT_FAILURE; /* default return from child */
 
   /* command line arguments processing */
-  for (i = 1; i < argc; i++)  {
+  for (i = 1; i < argc && error == 0; ++i) {
     if (argv[i][0] == '-') {
 #ifdef REDIRECT
       if (argv[i][1] == 'r') { // doesn't require a subsequent argument
@@ -658,6 +697,14 @@ static unsigned char SSL_no[] =
           use_if = 1;
           break;
 #endif
+        case 'o' :
+          errno = 0;
+          select_timeout = strtol(argv[++i], NULL, 10);
+          if (errno) {
+            ++i;
+            error = 1;
+          }
+          break;
 #ifdef PORT_MODE
         case 'p' :
           if (num_ports < MAX_PORTS) {
@@ -666,6 +713,14 @@ static unsigned char SSL_no[] =
             i++;
             error = 1;
           }
+          break;
+#endif
+#ifdef STATS_REPLY
+        case 's' :
+          stats_url = argv[++i];
+          break;
+        case 't' :
+          stats_text_url = argv[++i];
           break;
 #endif
 #ifdef DROP_ROOT
@@ -682,11 +737,6 @@ static unsigned char SSL_no[] =
           fname = argv[++i];
           break;
 #endif  // READ_FILE
-#ifdef STATS_REPLY
-        case 's' :
-          stats_url = argv[++i];
-          break;
-#endif
         default :
           error = 1;
         }
@@ -705,44 +755,50 @@ static unsigned char SSL_no[] =
 #ifndef TINY
     printf("Usage:%s"
            " [IP No/hostname (all)]"
+# ifdef IF_MODE
+           " [-n i/f (all)]"
+# endif // IF_MODE
+           " [-o select_timeout (%d seconds)]"
 # ifdef PORT_MODE
            " [-p port ("
            DEFAULT_PORT
            ")"
-# ifdef MULTIPORT
+#  ifdef MULTIPORT
            " & ("
            SECOND_PORT
            ")"
-# endif
+#  endif
            "]"
 # endif
-# ifdef IF_MODE
-           " [-n i/f (all)]"
-# endif // IF_MODE
+# ifdef REDIRECT
+           " [-r (enables redirect to encoded path in tracker links)]"
+# endif // REDIRECT
+# ifdef STATS_REPLY
+           " [-s /relative_stats_html_URL ("
+           DEFAULT_STATS_URL
+           ")"
+           " [-t /relative_stats_txt_URL ("
+           DEFAULT_STATS_TEXT_URL
+           ")"
+# endif // STATS_REPLY
 # ifdef DROP_ROOT
            " [-u user (\"nobody\")]"
 # endif // DROP_ROOT
-# ifdef STATS_REPLY
-           " [-s /relative_stats_URL ("
-           DEFAULT_STATS_URL
-           ")"
-# endif // STATS_REPLY
-# ifdef REDIRECT
-           " [-r (redirect encoded path in tracker links)]"
-# endif // REDIRECT
 # ifdef READ_FILE
            " [-f response.bin]"
 #  ifdef READ_GIF
            " [-g name.gif]"
 #  endif // READ_GIF
 # endif  // READ_FILE
-           "\n", argv[0]);
+           "\n", argv[0], DEFAULT_TIMEOUT);
 #endif  // !TINY
     exit(EXIT_FAILURE);
   }
 
   openlog("pixelserv", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
-  syslog(LOG_INFO, "%s version: %s compiled: %s from %s", argv[0], VERSION, __DATE__ " " __TIME__ , __FILE__ );
+  char* version_string = get_version(argv[0]);
+  syslog(LOG_INFO, "%s", version_string);
+  free(version_string);
 
 #ifdef READ_FILE
   if (fname) {
@@ -847,7 +903,7 @@ static unsigned char SSL_no[] =
       || ( bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen) != OK )
       || ( listen(sockfd, BACKLOG) != OK ) ) {
 #ifdef IF_MODE
-      syslog(LOG_ERR, "Abort: %m - %s %s:%s", ifname, ip_addr, port);
+      syslog(LOG_ERR, "Abort: %m - %s:%s:%s", ifname, ip_addr, port);
 #else
       syslog(LOG_ERR, "Abort: %m - %s:%s", ip_addr, port);
 #endif
@@ -894,7 +950,7 @@ static unsigned char SSL_no[] =
     syslog(LOG_WARNING, "Unknown user \"%s\"", user);
   }
   else if ( setuid(pw->pw_uid) ) {
-    syslog( LOG_WARNING, "setuid %d: %s\n", pw->pw_uid, strerror(errno) );
+    syslog( LOG_WARNING, "setuid %d: %m", pw->pw_uid);
   }
 #endif
 
@@ -904,7 +960,7 @@ static unsigned char SSL_no[] =
 #endif
 
 #ifdef IF_MODE
-  syslog(LOG_NOTICE, "Listening on %s %s:%s", ifname, ip_addr, port);
+  syslog(LOG_NOTICE, "Listening on %s:%s:%s", ifname, ip_addr, port);
 #else
   syslog(LOG_NOTICE, "Listening on %s:%s", ip_addr, port);
 #endif
@@ -926,7 +982,7 @@ static unsigned char SSL_no[] =
     // NOTE: MACRO needs "_GNU_SOURCE", without this the select gets interrupted with errno EINTR
     select_rv = TEMP_FAILURE_RETRY( select(FD_SETSIZE, &readfds, NULL, NULL, NULL) );
     if (select_rv < 0) {
-      syslog(LOG_ERR, "select(fd) error: %s", strerror(errno));
+      syslog(LOG_ERR, "select(fd) error: %m");
       exit(EXIT_FAILURE);
     }
 
@@ -948,6 +1004,7 @@ static unsigned char SSL_no[] =
     }
 
 #ifdef DO_COUNT
+    // from here on, all exits/returns/continues should be counted or logged
     count++;
 #endif
 
@@ -972,21 +1029,23 @@ static unsigned char SSL_no[] =
       FD_ZERO(&set);
       FD_SET(new_fd, &set);
       /* Initialize the timeout data structure */
-      timeout.tv_sec = 2;
+      timeout.tv_sec = select_timeout;
       timeout.tv_usec = 0;
 
       /* select returns 0 if timeout, 1 if input available, -1 if error */
       select_rv = select(new_fd + 1, &set, NULL, NULL, &timeout);
       if (select_rv < 0) {
-        MYLOG(LOG_ERR, "select: %m");
+        syslog(LOG_ERR, "select() returned error: %m");
       } else if (select_rv == 0) {
-        MYLOG(LOG_ERR, "timeout on select");
+        MYLOG(LOG_ERR, "select() timed out");
+        status = FAIL_TIMEOUT;
       } else {
         rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
         if (rv < 0) {
-          MYLOG(LOG_ERR, "recv: %m");
+          syslog(LOG_ERR, "recv() returned error: %m");
         } else if (rv == 0) {
-          MYLOG(LOG_ERR, "recv: No data");
+          status = FAIL_CLOSED;
+          syslog(LOG_ERR, "client closed connection without sending any data");
         } else {
           buf[rv] = '\0';
           TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
@@ -1008,7 +1067,7 @@ static unsigned char SSL_no[] =
             char *method = strtok(buf, " ");
 # endif
             if (method == NULL) {
-              MYLOG(LOG_ERR, "null method");
+              syslog(LOG_ERR, "client did not specify method");
             } else {
               TESTPRINT("method: '%s'\n", method);
               if ( strcmp(method, "GET") ) {  //methods are case-sensitive
@@ -1018,7 +1077,9 @@ static unsigned char SSL_no[] =
                 response = http501;
                 rsize = sizeof http501 - 1;
               } else {
-                status = DEFAULT_REPLY;  // send default from here
+                // ----------------------------------------------
+                // send default from here, no matter what happens
+                status = DEFAULT_REPLY;
                 /* trim up to non path chars */
 # ifdef REDIRECT
                 char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
@@ -1026,19 +1087,38 @@ static unsigned char SSL_no[] =
                 char *path = strtok(NULL, " ?#;=");	// "?;#:*<>[]='\"\\,|!~()"
 # endif // REDIRECT
                 if (path == NULL) {
-                  MYLOG(LOG_ERR, "null path");
+                  status = SEND_NO_URL;
+                  syslog(LOG_ERR, "client did not specify URL for GET request");
 # ifdef STATS_REPLY
                 } else if (!strcmp(path, stats_url)) {
                   status = SEND_STATS;
-                  char* stat_string = get_stats(1);
+                  char* version_string = get_version(argv[0]);
+                  char* stat_string = get_stats(1, 0);
                   asprintf((char**)(&response),
-                           "%s%d%s%s%s%s",
+                           "%s%d%s%s%s<br>%s%s",
                            httpstats1,
-                           statsbaselen + strlen(stat_string),
+                           statsbaselen + strlen(version_string) + 4 + strlen(stat_string),
                            httpstats2,
                            httpstats3,
+                           version_string,
                            stat_string,
                            httpstats4);
+                  free(version_string);
+                  free(stat_string);
+                  rsize = strlen((char*)response);
+                } else if (!strcmp(path, stats_text_url)) {
+                  status = SEND_STATSTEXT;
+                  char* version_string = get_version(argv[0]);
+                  char* stat_string = get_stats(0, 1);
+                  asprintf((char**)(&response),
+                           "%s%d%s%s\n%s%s",
+                           txtstats1,
+                           strlen(version_string) + 1 + strlen(stat_string) + 2,
+                           txtstats2,
+                           version_string,
+                           stat_string,
+                           txtstats3);
+                  free(version_string);
                   free(stat_string);
                   rsize = strlen((char*)response);
 # endif
@@ -1084,12 +1164,14 @@ static unsigned char SSL_no[] =
                     char *file = strrchr(path, '/');
 # endif // REDIRECT
                     if (file == NULL) {
-                      MYLOG(LOG_ERR, "invalid file path %s", path);
+                      status = SEND_BAD_PATH;
+                      syslog(LOG_ERR, "invalid file path %s", path);
                     } else {
                       TESTPRINT("file: '%s'\n", file);
                       char *ext = strrchr(file, '.');
                       if (ext == NULL) {
-                        MYLOG(LOG_ERR, "No file extension %s", file);
+                        status = SEND_NO_EXT;
+                        MYLOG(LOG_ERR, "no file extension %s from path %s", file, path);
                       } else {
                         TESTPRINT("ext: '%s'\n", ext);
 # ifdef NULLSERV_REPLIES
@@ -1117,6 +1199,9 @@ static unsigned char SSL_no[] =
                           status = SEND_ICO;
                           response = httpnull_ico;
                           rsize = sizeof httpnull_ico - 1;
+                        } else {
+                          status = SEND_UNK_EXT;
+                          MYLOG(LOG_ERR, "unrecognized file extension %s from path %s", ext, path);
                         }
 # else
                         if ( !strncasecmp(ext, ".js", 3) ) {  /* .jsx ?*/
@@ -1141,7 +1226,9 @@ static unsigned char SSL_no[] =
         }
       }
 
-      if (status != EXIT_FAILURE) {
+      if (status == EXIT_FAILURE) {
+        syslog(LOG_WARNING, "browser request processing completed with EXIT_FAILURE status");
+      } else if (status != FAIL_TIMEOUT && status != FAIL_CLOSED) {
 #else  // TEXT_REPLY
       {
         status = SEND_GIF;
@@ -1149,7 +1236,7 @@ static unsigned char SSL_no[] =
 #endif  // TEXT_REPLY
         rv = send(new_fd, response, rsize, 0);
 #ifdef STATS_REPLY
-        if (status == SEND_STATS) {
+        if (status == SEND_STATS || status == SEND_STATSTEXT) {
           // free memory allocated by asprintf()
           free(response);
           response = NULL;
@@ -1166,7 +1253,7 @@ static unsigned char SSL_no[] =
         /* check for error message, but don't bother checking that all bytes sent */
         if (rv < 0) {
           MYLOG(LOG_WARNING, "send: %m");
-          syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %s", status, strerror(errno));
+          syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", status);
           status = EXIT_FAILURE;
         }
       }
@@ -1178,7 +1265,7 @@ static unsigned char SSL_no[] =
           FD_ZERO(&set);
           FD_SET(new_fd, &set);
           /* Initialize the timeout data structure */
-          timeout.tv_sec = 2;
+          timeout.tv_sec = select_timeout;
           timeout.tv_usec = 0;
           /* select returns 0 if timeout, 1 if input available, -1 if error */
           select_rv = select(new_fd + 1, &set, NULL, NULL, &timeout);
@@ -1187,11 +1274,16 @@ static unsigned char SSL_no[] =
 
       shutdown(new_fd, SHUT_RD);
       close(new_fd);
+
+      if (status == EXIT_FAILURE) {
+        syslog(LOG_WARNING, "connection handler exiting with EXIT_FAILURE status");
+      }
+
       exit(status);
-    }
+    } // end of forked child process
 
     close(new_fd);  // parent doesn't need this
-  }
+  } // end of perpetual accept() loop
 //  Never get here while(1)
 //  return (EXIT_SUCCESS);
 }
@@ -1247,4 +1339,11 @@ V35.HZ3 add .ico response, mainly to support favicon requests
 V35.HZ4 add stats response URL feature, fix stats typo
 V35.HZ5 fixed stats response HTML output, log send() errors to syslog
 V35.HZ6 fix length of stats response
+V35.HZ7 add plaintext stats response
+        add syslog logging of various EXIT_FAILURE conditions
+        add counters for "connection timeout" and "connection closed" failure cases
+        add counters for "no extension", "unsupported extension", "no URL", and "bad path" default response cases
+        add configurable timeout(s)
+        increase default timeout(s) per mstombs suggestion
+        integrate transparent+caching .ico response from M0g13r/mstombs
 */
