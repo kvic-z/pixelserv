@@ -4,7 +4,7 @@
 * single pixel http string from http://proxytunnel.sourceforge.net/pixelserv.php
 */
 
-#define VERSION "V35.HZ7"
+#define VERSION "V35.HZ8"
 
 #define BACKLOG 30              // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 2048	    // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -1045,7 +1045,7 @@ static unsigned char SSL_no[] =
           syslog(LOG_ERR, "recv() returned error: %m");
         } else if (rv == 0) {
           status = FAIL_CLOSED;
-          syslog(LOG_ERR, "client closed connection without sending any data");
+          MYLOG(LOG_ERR, "client closed connection without sending any data");
         } else {
           buf[rv] = '\0';
           TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
@@ -1346,4 +1346,5 @@ V35.HZ7 add plaintext stats response
         add configurable timeout(s)
         increase default timeout(s) per mstombs suggestion
         integrate transparent+caching .ico response from M0g13r/mstombs
+V35.HZ8 suppress syslog regarding unexpectedly closed socket connection
 */
