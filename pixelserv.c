@@ -4,10 +4,10 @@
 * single pixel http string from http://proxytunnel.sourceforge.net/pixelserv.php
 */
 
-#define VERSION "V35.HZ8"
+#define VERSION "V35.HZ9"
 
 #define BACKLOG 30              // how many pending connections queue will hold
-#define CHAR_BUF_SIZE 2048	    // surprising how big requests can be with cookies and lengthy yahoo url!
+#define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
 
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
@@ -25,6 +25,12 @@
 
 #ifdef DROP_ROOT
 # define DEFAULT_USER "nobody"  // nobody used by dnsmasq
+#endif
+
+#ifdef STATS_PIPE
+# ifndef DO_COUNT
+#  define DO_COUNT
+# endif
 #endif
 
 #ifdef STATS_REPLY
@@ -211,6 +217,11 @@ enum responsetypes {
 
 #ifdef DO_COUNT
 volatile sig_atomic_t count = 0;
+# ifdef STATS_PIPE
+volatile sig_atomic_t avg = 0; // cumulative moving average request size
+volatile sig_atomic_t act = 0; // count (updated at time of average calculation)
+volatile sig_atomic_t rmx = 0; // maximum encountered request size
+# endif
 volatile sig_atomic_t gif = 0;
 volatile sig_atomic_t err = 0;
 # ifdef TEXT_REPLY
@@ -264,9 +275,13 @@ inline char* get_stats(int sta_offset, int stt_offset)
 {
   char* retbuf = NULL;
 
-  asprintf(&retbuf, "%d req, %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif,"
+  asprintf(&retbuf, "%d req"
+# ifdef STATS_PIPE
+    ", %d avg, %d rmx"
+# endif
+    ", %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif"
 # ifdef TEXT_REPLY
-    " %d bad, %d txt"
+    ", %d bad, %d txt"
 #  ifdef NULLSERV_REPLIES
     ", %d jpg, %d png, %d swf, %d ico"
 #  endif
@@ -280,7 +295,11 @@ inline char* get_stats(int sta_offset, int stt_offset)
 # ifdef REDIRECT
     ", %d rdr"
 # endif // REDIRECT
-    , count, err, tmo, cls, nou, pth, nfe, ufe, gif
+    , count
+# ifdef STATS_PIPE
+    , avg, rmx
+# endif
+    , err, tmo, cls, nou, pth, nfe, ufe, gif
 # ifdef TEXT_REPLY
     , bad, txt
 #  ifdef NULLSERV_REPLIES
@@ -392,6 +411,10 @@ int main (int argc, char *argv[]) // program start
   char *ip_addr = DEFAULT_IP;
   int use_ip = 0;
   char buf[CHAR_BUF_SIZE + 1];
+#ifdef STATS_PIPE
+  int pipefd[2];  // IPC pipe ends (0 = read, 1 = write)
+  int rv_total = -1;
+#endif
 
 #ifdef PORT_MODE
   char *ports[MAX_PORTS];
@@ -565,18 +588,18 @@ int main (int argc, char *argv[]) // program start
   "Content-length: 159\r\n"
   "Connection: close\r\n"
   "\r\n"
-  "\xff\xd8"   // SOI, Start Of Image
+  "\xff\xd8"  // SOI, Start Of Image
   "\xff\xe0"  // APP0
   "\x00\x10"  // length of section 16
   "JFIF\0"
   "\x01\x01"  // version 1.1
-  "\x01"    // pixel per inch
+  "\x01"      // pixel per inch
   "\x00\x48"  // horizontal density 72
   "\x00\x48"  // vertical density 72
   "\x00\x00"  // size of thumbnail 0 x 0
   "\xff\xdb"  // DQT
   "\x00\x43"  // length of section 3+64
-  "\x00"    // 0 QT 8 bit
+  "\x00"      // 0 QT 8 bit
   "\xff\xff\xff\xff\xff\xff\xff\xff"
   "\xff\xff\xff\xff\xff\xff\xff\xff"
   "\xff\xff\xff\xff\xff\xff\xff\xff"
@@ -585,17 +608,17 @@ int main (int argc, char *argv[]) // program start
   "\xff\xff\xff\xff\xff\xff\xff\xff"
   "\xff\xff\xff\xff\xff\xff\xff\xff"
   "\xff\xff\xff\xff\xff\xff\xff\xff"
-  "\xff\xc0"	// SOF
-  "\x00\x0b"	// length 11
+  "\xff\xc0"  // SOF
+  "\x00\x0b"  // length 11
   "\x08\x00\x01\x00\x01\x01\x01\x11\x00"
-  "\xff\xc4"	// DHT Define Huffman Table
-  "\x00\x14"	// length 20
-  "\x00\x01"	// DC table 1
+  "\xff\xc4"  // DHT Define Huffman Table
+  "\x00\x14"  // length 20
+  "\x00\x01"  // DC table 1
   "\x00\x00\x00\x00\x00\x00\x00\x00"
   "\x00\x00\x00\x00\x00\x00\x00\x03"
-  "\xff\xc4"	// DHT
-  "\x00\x14"	// length 20
-  "\x10\x01"	// AC table 1
+  "\xff\xc4"  // DHT
+  "\x00\x14"  // length 20
+  "\x10\x01"  // AC table 1
   "\x00\x00\x00\x00\x00\x00\x00\x00"
   "\x00\x00\x00\x00\x00\x00\x00\x00"
   "\xff\xda"  // SOS, Start of Scan
@@ -968,6 +991,13 @@ static unsigned char SSL_no[] =
   }
 #endif
 
+#ifdef STATS_PIPE
+  if (pipe(pipefd) == -1) {
+    syslog(LOG_ERR, "pipe() error: %m");
+    exit(EXIT_FAILURE);
+  }
+#endif
+
   sin_size = sizeof their_addr;
   while(1) {  /* main accept() loop */
 #ifdef MULTIPORT
@@ -1004,12 +1034,18 @@ static unsigned char SSL_no[] =
     }
 
 #ifdef DO_COUNT
-    // from here on, all exits/returns/continues should be counted or logged
     count++;
 #endif
 
     if ( fork() == 0 ) {
-      /* this is the child process */
+      // this is the child process
+      // NOTES:
+      // - from here on, all exit() calls should be counted or at least logged
+      // - something MUST be written to the pipe before any exit() to prevent
+      //   the parent thread's read() from hanging forever
+      // - a value of -1 should be written to the pipe if exit() is called
+      //   without having read anything from the socket connection
+      // - return/continue should not be called from the child process
       close(sockfd); /* child doesn't need the listener */
 #ifndef TINY
       signal(SIGTERM, SIG_DFL);
@@ -1017,6 +1053,11 @@ static unsigned char SSL_no[] =
       signal(SIGCHLD, SIG_DFL);
 #ifdef DO_COUNT
       signal(SIGUSR1, SIG_IGN);
+#endif
+
+#ifdef STATS_PIPE
+      // close child's copy of pipe read descriptor, as it doesn't need it
+      close(pipefd[0]);
 #endif
 
 #ifdef TEST
@@ -1049,6 +1090,9 @@ static unsigned char SSL_no[] =
         } else {
           buf[rv] = '\0';
           TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
+#ifdef STATS_PIPE
+          rv_total = rv;  // record number of bytes read so far during this loop pass
+#endif
 # ifdef HEX_DUMP
           hex_dump(buf, rv);
 # endif
@@ -1084,7 +1128,7 @@ static unsigned char SSL_no[] =
 # ifdef REDIRECT
                 char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
 # else
-                char *path = strtok(NULL, " ?#;=");	// "?;#:*<>[]='\"\\,|!~()"
+                char *path = strtok(NULL, " ?#;="); // "?;#:*<>[]='\"\\,|!~()"
 # endif // REDIRECT
                 if (path == NULL) {
                   status = SEND_NO_URL;
@@ -1269,11 +1313,29 @@ static unsigned char SSL_no[] =
           timeout.tv_usec = 0;
           /* select returns 0 if timeout, 1 if input available, -1 if error */
           select_rv = select(new_fd + 1, &set, NULL, NULL, &timeout);
-        } while ( (select_rv > 0) && ( recv(new_fd, buf, CHAR_BUF_SIZE, 0) > 0 ) );
+          if (select_rv > 0) {
+            rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+#ifdef STATS_PIPE
+            if (rv > 0) {
+              rv_total += rv;
+            }
+#endif
+          }
+        } while (select_rv > 0 && rv > 0);
       }
 
       shutdown(new_fd, SHUT_RD);
       close(new_fd);
+
+#ifdef STATS_PIPE
+      // write rv_total to pipe
+      if (write(pipefd[1], &rv_total, sizeof(rv_total)) < 0) {
+        // log as warning only because it only affects stats
+        syslog(LOG_WARNING, "write() to pipe returned error: %m");
+        // should probably also check for return value of 0 and of != sizeof(rv_total)...
+      }
+      close(pipefd[1]);
+#endif
 
       if (status == EXIT_FAILURE) {
         syslog(LOG_WARNING, "connection handler exiting with EXIT_FAILURE status");
@@ -1281,6 +1343,32 @@ static unsigned char SSL_no[] =
 
       exit(status);
     } // end of forked child process
+
+    // this is guaranteed to be the parent process, as the child has called exit()
+
+#ifdef STATS_PIPE
+    // NOTE: do NOT close write end of pipe, because next child will need it to
+    //       still be open
+    //
+    // perform a single read from pipe, which will block until the child has
+    //  written something (unless it already has)
+    rv = read(pipefd[0], &rv_total, sizeof(rv_total));
+    if (rv < 0) {
+      syslog(LOG_ERR, "error reading from pipe: %m");
+    } else if (rv == 0) {
+      syslog(LOG_ERR, "pipe read() returned zero");
+    } else if (rv != sizeof(rv_total)) {
+      syslog(LOG_WARNING, "pipe read() got %d bytes, but %d bytes were expected - discarding", rv, sizeof(rv_total));
+    } else if (rv_total < 0) {
+      syslog(LOG_WARNING, "pipe read() got negative data value %d - discarding", rv_total);
+    } else {
+      // calculate as a double, round up, truncate to int
+      avg += ((double)(rv_total - avg) / ++act) + 0.5;
+      if (rv_total > rmx) {
+        rmx = rv_total;
+      }
+    }
+#endif
 
     close(new_fd);  // parent doesn't need this
   } // end of perpetual accept() loop
@@ -1347,4 +1435,5 @@ V35.HZ7 add plaintext stats response
         increase default timeout(s) per mstombs suggestion
         integrate transparent+caching .ico response from M0g13r/mstombs
 V35.HZ8 suppress syslog regarding unexpectedly closed socket connection
+V35.HZ9 use pipe to report client request sizes, and report average and max request size stats
 */

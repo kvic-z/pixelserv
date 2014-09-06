@@ -20,11 +20,11 @@ CC="mipsel-uclibc-gcc -mips32"
 CFLAGS="-Os -s -Wall -ffunction-sections -fdata-sections"
 LDFLAGS="-Wl,--gc-sections"
 STRIP="mipsel-uclibc-strip -s -R .note -R .comment -R .gnu.version -R .gnu.version_r"
-OPTS="-DTEXT_REPLY -DDROP_ROOT -DNULLSERV_REPLIES -DSSL_RESP -DMULTIPORT -DIF_MODE -DSTATS_REPLY -DREDIRECT"
+OPTS="-DTEXT_REPLY -DDROP_ROOT -DNULLSERV_REPLIES -DSSL_RESP -DMULTIPORT -DIF_MODE -DSTATS_REPLY -DREDIRECT -DSTATS_PIPE"
 # -DIF_MODE "-i br0" responsible for failures when gui changes made
 # -DREAD_FILE -DREAD_GIF over-ridden by -DNULLSERV_REPLIES
 # -DPORT_MODE set by -DMULTIPORT
-# -DDO_COUNT set by -DSTATS_REPLY
+# -DDO_COUNT set by -DSTATS_REPLY and/or -DSTATS_PIPE
 # -DVERBOSE"
 BIN=$OUT
 $CC $CFLAGS $LDFLAGS $OPTS $SRC -o $BIN
