@@ -68,53 +68,21 @@
 #endif
 
 #define OK (0)
-#define ERROR (-1)
 
-// system includes
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>        // for TCP_NODELAY
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <sys/wait.h>
-#include <signal.h>
-#include <syslog.h>
-//#include <net/if.h>             // for IFNAMSIZ (OBE - commented out)
-#include <pwd.h>                // for getpwnam
-#include <ctype.h>              // isdigit() & tolower()
-
-// shared enums
-enum responsetypes {
-  SEND_GIF = 10,
-  SEND_TXT,
-  SEND_JPG,
-  SEND_PNG,
-  SEND_SWF,
-  SEND_ICO,
-  SEND_BAD,
-#ifdef SSL_RESP
-  SEND_SSL,
-#endif
-#ifdef STATS_REPLY
-  SEND_STATS,
-  SEND_STATSTEXT,
-#endif
-#ifdef REDIRECT
-  SEND_REDIRECT,
-#endif
-  SEND_NO_EXT,
-  SEND_UNK_EXT,
-  SEND_NO_URL,
-  SEND_BAD_PATH,
-  FAIL_TIMEOUT,
-  FAIL_CLOSED
-};
+// system includes used by more than one source file
+#include <errno.h>              // EPIPE, errno, EINTR
+#include <netdb.h>              // addrinfo(), AI_PASSIVE, gai_strerror(), freeaddrinfo()
+//#include <net/if.h>           // IFNAMSIZ
+//#include <netinet/in.h>       // doesn't seem to be needed
+#include <netinet/tcp.h>        // SOL_TCP, TCP_NODELAY
+#include <signal.h>             // sig_atomic_t
+#include <stdio.h>              // printf() and variants
+#include <stdlib.h>             // exit(), EXIT_FAILURE
+#include <string.h>             // lots of stuff!
+#include <syslog.h>             // syslog(), openlog()
+//#include <sys/socket.h>       // doesn't seem to be needed
+//#include <sys/types.h>        // doesn't seem to be needed
+#include <unistd.h>             // close(), setuid(), TEMP_FAILURE_RETRY, fork()
 
 // cross-thread count variables
 #ifdef DO_COUNT
@@ -135,9 +103,9 @@ extern volatile sig_atomic_t png;
 extern volatile sig_atomic_t swf;
 extern volatile sig_atomic_t ico;
 #  endif
-# ifdef SSL_RESP
+#  ifdef SSL_RESP
 extern volatile sig_atomic_t ssl;
-# endif
+#  endif
 # endif  // TEXT_REPLY
 # ifdef STATS_REPLY
 extern volatile sig_atomic_t sta; // so meta!
@@ -159,7 +127,7 @@ extern volatile sig_atomic_t ufe;
 // generate version string
 // note that caller is expected to call free()
 //  on the return value when done using it
-char* get_version(char* program_name);
+char* get_version(const char* const program_name);
 
 #ifdef DO_COUNT
 // stats string generator
@@ -170,7 +138,7 @@ char* get_version(char* program_name);
 // - The purpose of sta_offset is to allow accounting for an in-progess status
 //   response.
 // - Similarly, stt_offset is for an in-progress status.txt response.
-char* get_stats(int sta_offset, int stt_offset);
+char* get_stats(const int sta_offset, const int stt_offset);
 #endif
 
 // changelog
@@ -235,6 +203,12 @@ V35.HZ7  add plaintext stats response
 V35.HZ8  suppress syslog regarding unexpectedly closed socket connection
 V35.HZ9  use pipe to report client request sizes, and report average and max request size stats
 V35.HZ10 split code into multiple files for organizational and encapsulation purposes
+         use select() to also handle pipe I/O, and set pipe to non-blocking reads/writes
+         build select()'s fd set only once, by operating on a copy
+         process all pending socket/pipe I/O before calling main select() again
+         enable redirect feature by default, deprecating -r and adding opposite -R parameter
+         add program uptime to stats report
+         various minor tweaks and optimizations
 */
 
 #endif // UTIL_H

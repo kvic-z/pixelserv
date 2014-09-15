@@ -7,71 +7,89 @@
 #include "util.h"
 #include "socket_handler.h"
 
+#include <sys/wait.h>   // waitpid()
+
+#ifdef DROP_ROOT
+# include <pwd.h>       // getpwnam()
+#endif
 #ifdef READ_FILE
 # include <sys/stat.h>
+#endif
+#ifdef STATS_PIPE
+# include <fcntl.h>     // fcntl() and related
+#endif
+#ifdef TEST
+# include <arpa/inet.h> // inet_ntop()
 #endif
 
 void signal_handler(int sig)
 {
   int status;
   switch (sig) {
-  case SIGCHLD :  // ensure no zombie sub processes left */
-    while ( waitpid(-1, &status, WNOHANG) > 0 ) {
+    case SIGCHLD :  // ensure no zombie sub processes left */
+      while ( waitpid(-1, &status, WNOHANG) > 0 ) {
 #ifdef DO_COUNT
-      if ( WIFEXITED(status) ) {
-        switch ( WEXITSTATUS(status) ) {
-          case EXIT_FAILURE:   err++; break;
-          case FAIL_TIMEOUT:   tmo++; break;
-          case FAIL_CLOSED:    cls++; break;
-          case SEND_NO_URL:    nou++; break;
-          case SEND_BAD_PATH:  pth++; break;
-          case SEND_NO_EXT:    nfe++; break;
-          case SEND_UNK_EXT:   ufe++; break;
-          case SEND_GIF:       gif++; break;
+        if ( WIFEXITED(status) ) {
+          switch ( WEXITSTATUS(status) ) {
+            case EXIT_FAILURE:   err++; break;
+            case FAIL_TIMEOUT:   tmo++; break;
+            case FAIL_CLOSED:    cls++; break;
+            case SEND_NO_URL:    nou++; break;
+            case SEND_BAD_PATH:  pth++; break;
+            case SEND_NO_EXT:    nfe++; break;
+            case SEND_UNK_EXT:   ufe++; break;
+            case SEND_GIF:       gif++; break;
 # ifdef STATS_REPLY
-          case SEND_STATS:     sta++; break;
-          case SEND_STATSTEXT: stt++; break;
+            case SEND_STATS:     sta++; break;
+            case SEND_STATSTEXT: stt++; break;
 # endif // STATS_REPLY
 # ifdef REDIRECT
-          case SEND_REDIRECT:  rdr++; break;
+            case SEND_REDIRECT:  rdr++; break;
 # endif // REDIRECT
 # ifdef TEXT_REPLY
-          case SEND_BAD:       bad++; break;
-          case SEND_TXT:       txt++; break;
+            case SEND_BAD:       bad++; break;
+            case SEND_TXT:       txt++; break;
 #  ifdef NULLSERV_REPLIES
-          case SEND_JPG:       jpg++; break;
-          case SEND_PNG:       png++; break;
-          case SEND_SWF:       swf++; break;
-          case SEND_ICO:       ico++; break;
+            case SEND_JPG:       jpg++; break;
+            case SEND_PNG:       png++; break;
+            case SEND_SWF:       swf++; break;
+            case SEND_ICO:       ico++; break;
 #  endif  // NULLSERV_REPLIES
 #  ifdef SSL_RESP
-          case SEND_SSL:       ssl++; break;
+            case SEND_SSL:       ssl++; break;
 #  endif
 # endif  // TEXT_REPLY
+            default:
+              syslog(LOG_WARNING, "Socket handler child process returned unknown exit status: %d", status);
+          }
         }
-      }
 #endif  // DO_COUNT
-    };
-    return;
+      };
+    return; // case SIGCHLD
 
 #ifndef TINY
-  case SIGTERM :  // Handler for the SIGTERM signal (kill)
-    signal(sig, SIG_IGN);  // Ignore this signal while we are quiting
+    case SIGTERM:  // Handler for the SIGTERM signal (kill)
+      signal(sig, SIG_IGN);  // Ignore this signal while we are quitting
+      // fall through
 # ifdef DO_COUNT
-  case SIGUSR1 :
-    {
-      char* stats_string = get_stats(0, 0);
-      syslog(LOG_INFO, "%s", stats_string);
-      free(stats_string);
-    }
+    case SIGUSR1:
+      {
+        char* stats_string = get_stats(0, 0);
+        syslog(LOG_INFO, "%s", stats_string);
+        free(stats_string);
+      }
 
-    if (sig == SIGUSR1) {
-      return;
-    }
+      if (sig == SIGUSR1) {
+        return;
+      }
 # endif  // DO_COUNT
-    syslog(LOG_NOTICE, "exit on SIGTERM");
-    exit(EXIT_SUCCESS);
-#endif // TINY
+      syslog(LOG_NOTICE, "exit on SIGTERM");
+      exit(EXIT_SUCCESS);
+#endif // !TINY
+    break;
+
+    default:
+      syslog(LOG_WARNING, "Got unhandled signal number: %d", sig);
   }
 }
 
@@ -89,58 +107,57 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main (int argc, char *argv[]) // program start
 {
-  int sockfd;  // listen on sock_fd
-  int new_fd;  // new connection on new_fd
+  int sockfd = 0;  // listen on sock_fd
+  int new_fd = 0;  // new connection on new_fd
   struct sockaddr_storage their_addr;  // connector's address information
   socklen_t sin_size;
   int yes = 1;
+  char* version_string;
+  time_t select_timeout = DEFAULT_TIMEOUT;
+  int rv = 0;
+  char *ip_addr = DEFAULT_IP;
+  int use_ip = 0;
+  struct addrinfo hints, *servinfo;
+  int error = 0;
 #ifdef TEST
   char ntop_buf[INET6_ADDRSTRLEN];
 #endif
-  time_t select_timeout = DEFAULT_TIMEOUT;
-  int rv;
-  char *ip_addr = DEFAULT_IP;
-  int use_ip = 0;
 #ifdef STATS_PIPE
   int pipefd[2];  // IPC pipe ends (0 = read, 1 = write)
   int rx_total = -1;
 #endif
-
 #ifdef PORT_MODE
   char *ports[MAX_PORTS];
   ports[0] = DEFAULT_PORT;
-  char *port;
+  char *port = NULL;
 # ifdef MULTIPORT
   fd_set readfds;
+  fd_set selectfds;
   int sockfds[MAX_PORTS];
   ports[1] = SECOND_PORT;
-  int select_rv;
+  int select_rv = 0;
+  int nfds = 0;
 # endif
   int num_ports = 0;
 #else
 # define port DEFAULT_PORT
 #endif
   int i;
-
 #ifdef IF_MODE
   char *ifname = "";
   int use_if = 0;
 #endif
-
 #ifdef DROP_ROOT
   char *user = DEFAULT_USER;  // used to be long enough
-  struct passwd *pw;
+  struct passwd *pw = 0;
 #endif
-
 #ifdef STATS_REPLY
   char* stats_url = DEFAULT_STATS_URL;
   char* stats_text_url = DEFAULT_STATS_TEXT_URL;
 #endif
-
 #ifdef REDIRECT
-  int do_redirect = 0;
+  int do_redirect = 1;
 #endif // REDIRECT
-
 #ifdef READ_FILE
   char *fname = NULL;
   int fsize;
@@ -150,73 +167,76 @@ int main (int argc, char *argv[]) // program start
   int hsize = 0;
   struct stat file_stat;
   FILE *fp;
-  unsigned char *response = NULL;
+  char *response = NULL;
   int rsize = -1;
   char buf[CHAR_BUF_SIZE + 1];
 #endif // READ_FILE
-
-  struct addrinfo hints, *servinfo;
-  int error = 0;
 
   /* command line arguments processing */
   for (i = 1; i < argc && error == 0; ++i) {
     if (argv[i][0] == '-') {
 #ifdef REDIRECT
-      if (argv[i][1] == 'r') { // doesn't require a subsequent argument
-        do_redirect = 1;
+      // handle arguments that don't require a subsequent argument
+      switch (argv[i][1]) {
+        case 'r':
+          // deprecated - ignore
+//          do_redirect = 1;
+        continue;
+        case 'R':
+          do_redirect = 0;
         continue;
       }
 #endif
-      if ( (i + 1) < argc ) { // arguments that require a subsequent argument
-        switch (argv[i][1]) {
+      // handle arguments that require a subsequent argument
+      if ( (i + 1) < argc ) {
+        // switch on parameter letter and process subsequent argument
+        switch (argv[i++][1]) {
 #ifdef IF_MODE
-        case 'n' :
-          ifname = argv[++i];
-          use_if = 1;
+          case 'n':
+            ifname = argv[i];
+            use_if = 1;
           break;
 #endif
-        case 'o' :
-          errno = 0;
-          select_timeout = strtol(argv[++i], NULL, 10);
-          if (errno) {
-            ++i;
-            error = 1;
-          }
+          case 'o':
+            errno = 0;
+            select_timeout = strtol(argv[i], NULL, 10);
+            if (errno) {
+              error = 1;
+            }
           break;
 #ifdef PORT_MODE
-        case 'p' :
-          if (num_ports < MAX_PORTS) {
-            ports[num_ports++] = argv[++i];
-          } else {
-            i++;
-            error = 1;
-          }
+          case 'p':
+            if (num_ports < MAX_PORTS) {
+              ports[num_ports++] = argv[i];
+            } else {
+              error = 1;
+            }
           break;
 #endif
 #ifdef STATS_REPLY
-        case 's' :
-          stats_url = argv[++i];
+          case 's':
+            stats_url = argv[i];
           break;
-        case 't' :
-          stats_text_url = argv[++i];
+          case 't':
+            stats_text_url = argv[i];
           break;
 #endif
 #ifdef DROP_ROOT
-        case 'u' :
-          user = argv[++i];
+          case 'u':
+            user = argv[i];
           break;
 #endif
 #ifdef READ_FILE
 # ifdef READ_GIF
-        case 'g' :
-          do_gif = 1;  // and fall through
+          case 'g':
+            do_gif = 1;  // and fall through
 # endif
-        case 'f' :
-          fname = argv[++i];
-          break;
+          case 'f':
+            fname = argv[i];
+            break;
 #endif  // READ_FILE
-        default :
-          error = 1;
+          default:
+            error = 1;
         }
       } else {
         error = 1;
@@ -249,7 +269,8 @@ int main (int argc, char *argv[]) // program start
            "]"
 # endif
 # ifdef REDIRECT
-           " [-r (enables redirect to encoded path in tracker links)]"
+           " [-r (deprecated - ignored)]"
+           " [-R (disables redirect to encoded path in tracker links)]"
 # endif // REDIRECT
 # ifdef STATS_REPLY
            " [-s /relative_stats_html_URL ("
@@ -274,9 +295,13 @@ int main (int argc, char *argv[]) // program start
   }
 
   openlog("pixelserv", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
-  char* version_string = get_version(argv[0]);
-  syslog(LOG_INFO, "%s", version_string);
-  free(version_string);
+  version_string = get_version(argv[0]);
+  if (version_string) {
+    syslog(LOG_INFO, "%s", version_string);
+    free(version_string);
+  } else {
+    exit(EXIT_FAILURE);
+  }
 
 #ifdef READ_FILE
   if (fname) {
@@ -362,6 +387,11 @@ int main (int argc, char *argv[]) // program start
 # endif
   }
 
+# ifdef MULTIPORT
+  // clear the set
+  FD_ZERO(&readfds);
+# endif
+
   for (i = 0; i < num_ports; i++) {
     port = ports[i];
 #endif
@@ -387,13 +417,15 @@ int main (int argc, char *argv[]) // program start
 #endif
       exit(EXIT_FAILURE);
     }
-#ifdef PORT_MODE
 #ifdef MULTIPORT
     sockfds[i] = sockfd;
+    // add descriptor to the set
+    FD_SET(sockfd, &readfds);
+    if (sockfd > nfds) {
+      nfds = sockfd;
+    }
   }
 #endif
-#endif
-
   freeaddrinfo(servinfo); /* all done with this structure */
 
   {
@@ -428,7 +460,7 @@ int main (int argc, char *argv[]) // program start
     syslog(LOG_WARNING, "Unknown user \"%s\"", user);
   }
   else if ( setuid(pw->pw_uid) ) {
-    syslog( LOG_WARNING, "setuid %d: %m", pw->pw_uid);
+    syslog(LOG_WARNING, "setuid %d: %m", pw->pw_uid);
   }
 #endif
 
@@ -444,41 +476,115 @@ int main (int argc, char *argv[]) // program start
 #endif
 #ifdef MULTIPORT
   }
-#endif
+# ifdef STATS_PIPE
+  // cause failed pipe I/O calls to result in error return values instead of
+  //  SIGPIPE signals
+  signal(SIGPIPE, SIG_IGN);
 
-#ifdef STATS_PIPE
+  // open pipe for children to use for writing data back to main
   if (pipe(pipefd) == -1) {
     syslog(LOG_ERR, "pipe() error: %m");
     exit(EXIT_FAILURE);
+  } else if (fcntl(pipefd[0], F_SETFL, fcntl(pipefd[0], F_GETFL) | O_NONBLOCK) == -1) {
+    syslog(LOG_ERR, "fcntl() error setting O_NONBLOCK on read end of pipe: %m");
+    exit(EXIT_FAILURE);
+  } else if (fcntl(pipefd[1], F_SETFL, fcntl(pipefd[1], F_GETFL) | O_NONBLOCK) == -1) {
+    syslog(LOG_ERR, "fcntl() error setting O_NONBLOCK on write end of pipe: %m");
+    exit(EXIT_FAILURE);
   }
+
+  // FYI, this shows 4096 on mips K26
+  MYLOG(LOG_INFO, "opened pipe with buffer size %d bytes", PIPE_BUF);
+
+  // also have select() monitor the read end of the stats pipe
+  FD_SET(pipefd[0], &readfds);
+  // note if pipe read descriptor is the largest fd number we care about
+  if (pipefd[0] > nfds) {
+    nfds = pipefd[0];
+  }
+# endif
+  // nfds now contains the largest fd number of interest;
+  //  increment by 1 for use with select()
+  ++nfds;
 #endif
 
   sin_size = sizeof their_addr;
   while(1) {  /* main accept() loop */
 #ifdef MULTIPORT
-    sockfd = 0;
-    // clear the set
-    FD_ZERO(&readfds);
-    // add our descriptors to the set
-    for (i = 0; i < num_ports; i++) {
-      FD_SET(sockfds[i], &readfds);
+    // only call select() if we have something more to process
+    if (select_rv <= 0) {
+      // select() modifies its fd set, so make a working copy
+      // readfds should not be referenced after this point, as it must remain
+      //  intact
+      selectfds = readfds;
+      // NOTE: MACRO needs "_GNU_SOURCE"; without this the select gets
+      //       interrupted with errno EINTR
+      select_rv = TEMP_FAILURE_RETRY(select(nfds, &selectfds, NULL, NULL, NULL));
+      if (select_rv < 0) {
+        syslog(LOG_ERR, "main select() error: %m");
+        exit(EXIT_FAILURE);
+      } else if (select_rv == 0) {
+        // this should be pathological, as we don't specify a timeout
+        syslog(LOG_WARNING, "main select() returned zero (timeout?)");
+        continue;
+      }
     }
 
-    // NOTE: MACRO needs "_GNU_SOURCE", without this the select gets interrupted with errno EINTR
-    select_rv = TEMP_FAILURE_RETRY( select(FD_SETSIZE, &readfds, NULL, NULL, NULL) );
-    if (select_rv < 0) {
-      syslog(LOG_ERR, "select(fd) error: %m");
-      exit(EXIT_FAILURE);
-    }
-
-    for (i = 0; i < num_ports; i++) {
-      if ( FD_ISSET(sockfds[i], &readfds) ) {
+    // find first socket descriptor that is ready to read (if any)
+    // note that even though multiple sockets may be ready, we only process one
+    //  per loop iteration; subsequent ones will be handled on subsequent passes
+    //  through the loop
+    for (i = 0, sockfd = 0; i < num_ports; i++) {
+      if ( FD_ISSET(sockfds[i], &selectfds) ) {
+        // select sockfds[i] for servicing during this loop pass
         sockfd = sockfds[i];
+        // remove socket from the fd working set
+//        FD_CLR(sockfd, &selectfds);
+        --select_rv;
         break;
       }
     }
 
+# ifdef STATS_PIPE
+    // if select() didn't return due to a socket connection, check for pipe I/O
+    if (!sockfd && FD_ISSET(pipefd[0], &selectfds)) {
+      // perform a single read from pipe
+      rv = read(pipefd[0], &rx_total, sizeof(rx_total));
+      if (rv < 0) {
+        syslog(LOG_WARNING, "error reading from pipe: %m");
+      } else if (rv == 0) {
+        syslog(LOG_WARNING, "pipe read() returned zero");
+      } else if (rv != sizeof(rx_total)) {
+        syslog(LOG_WARNING, "pipe read() got %d bytes, but %d bytes were expected - discarding", rv, sizeof(rx_total));
+      } else if (rx_total <= 0) {
+        syslog(LOG_WARNING, "pipe read() got nonsensical data value %d - discarding", rx_total);
+      } else {
+        // calculate as a double and add rounding factor for implicit integer
+        //  truncation
+        avg += ((double)(rx_total - avg) / ++act) + 0.5;
+        // look for a new high score
+        if (rx_total > rmx) {
+          rmx = rx_total;
+        }
+      }
+      // remove pipe from the fd working set
+//      FD_CLR(sockfd, &selectfds);
+      --select_rv;
+      continue;
+    }
+# endif
+
+    // if select() returned but no fd's of interest were found, give up
+    // note that this is bad because it means that select() will probably never
+    //  block again because something will always be waiting on the unhandled
+    //  file descriptor
+    // on the other hand, this should be a pathological case unless something is
+    //  added to FD_SET that is not checked before this point
     if (!sockfd) {
+      syslog(LOG_WARNING, "select() returned a value of %d but no file descriptors of interest are ready for read", select_rv);
+      // force select_rv to zero so that select() will be called on the next
+      //  loop iteration
+      select_rv = 0;
       continue;
     }
 #endif
@@ -492,7 +598,7 @@ int main (int argc, char *argv[]) // program start
     count++;
 #endif
 
-    if ( fork() == 0 ) {
+    if (fork() == 0) {
       // this is the child process
 
       // set child signal behavior
@@ -506,6 +612,9 @@ int main (int argc, char *argv[]) // program start
       // close unneeded file handles inherited from the parent process
       close(sockfd);
 #ifdef STATS_PIPE
+      // note that only the read end is closed
+      // even main() should leave the write end open so that children can
+      //  inherit it
       close(pipefd[0]);
 #endif
 #ifdef TEST
@@ -536,30 +645,6 @@ int main (int argc, char *argv[]) // program start
     // this is guaranteed to be the parent process, as the child calls exit()
     //  above when it's done instead of proceeding to this point
     close(new_fd);  // parent doesn't need this
-
-#ifdef STATS_PIPE
-    // NOTE: do NOT close write end of pipe, because next child will need it to
-    //       still be open
-    //
-    // perform a single read from pipe, which will block until the child has
-    //  written something (unless it already has)
-    rv = read(pipefd[0], &rx_total, sizeof(rx_total));
-    if (rv < 0) {
-      syslog(LOG_ERR, "error reading from pipe: %m");
-    } else if (rv == 0) {
-      syslog(LOG_ERR, "pipe read() returned zero");
-    } else if (rv != sizeof(rx_total)) {
-      syslog(LOG_WARNING, "pipe read() got %d bytes, but %d bytes were expected - discarding", rv, sizeof(rx_total));
-    } else if (rx_total < 0) {
-      syslog(LOG_WARNING, "pipe read() got negative data value %d - discarding", rx_total);
-    } else {
-      // calculate as a double, round up, truncate to int
-      avg += ((double)(rx_total - avg) / ++act) + 0.5;
-      if (rx_total > rmx) {
-        rmx = rx_total;
-      }
-    }
-#endif
   } // end of perpetual accept() loop
 //  Never get here while(1)
 //  return (EXIT_SUCCESS);

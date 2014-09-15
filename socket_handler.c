@@ -1,46 +1,50 @@
 #include "util.h"
 #include "socket_handler.h"
 
+#if defined(REDIRECT) || defined(HEX_DUMP)
+# include <ctype.h> // isprint(), isdigit(), tolower()
+#endif
+
 // private data for socket_handler() use
 #ifdef STATS_REPLY
   // HTML response pieces
-  static const unsigned char httpstats1[] =
+  static const char httpstats1[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: text/html\r\n"
   "Content-length: ";
   // total content length goes between these two strings
-  static const unsigned char httpstats2[] =
+  static const char httpstats2[] =
   "\r\n"
   "Connection: close\r\n"
   "\r\n";
   // split here because we care about the length of what follows
-  static const unsigned char httpstats3[] =
+  static const char httpstats3[] =
   "<!DOCTYPE html><html><head><title>pixelserv statistics</title></head><body>";
   // stats text goes between these two strings
-  static const unsigned char httpstats4[] =
+  static const char httpstats4[] =
   "</body></html>\r\n";
 
   // note: the -2 is to avoid counting the last line ending characters
   static const unsigned int statsbaselen = sizeof httpstats3 + sizeof httpstats4 - 2;
 
   // TXT response pieces
-  static const unsigned char txtstats1[] =
+  static const char txtstats1[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: text/plain\r\n"
   "Content-length: ";
   // total content length goes between these two strings
-  static const unsigned char txtstats2[] =
+  static const char txtstats2[] =
   "\r\n"
   "Connection: close\r\n"
   "\r\n";
   // split here because we care about the length of what follows
-  static const unsigned char txtstats3[] =
+  static const char txtstats3[] =
   "\r\n";
 #endif
 
 #ifdef REDIRECT
 # ifdef TEXT_REPLY
-  static const char *httpredirect =
+  static const char httpredirect[] =
   "HTTP/1.1 307 Temporary Redirect\r\n"
   "Location: %s\r\n"
   "Content-type: text/plain\r\n"
@@ -49,7 +53,7 @@
 # endif // TEXT_REPLY
 #endif // REDIRECT
 
-  static unsigned char httpnullpixel[] =
+  static const char httpnullpixel[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/gif\r\n"
   "Content-length: 42\r\n"
@@ -79,20 +83,20 @@
   ";";  // GIF file terminator
 
 #ifdef TEXT_REPLY
-  static unsigned char httpnulltext[] =
+  static const char httpnulltext[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: text/html\r\n"
   "Content-length: 0\r\n"
   "Connection: close\r\n"
   "\r\n";
 
-  static unsigned char http501[] =
+  static const char http501[] =
   "HTTP/1.1 501 Method Not Implemented\r\n"
   "Connection: close\r\n"
   "\r\n";
 
 #ifdef NULLSERV_REPLIES
-  static unsigned char httpnull_png[] =
+  static const char httpnull_png[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/png\r\n"
   "Content-length: 67\r\n"
@@ -117,7 +121,7 @@
   "IEND"
   "\xae\x42\x60\x82";  // CRC
 
-  static unsigned char httpnull_jpg[] =
+  static const char httpnull_jpg[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/jpeg\r\n"
   "Content-length: 159\r\n"
@@ -164,7 +168,7 @@
   "\x37" // image
   "\xff\xd9";  // EOI, End Of image
 
-static unsigned char httpnull_swf[] =
+static const char httpnull_swf[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: application/x-shockwave-flash\r\n"
   "Content-length: 25\r\n"
@@ -181,7 +185,7 @@ static unsigned char httpnull_swf[] =
   "\x40\x00"  // tag type 1 = show frame
   "\x00\x00";  // tag type 0 - end file
 
-static unsigned char httpnull_ico[] =
+static const char httpnull_ico[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/x-icon\r\n"
   "Cache-Control: max-age=2592000\r\n"
@@ -211,7 +215,7 @@ static unsigned char httpnull_ico[] =
 # endif
 
 # ifdef SSL_RESP
-static unsigned char SSL_no[] =
+static const char SSL_no[] =
   "\x15"  // Alert 21
   "\3\0"  // Version 3.0
   "\0\2"  // length 2
@@ -230,8 +234,8 @@ static void hex_dump(void *data, int size)
    * (in a single line of course)
    */
 
-  unsigned char *p = data;
-  unsigned char c;
+  char *p = data;
+  char c;
   int n;
   char bytestr[4] = {0};
   char addrstr[10] = {0};
@@ -280,7 +284,7 @@ static void hex_dump(void *data, int size)
 
 #ifdef REDIRECT
 // redirect utility functions
-char* strstr_last(const char *str1, const char *str2) {
+char* strstr_last(const char* const str1, const char* const str2) {
   char *strp;
   int len1, len2;
   len2 = strlen(str2);
@@ -301,12 +305,13 @@ char* strstr_last(const char *str1, const char *str2) {
   return 0;
 }
 
-char from_hex(char ch) {
+char from_hex(const char ch) {
     return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
 }
 
-void urldecode(char *decoded, char *encoded) {
-    char *pstr = encoded, *pbuf = decoded;
+void urldecode(char* const decoded, char* const encoded) {
+    char* pstr = encoded;
+    char* pbuf = decoded;
 
     while (*pstr) {
       if (*pstr == '%') {
@@ -323,30 +328,26 @@ void urldecode(char *decoded, char *encoded) {
 }
 #endif // REDIRECT
 
-int socket_handler(int new_fd
-                  ,time_t select_timeout
+responsetypes socket_handler(const int new_fd
+                            ,const time_t select_timeout
 #ifdef STATS_PIPE
-                  ,int pipefd
+                            ,const int pipefd
 #endif
 #ifdef STATS_REPLY
-                  ,char* stats_url
-                  ,char* stats_text_url
-                  ,char* program_name
+                            ,const char* const stats_url
+                            ,const char* const stats_text_url
+                            ,const char* const program_name
 #endif
 #ifdef REDIRECT
-                  ,int do_redirect
+                            ,const int do_redirect
 #endif
 #ifdef READ_FILE
-                  ,unsigned char* default_response
-                  ,int default_rsize
+                            ,const char* const default_response
+                            ,const int default_rsize
 #endif
-                  ) {
+                            ) {
   // NOTES:
   // - from here on, all exit points should be counted or at least logged
-  // - something MUST be written to the pipe before any exit point to prevent
-  //   the parent thread's read() from hanging forever
-  // - a value of -1 should be written to the pipe if exit() is called without
-  //   having read anything from the socket connection
   // - exit() should not be called from the child process
   fd_set select_set;
   struct timeval timeout;
@@ -360,17 +361,22 @@ int socket_handler(int new_fd
 #ifdef REDIRECT
   char *bufptr = NULL;
   char *url = NULL;
-  char *location = NULL;
 #endif
-
+#if defined(REDIRECT) || defined(STATS_REPLY)
+  char* aspbuf = NULL;
+#endif
 #ifdef NULLSERV_REPLIES
 # define DEFAULT_REPLY SEND_TXT
-  unsigned char *response = httpnulltext;
+  const char* response = httpnulltext;
   int rsize = sizeof httpnulltext - 1;
 #else
 # define DEFAULT_REPLY SEND_GIF
-  unsigned char *response = httpnullpixel;
+  const char *response = httpnullpixel;
   int rsize = sizeof httpnullpixel - 1;
+#endif
+#ifdef STATS_REPLY
+  char* version_string = NULL;
+  char* stat_string = NULL;
 #endif
 
 #ifdef READ_FILE
@@ -382,28 +388,31 @@ int socket_handler(int new_fd
 #endif
 
 #ifdef TEXT_REPLY
-  /* read a line from the request */
+  // the socket is connected, but we need to perform a blocking check for
+  //  incoming data
+  // select() is used because we want to give up after a specified timeout
+  //  period, in case the client is messing with us
   FD_ZERO(&select_set);
   FD_SET(new_fd, &select_set);
-  /* Initialize the timeout data structure */
   timeout.tv_sec = select_timeout;
   timeout.tv_usec = 0;
-
-  /* select returns 0 if timeout, 1 if input available, -1 if error */
   select_rv = select(new_fd + 1, &select_set, NULL, NULL, &timeout);
-  if (select_rv < 0) {
+  if (select_rv < 0) {          // some kind of error
     syslog(LOG_ERR, "select() returned error: %m");
-  } else if (select_rv == 0) {
+    status = EXIT_FAILURE;
+  } else if (select_rv == 0) {  // timeout
     MYLOG(LOG_ERR, "select() timed out");
     status = FAIL_TIMEOUT;
-  } else {
+  } else {                      // socket is ready for read
+    // read some data from the socket to buf
     rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
-    if (rv < 0) {
+    if (rv < 0) {               // some kind of error
       syslog(LOG_ERR, "recv() returned error: %m");
-    } else if (rv == 0) {
-      status = FAIL_CLOSED;
+      status = EXIT_FAILURE;
+    } else if (rv == 0) {       // EOF
       MYLOG(LOG_ERR, "client closed connection without sending any data");
-    } else {
+      status = FAIL_CLOSED;
+    } else {                    // got some data
       buf[rv] = '\0';
       TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
 # ifdef STATS_PIPE
@@ -452,35 +461,35 @@ int socket_handler(int new_fd
 # ifdef STATS_REPLY
             } else if (!strcmp(path, stats_url)) {
               status = SEND_STATS;
-              char* version_string = get_version(program_name);
-              char* stat_string = get_stats(1, 0);
-              asprintf((char**)(&response),
-                       "%s%d%s%s%s<br>%s%s",
-                       httpstats1,
-                       statsbaselen + strlen(version_string) + 4 + strlen(stat_string),
-                       httpstats2,
-                       httpstats3,
-                       version_string,
-                       stat_string,
-                       httpstats4);
+              version_string = get_version(program_name);
+              stat_string = get_stats(1, 0);
+              rsize = asprintf(&aspbuf,
+                               "%s%d%s%s%s<br>%s%s",
+                               httpstats1,
+                               statsbaselen + strlen(version_string) + 4 + strlen(stat_string),
+                               httpstats2,
+                               httpstats3,
+                               version_string,
+                               stat_string,
+                               httpstats4);
               free(version_string);
               free(stat_string);
-              rsize = strlen((char*)response);
+              response = aspbuf;
             } else if (!strcmp(path, stats_text_url)) {
               status = SEND_STATSTEXT;
-              char* version_string = get_version(program_name);
-              char* stat_string = get_stats(0, 1);
-              asprintf((char**)(&response),
-                       "%s%d%s%s\n%s%s",
-                       txtstats1,
-                       strlen(version_string) + 1 + strlen(stat_string) + 2,
-                       txtstats2,
-                       version_string,
-                       stat_string,
-                       txtstats3);
+              version_string = get_version(program_name);
+              stat_string = get_stats(0, 1);
+              rsize = asprintf(&aspbuf,
+                               "%s%d%s%s\n%s%s",
+                               txtstats1,
+                               strlen(version_string) + 1 + strlen(stat_string) + 2,
+                               txtstats2,
+                               version_string,
+                               stat_string,
+                               txtstats3);
               free(version_string);
               free(stat_string);
-              rsize = strlen((char*)response);
+              response = aspbuf;
 # endif
             } else {
 # ifdef REDIRECT
@@ -511,10 +520,9 @@ int socket_handler(int new_fd
                 }
               }
               if (do_redirect && url) {
-                location = NULL;
                 status = SEND_REDIRECT;
-                rsize = asprintf(&location, httpredirect, url);
-                response = (unsigned char *)(location);
+                rsize = asprintf(&aspbuf, httpredirect, url);
+                response = aspbuf;
                 TESTPRINT("Sending redirect: %s\n", url);
                 url = NULL;
               } else {
@@ -584,52 +592,60 @@ int socket_handler(int new_fd
 # endif
       }
     }
-  }
+  } // select() > 0
 
+  // done processing socket connection; now handle selected result action
   if (status == EXIT_FAILURE) {
+    // log general error status in case it wasn't caught above
     syslog(LOG_WARNING, "browser request processing completed with EXIT_FAILURE status");
   } else if (status != FAIL_TIMEOUT && status != FAIL_CLOSED) {
-#else  // TEXT_REPLY
+    // only attempt to send response if we've chosen a valid response type
+#else   // !TEXT_REPLY
   {
     status = SEND_GIF;
     TESTPRINT("Sending a gif response\n");
 #endif  // TEXT_REPLY
-    rv = send(new_fd, response, rsize, 0);
-#ifdef STATS_REPLY
-    if (status == SEND_STATS || status == SEND_STATSTEXT) {
+    // send response
+    // this is currently a blocking call, so zero should not be returned
+    rv = send(new_fd, response, rsize, MSG_NOSIGNAL);
+#if defined(STATS_REPLY) || defined(REDIRECT)
+    if (aspbuf) {
+//      if (response == aspbuf) {
+//        response = NULL;
+//      }
       // free memory allocated by asprintf()
-      free(response);
-      response = NULL;
+      free(aspbuf);
+//      aspbuf = NULL;
     }
-#endif // STATS_REPLY
-#ifdef REDIRECT
-    if (status == SEND_REDIRECT) {
-      // free memory allocated by asprintf()
-      free(location);
-      location = NULL;
-      response = NULL;
-    }
-#endif // REDIRECT
+#endif // STATS_REPLY || REDIRECT
     /* check for error message, but don't bother checking that all bytes sent */
     if (rv < 0) {
-      MYLOG(LOG_WARNING, "send: %m");
-      syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", status);
-      status = EXIT_FAILURE;
+      if (rv == EPIPE) {
+        // client closed socket sometime after initial check
+        MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", status);
+        status = FAIL_CLOSED;
+      } else {
+        // some other error
+        syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", status);
+        status = EXIT_FAILURE;
+      }
     }
   }
 
-  /* clean way to flush read buffers and close connection */
-  if (shutdown(new_fd, SHUT_WR) == OK) {
+  // signal the socket connection that we're done writing
+  if (shutdown(new_fd, SHUT_WR) == OK
+      && status != FAIL_CLOSED) {
+    // socket may still be open for read, so read any data that is still waiting
     do {
-      /* Initialize the file descriptor set */
+      // check whether socket is ready for read
       FD_ZERO(&select_set);
       FD_SET(new_fd, &select_set);
-      /* Initialize the timeout data structure */
       timeout.tv_sec = select_timeout;
       timeout.tv_usec = 0;
       /* select returns 0 if timeout, 1 if input available, -1 if error */
       select_rv = select(new_fd + 1, &select_set, NULL, NULL, &timeout);
       if (select_rv > 0) {
+        // something is there; attempt to read it
         rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
 #ifdef STATS_PIPE
         if (rv > 0) {
@@ -637,23 +653,36 @@ int socket_handler(int new_fd
         }
 #endif
       }
+      // if we got something, repeat until we don't
     } while (select_rv > 0 && rv > 0);
   }
 
+  // signal that we're done reading and then close the connection
   shutdown(new_fd, SHUT_RD);
   close(new_fd);
 
 #ifdef STATS_PIPE
-  // write rx_total to pipe
-  if (write(pipefd, &rx_total, sizeof(rx_total)) < 0) {
-    // log as warning only because it only affects stats
-    syslog(LOG_WARNING, "write() to pipe returned error: %m");
-    // should probably also check for return value of 0 and of != sizeof(rx_total)...
+  // if we read any data, write rx_total to pipe
+  // note that the parent must not perform a blocking pipe read without checking
+  //  for available data, or else it may deadlock when we don't write anything
+  if (rx_total > 0) {
+    rv = write(pipefd, &rx_total, sizeof(rx_total));
+    if (rv < 0) {
+      syslog(LOG_WARNING, "write() to pipe returned error: %m");
+    } else if (rv == 0) {
+      syslog(LOG_WARNING, "write() reports no data written to pipe but no error");
+    } else if (rv != sizeof(rx_total)) {
+      syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %d", rv, sizeof(rx_total));
+    }
   }
+  // child no longer needs write pipe, so close descriptor
+  // this is probably redundant since we are about to exit() anyway
   close(pipefd);
 #endif
 
   if (status == EXIT_FAILURE) {
+    // complain (possibly again) about general failure status, in case it wasn't
+    //  caught previously
     syslog(LOG_WARNING, "connection handler exiting with EXIT_FAILURE status");
   }
 
