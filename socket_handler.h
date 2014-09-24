@@ -16,6 +16,9 @@ typedef enum {
   SEND_STATS,
   SEND_STATSTEXT,
 #endif
+#ifdef GEN204_REPLY
+  SEND_204,
+#endif
 #ifdef REDIRECT
   SEND_REDIRECT,
 #endif
@@ -36,6 +39,9 @@ responsetypes socket_handler(const int new_fd
                             ,const char* const stats_url
                             ,const char* const stats_text_url
                             ,const char* const program_name
+#endif
+#ifdef GEN204_REPLY
+                            ,const int do_204
 #endif
 #ifdef REDIRECT
                             ,const int do_redirect

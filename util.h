@@ -4,7 +4,7 @@
 // common configuration items
 
 // preprocessor defines
-#define VERSION "V35.HZ10"
+#define VERSION "V35.HZ11WIP3"
 
 #define BACKLOG 30              // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -12,6 +12,8 @@
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
 #define DEFAULT_TIMEOUT 10      // default timeout for select() calls, in seconds
+
+#define _GNU_SOURCE             // using a bunch of gcc-specific stuff
 
 #ifdef MULTIPORT
 # ifndef PORT_MODE
@@ -44,8 +46,6 @@
 # define DEFAULT_STATS_URL "/servstats"
 # define DEFAULT_STATS_TEXT_URL "/servstats.txt"
 #endif
-
-# define _GNU_SOURCE            // asprintf()
 
 #ifdef TEST
 # define TEXT_REPLY 1
@@ -111,6 +111,9 @@ extern volatile sig_atomic_t ssl;
 extern volatile sig_atomic_t sta; // so meta!
 extern volatile sig_atomic_t stt;
 # endif // STATS_REPLY
+# ifdef GEN204_REPLY
+extern volatile sig_atomic_t noc;
+# endif // GEN204_REPLY
 # ifdef REDIRECT
 extern volatile sig_atomic_t rdr;
 # endif // REDIRECT
@@ -209,6 +212,7 @@ V35.HZ10 split code into multiple files for organizational and encapsulation pur
          enable redirect feature by default, deprecating -r and adding opposite -R parameter
          add program uptime to stats report
          various minor tweaks and optimizations
+V35.HZ11 send HTTP 204 No Content (noc stat) reply for generate_204 URLs
 */
 
 #endif // UTIL_H

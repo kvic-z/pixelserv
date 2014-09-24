@@ -5,7 +5,20 @@
 # include <ctype.h> // isprint(), isdigit(), tolower()
 #endif
 
+
 // private data for socket_handler() use
+#ifdef GEN204_REPLY
+  // HTTP 204 No Content for Google generate_204 URLs
+  static const char http204[] =
+  "HTTP/1.1 204 No Content\r\n"
+  "Content-Length: 0\r\n"
+  "Content-Type: text/html; charset=UTF-8\r\n"
+//"Date: Sun, 21 Sep 2014 17:42:25 GMT\r\n"
+//"Server: GFE/2.0\r\n"
+//"X-Firefox-Spdy: 3.1\r\n"
+  "\r\n";
+#endif
+
 #ifdef STATS_REPLY
   // HTML response pieces
   static const char httpstats1[] =
@@ -43,14 +56,12 @@
 #endif
 
 #ifdef REDIRECT
-# ifdef TEXT_REPLY
   static const char httpredirect[] =
   "HTTP/1.1 307 Temporary Redirect\r\n"
   "Location: %s\r\n"
   "Content-type: text/plain\r\n"
   "Content-length: 0\r\n"
   "Connection: close\r\n\r\n";
-# endif // TEXT_REPLY
 #endif // REDIRECT
 
   static const char httpnullpixel[] =
@@ -338,6 +349,9 @@ responsetypes socket_handler(const int new_fd
                             ,const char* const stats_text_url
                             ,const char* const program_name
 #endif
+#ifdef GEN204_REPLY
+                            ,const int do_204
+#endif
 #ifdef REDIRECT
                             ,const int do_redirect
 #endif
@@ -490,7 +504,13 @@ responsetypes socket_handler(const int new_fd
               free(version_string);
               free(stat_string);
               response = aspbuf;
-# endif
+# endif // STATS_REPLY
+# ifdef GEN204_REPLY
+            } else if (!strcasecmp(path, "/generate_204")) {
+              status = SEND_204;
+              response = http204;
+              rsize = sizeof http204 - 1;
+# endif // GEN204_REPLY
             } else {
 # ifdef REDIRECT
               /* pick out encoded urls (usually advert redirects) */
@@ -543,30 +563,33 @@ responsetypes socket_handler(const int new_fd
                   } else {
                     TESTPRINT("ext: '%s'\n", ext);
 # ifdef NULLSERV_REPLIES
-                    if ( !strcasecmp(ext, ".gif") ) {
+                    if (!strcasecmp(ext, ".gif")) {
                       TESTPRINT("Sending gif response\n");
                       status = SEND_GIF;
                       response = httpnullpixel;
                       rsize = sizeof httpnullpixel - 1;
-                    } else if (!strcasecmp(ext, ".png") ) {
+                    } else if (!strcasecmp(ext, ".png")) {
                       TESTPRINT("Sending png response\n");
                       status = SEND_PNG;
                       response = httpnull_png;
                       rsize = sizeof httpnull_png - 1;
-                    } else if (!strncasecmp(ext, ".jp", 3) ) {
+                    } else if (!strncasecmp(ext, ".jp", 3)) {
                       TESTPRINT("Sending jpg response\n");
                       status = SEND_JPG;
                       response = httpnull_jpg;
                       rsize = sizeof httpnull_jpg - 1;
-                    } else if (!strcasecmp(ext, ".swf") ) {
+                    } else if (!strcasecmp(ext, ".swf")) {
                       TESTPRINT("Sending swf response\n");
                       status = SEND_SWF;
                       response = httpnull_swf;
                       rsize = sizeof httpnull_swf - 1;
-                    } else if (!strcasecmp(ext, ".ico") ) {
+                    } else if (!strcasecmp(ext, ".ico")) {
                       status = SEND_ICO;
                       response = httpnull_ico;
                       rsize = sizeof httpnull_ico - 1;
+                    } else if (!strcasecmp(ext, ".js")) {
+                      status = SEND_TXT;
+                      // text is default response, so no need to set it here
                     } else {
                       status = SEND_UNK_EXT;
                       MYLOG(LOG_ERR, "unrecognized file extension %s from path %s", ext, path);

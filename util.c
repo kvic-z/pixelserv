@@ -30,6 +30,9 @@ volatile sig_atomic_t ssl = 0;
 volatile sig_atomic_t sta = 0;
 volatile sig_atomic_t stt = 0;
 # endif // STATS_REPLY
+# ifdef GEN204_REPLY
+volatile sig_atomic_t noc = 0;
+# endif // GEN204_REPLY
 # ifdef REDIRECT
 volatile sig_atomic_t rdr = 0;
 # endif // REDIRECT
@@ -89,6 +92,9 @@ char* get_stats(const int sta_offset, const int stt_offset) {
 # ifdef STATS_REPLY
     ", %d sta, %d stt"
 # endif // STATS_REPLY
+# ifdef GEN204_REPLY
+    ", %d 204"
+# endif // GEN204_REPLY
 # ifdef REDIRECT
     ", %d rdr"
 # endif // REDIRECT
@@ -109,6 +115,9 @@ char* get_stats(const int sta_offset, const int stt_offset) {
 # ifdef STATS_REPLY
     , sta + sta_offset, stt + stt_offset
 # endif // STATS_REPLY
+# ifdef GEN204_REPLY
+    , noc
+# endif // GEN204_REPLY
 # ifdef REDIRECT
     , rdr
 # endif // REDIRECT

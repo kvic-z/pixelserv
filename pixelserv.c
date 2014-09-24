@@ -43,6 +43,9 @@ void signal_handler(int sig)
             case SEND_STATS:     sta++; break;
             case SEND_STATSTEXT: stt++; break;
 # endif // STATS_REPLY
+# ifdef GEN204_REPLY
+            case SEND_204:       noc++; break;
+# endif // GEN204_REPLY
 # ifdef REDIRECT
             case SEND_REDIRECT:  rdr++; break;
 # endif // REDIRECT
@@ -60,7 +63,7 @@ void signal_handler(int sig)
 #  endif
 # endif  // TEXT_REPLY
             default:
-              syslog(LOG_WARNING, "Socket handler child process returned unknown exit status: %d", status);
+              syslog(LOG_ERR, "Socket handler child process returned unknown exit status: %d", status);
           }
         }
 #endif  // DO_COUNT
@@ -155,6 +158,9 @@ int main (int argc, char *argv[]) // program start
   char* stats_url = DEFAULT_STATS_URL;
   char* stats_text_url = DEFAULT_STATS_TEXT_URL;
 #endif
+#ifdef GEN204_REPLY
+  int do_204 = 1;
+#endif // GEN204_REPLY
 #ifdef REDIRECT
   int do_redirect = 1;
 #endif // REDIRECT
@@ -175,9 +181,15 @@ int main (int argc, char *argv[]) // program start
   /* command line arguments processing */
   for (i = 1; i < argc && error == 0; ++i) {
     if (argv[i][0] == '-') {
-#ifdef REDIRECT
+#if defined(GEN204_REPLY) || defined(REDIRECT)
       // handle arguments that don't require a subsequent argument
       switch (argv[i][1]) {
+# ifdef GEN204_REPLY
+        case '2':
+          do_204 = 0;
+        continue;
+# endif // GEN204_REPLY
+# ifdef REDIRECT
         case 'r':
           // deprecated - ignore
 //          do_redirect = 1;
@@ -185,8 +197,9 @@ int main (int argc, char *argv[]) // program start
         case 'R':
           do_redirect = 0;
         continue;
+# endif // REDIRECT
       }
-#endif
+#endif // GEN204_REPLY || REDIRECT
       // handle arguments that require a subsequent argument
       if ( (i + 1) < argc ) {
         // switch on parameter letter and process subsequent argument
@@ -253,6 +266,9 @@ int main (int argc, char *argv[]) // program start
 #ifndef TINY
     printf("Usage:%s"
            " [IP No/hostname (all)]"
+# ifdef GEN204_REPLY
+           " [-2 (disables HTTP 204 reply to generate_204 URLs)]"
+# endif // GEN204_REPLY
 # ifdef IF_MODE
            " [-n i/f (all)]"
 # endif // IF_MODE
@@ -485,11 +501,11 @@ int main (int argc, char *argv[]) // program start
   if (pipe(pipefd) == -1) {
     syslog(LOG_ERR, "pipe() error: %m");
     exit(EXIT_FAILURE);
-  } else if (fcntl(pipefd[0], F_SETFL, fcntl(pipefd[0], F_GETFL) | O_NONBLOCK) == -1) {
+  }
+  // set non-blocking read mode
+  // note that writes are left as blocking because otherwise weird things happen
+  if (fcntl(pipefd[0], F_SETFL, fcntl(pipefd[0], F_GETFL) | O_NONBLOCK) == -1) {
     syslog(LOG_ERR, "fcntl() error setting O_NONBLOCK on read end of pipe: %m");
-    exit(EXIT_FAILURE);
-  } else if (fcntl(pipefd[1], F_SETFL, fcntl(pipefd[1], F_GETFL) | O_NONBLOCK) == -1) {
-    syslog(LOG_ERR, "fcntl() error setting O_NONBLOCK on write end of pipe: %m");
     exit(EXIT_FAILURE);
   }
 
@@ -631,6 +647,9 @@ int main (int argc, char *argv[]) // program start
                          ,stats_url
                          ,stats_text_url
                          ,argv[0]
+#endif
+#ifdef GEN204_REPLY
+                         ,do_204
 #endif
 #ifdef REDIRECT
                          ,do_redirect
