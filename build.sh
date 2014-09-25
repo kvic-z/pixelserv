@@ -22,7 +22,6 @@ mkdir dist
 CC=$PREFIX"gcc -mips32"
 STRIP=$PREFIX"strip -s -R .note -R .comment -R .gnu.version -R .gnu.version_r"
 OPTS="-DDROP_ROOT -DNULLSERV_REPLIES -DSSL_RESP -DMULTIPORT -DIF_MODE -DSTATS_REPLY -DREDIRECT -DSTATS_PIPE -DGEN204_REPLY"
-#OPTS="-DDROP_ROOT -DNULLSERV_REPLIES -DSSL_RESP -DMULTIPORT -DIF_MODE -DSTATS_REPLY -DREDIRECT -DGEN204_REPLY"
 
 #tomato small - standard, optimized for size
 CFLAGS="-Os -s -Wall -ffunction-sections -fdata-sections"
@@ -40,7 +39,8 @@ ls -laF $BIN
 
 #tomato static - standard, optimized for performance
 CFLAGS="-O3 -s -Wall -ffunction-sections -fdata-sections"
-LDFLAGS="-static -Wl,--gc-sections,-Bdynamic,-lgcc_s,-Bstatic"
+#LDFLAGS="-static -Wl,--gc-sections,-Bdynamic,-lgcc_s,-Bstatic"
+LDFLAGS="-static -Wl,--gc-sections"
 BIN=$OUT.static
 $CC $CFLAGS $LDFLAGS $OPTS $SRC -o $BIN || exit $?
 $STRIP $BIN
