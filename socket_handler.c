@@ -1,13 +1,10 @@
 #include "util.h"
 #include "socket_handler.h"
 
-#if defined(REDIRECT) || defined(HEX_DUMP)
-# include <ctype.h> // isprint(), isdigit(), tolower()
-#endif
-
+#include <ctype.h> // isprint(), isdigit(), tolower()
 
 // private data for socket_handler() use
-#ifdef GEN204_REPLY
+
   // HTTP 204 No Content for Google generate_204 URLs
   static const char http204[] =
   "HTTP/1.1 204 No Content\r\n"
@@ -17,10 +14,8 @@
 //"Server: GFE/2.0\r\n"
 //"X-Firefox-Spdy: 3.1\r\n"
   "\r\n";
-#endif
 
-#ifdef STATS_REPLY
-  // HTML response pieces
+  // HTML stats response pieces
   static const char httpstats1[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: text/html\r\n"
@@ -40,7 +35,7 @@
   // note: the -2 is to avoid counting the last line ending characters
   static const unsigned int statsbaselen = sizeof httpstats3 + sizeof httpstats4 - 2;
 
-  // TXT response pieces
+  // TXT stats response pieces
   static const char txtstats1[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: text/plain\r\n"
@@ -53,16 +48,13 @@
   // split here because we care about the length of what follows
   static const char txtstats3[] =
   "\r\n";
-#endif
 
-#ifdef REDIRECT
   static const char httpredirect[] =
   "HTTP/1.1 307 Temporary Redirect\r\n"
   "Location: %s\r\n"
   "Content-type: text/plain\r\n"
   "Content-length: 0\r\n"
   "Connection: close\r\n\r\n";
-#endif // REDIRECT
 
   static const char httpnullpixel[] =
   "HTTP/1.1 200 OK\r\n"
@@ -93,7 +85,6 @@
   "\0"  // end of image data
   ";";  // GIF file terminator
 
-#ifdef TEXT_REPLY
   static const char httpnulltext[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: text/html\r\n"
@@ -106,7 +97,6 @@
   "Connection: close\r\n"
   "\r\n";
 
-#ifdef NULLSERV_REPLIES
   static const char httpnull_png[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/png\r\n"
@@ -223,21 +213,17 @@ static const char httpnull_ico[] =
   "\x00\x00\x00\x00" // Colour table
   "\x00\x00\x00\x00" // XOR B G R
   "\x80\xF8\x9C\x41"; // AND ?
-# endif
 
-# ifdef SSL_RESP
 static const char SSL_no[] =
   "\x15"  // Alert 21
   "\3\0"  // Version 3.0
   "\0\2"  // length 2
   "\2"    // fatal
   "\x31"; // 0 close notify, 0x28 Handshake failure 40, 0x31 TLS access denied 49
-# endif
-#endif // TEXT_REPLY
 
 // private functions for socket_handler() use
 #ifdef HEX_DUMP
-/* from http://sws.dett.de/mini/hexdump-c/ */
+// from http://sws.dett.de/mini/hexdump-c/
 static void hex_dump(void *data, int size)
 {
   /* dumps size bytes of *data to stdout. Looks like:
@@ -254,7 +240,7 @@ static void hex_dump(void *data, int size)
   char charstr[16*1 + 5] = {0};
   for (n = 1; n <= size; n++) {
     if (n%16 == 1) {
-      /* store address for this line */
+      // store address for this line
       snprintf(addrstr, sizeof addrstr, "%.4x",
          ((unsigned int)p-(unsigned int)data) );
     }
@@ -264,36 +250,35 @@ static void hex_dump(void *data, int size)
       c = '.';
     }
 
-    /* store hex str (for left side) */
+    // store hex str (for left side)
     snprintf(bytestr, sizeof bytestr, "%02X ", *p);
     strncat(hexstr, bytestr, sizeof hexstr - strlen(hexstr) - 1);
 
-    /* store char str (for right side) */
+    // store char str (for right side)
     snprintf(bytestr, sizeof bytestr, "%c", c);
     strncat(charstr, bytestr, sizeof charstr - strlen(charstr) - 1);
 
     if (n%16 == 0) {
-      /* line completed */
+      // line completed
       printf("[%4.4s]   %-50.50s  %s\n", addrstr, hexstr, charstr);
       hexstr[0] = 0;
       charstr[0] = 0;
     } else if (n%8 == 0) {
-      /* half line: add whitespaces */
+      // half line: add whitespaces
       strncat(hexstr, "  ", sizeof hexstr - strlen(hexstr) - 1);
       strncat(charstr, " ", sizeof charstr - strlen(charstr) - 1);
     }
 
-    p++; /* next byte */
+    p++; // next byte
   }
 
   if (strlen(hexstr) > 0) {
-    /* print rest of buffer if not empty */
+    // print rest of buffer if not empty
     printf("[%4.4s]   %-50.50s  %s\n", addrstr, hexstr, charstr);
   }
 }
 #endif // HEX_DUMP
 
-#ifdef REDIRECT
 // redirect utility functions
 char* strstr_last(const char* const str1, const char* const str2) {
   char *strp;
@@ -317,91 +302,52 @@ char* strstr_last(const char* const str1, const char* const str2) {
 }
 
 char from_hex(const char ch) {
-    return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
+  return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
 }
 
 void urldecode(char* const decoded, char* const encoded) {
-    char* pstr = encoded;
-    char* pbuf = decoded;
+  char* pstr = encoded;
+  char* pbuf = decoded;
 
-    while (*pstr) {
-      if (*pstr == '%') {
-        if (pstr[1] && pstr[2]) {
-            *pbuf++ = from_hex(pstr[1]) << 4 | from_hex(pstr[2]);
-            pstr += 2;
-        }
-      } else {
-        *pbuf++ = *pstr;
+  while (*pstr) {
+    if (*pstr == '%') {
+      if (pstr[1] && pstr[2]) {
+        *pbuf++ = from_hex(pstr[1]) << 4 | from_hex(pstr[2]);
+        pstr += 2;
       }
-      pstr++;
+    } else {
+      *pbuf++ = *pstr;
     }
-    *pbuf = '\0';
+    pstr++;
+  }
+  *pbuf = '\0';
 }
-#endif // REDIRECT
 
-responsetypes socket_handler(const int new_fd
-                            ,const time_t select_timeout
-#ifdef STATS_PIPE
-                            ,const int pipefd
-#endif
-#ifdef STATS_REPLY
-                            ,const char* const stats_url
-                            ,const char* const stats_text_url
-                            ,const char* const program_name
-#endif
-#ifdef GEN204_REPLY
-                            ,const int do_204
-#endif
-#ifdef REDIRECT
-                            ,const int do_redirect
-#endif
-#ifdef READ_FILE
-                            ,const char* const default_response
-                            ,const int default_rsize
-#endif
-                            ) {
+void socket_handler(const int new_fd
+                   ,const time_t select_timeout
+                   ,const int pipefd
+                   ,const char* const stats_url
+                   ,const char* const stats_text_url
+                   ,const char* const program_name
+                   ,const int do_204
+                   ,const int do_redirect
+                   ) {
   // NOTES:
   // - from here on, all exit points should be counted or at least logged
   // - exit() should not be called from the child process
+  response_struct pipedata = { FAIL_GENERAL, 0 };
   fd_set select_set;
   struct timeval timeout;
   int select_rv;
-  int status = EXIT_FAILURE; /* default return from child */
   int rv;
   char buf[CHAR_BUF_SIZE + 1];
-#ifdef STATS_PIPE
-  int rx_total = -1;
-#endif
-#ifdef REDIRECT
   char *bufptr = NULL;
   char *url = NULL;
-#endif
-#if defined(REDIRECT) || defined(STATS_REPLY)
   char* aspbuf = NULL;
-#endif
-#ifdef NULLSERV_REPLIES
-# define DEFAULT_REPLY SEND_TXT
   const char* response = httpnulltext;
   int rsize = sizeof httpnulltext - 1;
-#else
-# define DEFAULT_REPLY SEND_GIF
-  const char *response = httpnullpixel;
-  int rsize = sizeof httpnullpixel - 1;
-#endif
-#ifdef STATS_REPLY
   char* version_string = NULL;
   char* stat_string = NULL;
-#endif
-
-#ifdef READ_FILE
-  // if default_response is non-NULL, then a command line override was provided
-  if (default_response != NULL) {
-    response = default_response;
-    rsize = default_rsize;
-  }
-#endif
-
-#ifdef TEXT_REPLY
   // the socket is connected, but we need to perform a blocking check for
   //  incoming data
   // select() is used because we want to give up after a specified timeout
@@ -413,68 +359,56 @@ responsetypes socket_handler(const int new_fd
   select_rv = select(new_fd + 1, &select_set, NULL, NULL, &timeout);
   if (select_rv < 0) {          // some kind of error
     syslog(LOG_ERR, "select() returned error: %m");
-    status = EXIT_FAILURE;
+    pipedata.response = FAIL_GENERAL;
   } else if (select_rv == 0) {  // timeout
     MYLOG(LOG_ERR, "select() timed out");
-    status = FAIL_TIMEOUT;
+    pipedata.response = FAIL_TIMEOUT;
   } else {                      // socket is ready for read
     // read some data from the socket to buf
     rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
     if (rv < 0) {               // some kind of error
       syslog(LOG_ERR, "recv() returned error: %m");
-      status = EXIT_FAILURE;
+      pipedata.response = FAIL_GENERAL;
     } else if (rv == 0) {       // EOF
       MYLOG(LOG_ERR, "client closed connection without sending any data");
-      status = FAIL_CLOSED;
+      pipedata.response = FAIL_CLOSED;
     } else {                    // got some data
       buf[rv] = '\0';
       TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
-# ifdef STATS_PIPE
-      rx_total = rv;  // record number of bytes read so far during this loop pass
-# endif
-# ifdef HEX_DUMP
+
+      pipedata.rx_total = rv;  // record number of bytes read so far during this loop pass
+#ifdef HEX_DUMP
       hex_dump(buf, rv);
-# endif
-# ifdef SSL_RESP
+#endif
       if (buf[0] == '\x16'){
         TESTPRINT("SSL handshake request received\n");
-        status = SEND_SSL;
+        pipedata.response = SEND_SSL;
         response = SSL_no;
         rsize = sizeof SSL_no - 1;
       } else {
-# endif
-# ifdef REDIRECT
         char *req = strtok_r(buf, "\r\n", &bufptr);
         char *method = strtok(req, " ");
-# else
-        char *method = strtok(buf, " ");
-# endif
         if (method == NULL) {
           syslog(LOG_ERR, "client did not specify method");
         } else {
           TESTPRINT("method: '%s'\n", method);
           if ( strcmp(method, "GET") ) {  //methods are case-sensitive
             MYLOG(LOG_ERR, "unknown method: %s", method);
-            status = SEND_BAD;
+            pipedata.response = SEND_BAD;
             TESTPRINT("Sending 501 response\n");
             response = http501;
             rsize = sizeof http501 - 1;
           } else {
             // ----------------------------------------------
             // send default from here, no matter what happens
-            status = DEFAULT_REPLY;
-            /* trim up to non path chars */
-# ifdef REDIRECT
+            pipedata.response = DEFAULT_REPLY;
+            // trim up to non path chars
             char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
-# else
-            char *path = strtok(NULL, " ?#;="); // "?;#:*<>[]='\"\\,|!~()"
-# endif // REDIRECT
             if (path == NULL) {
-              status = SEND_NO_URL;
+              pipedata.response = SEND_NO_URL;
               syslog(LOG_ERR, "client did not specify URL for GET request");
-# ifdef STATS_REPLY
             } else if (!strcmp(path, stats_url)) {
-              status = SEND_STATS;
+              pipedata.response = SEND_STATS;
               version_string = get_version(program_name);
               stat_string = get_stats(1, 0);
               rsize = asprintf(&aspbuf,
@@ -490,7 +424,7 @@ responsetypes socket_handler(const int new_fd
               free(stat_string);
               response = aspbuf;
             } else if (!strcmp(path, stats_text_url)) {
-              status = SEND_STATSTEXT;
+              pipedata.response = SEND_STATSTEXT;
               version_string = get_version(program_name);
               stat_string = get_stats(0, 1);
               rsize = asprintf(&aspbuf,
@@ -504,28 +438,24 @@ responsetypes socket_handler(const int new_fd
               free(version_string);
               free(stat_string);
               response = aspbuf;
-# endif // STATS_REPLY
-# ifdef GEN204_REPLY
-            } else if (!strcasecmp(path, "/generate_204")) {
-              status = SEND_204;
+            } else if (do_204 && !strcasecmp(path, "/generate_204")) {
+              pipedata.response = SEND_204;
               response = http204;
               rsize = sizeof http204 - 1;
-# endif // GEN204_REPLY
             } else {
-# ifdef REDIRECT
-              /* pick out encoded urls (usually advert redirects) */
+              // pick out encoded urls (usually advert redirects)
 //                  if (do_redirect && strstr(path, "=http") && strchr(path, '%')) {
               if (do_redirect && strcasestr(path, "=http")) {
                 char *decoded = malloc(strlen(path)+1);
                 urldecode(decoded, path);
-                /* double decode */
+                // double decode
                 urldecode(path, decoded);
                 free(decoded);
                 url = strstr_last(path, "http://");
                 if (url == NULL) {
                   url = strstr_last(path, "https://");
                 }
-                /* WORKAROUND: google analytics block - request bomb on pages with conversion callbacks (see in chrome) */
+                // WORKAROUND: google analytics block - request bomb on pages with conversion callbacks (see in chrome)
                 if (url) {
                   char *tok = NULL;
                   for (tok = strtok_r(NULL, "\r\n", &bufptr); tok; tok = strtok_r(NULL, "\r\n", &bufptr)) {
@@ -540,124 +470,100 @@ responsetypes socket_handler(const int new_fd
                 }
               }
               if (do_redirect && url) {
-                status = SEND_REDIRECT;
+                pipedata.response = SEND_REDIRECT;
                 rsize = asprintf(&aspbuf, httpredirect, url);
                 response = aspbuf;
                 TESTPRINT("Sending redirect: %s\n", url);
                 url = NULL;
               } else {
                 char *file = strrchr(strtok(path, "?#;="), '/');
-# else
-                TESTPRINT("path: '%s'\n",path);
-                char *file = strrchr(path, '/');
-# endif // REDIRECT
                 if (file == NULL) {
-                  status = SEND_BAD_PATH;
+                  pipedata.response = SEND_BAD_PATH;
                   syslog(LOG_ERR, "invalid file path %s", path);
                 } else {
                   TESTPRINT("file: '%s'\n", file);
                   char *ext = strrchr(file, '.');
                   if (ext == NULL) {
-                    status = SEND_NO_EXT;
+                    pipedata.response = SEND_NO_EXT;
                     MYLOG(LOG_ERR, "no file extension %s from path %s", file, path);
                   } else {
                     TESTPRINT("ext: '%s'\n", ext);
-# ifdef NULLSERV_REPLIES
                     if (!strcasecmp(ext, ".gif")) {
                       TESTPRINT("Sending gif response\n");
-                      status = SEND_GIF;
+                      pipedata.response = SEND_GIF;
                       response = httpnullpixel;
                       rsize = sizeof httpnullpixel - 1;
                     } else if (!strcasecmp(ext, ".png")) {
                       TESTPRINT("Sending png response\n");
-                      status = SEND_PNG;
+                      pipedata.response = SEND_PNG;
                       response = httpnull_png;
                       rsize = sizeof httpnull_png - 1;
                     } else if (!strncasecmp(ext, ".jp", 3)) {
                       TESTPRINT("Sending jpg response\n");
-                      status = SEND_JPG;
+                      pipedata.response = SEND_JPG;
                       response = httpnull_jpg;
                       rsize = sizeof httpnull_jpg - 1;
                     } else if (!strcasecmp(ext, ".swf")) {
                       TESTPRINT("Sending swf response\n");
-                      status = SEND_SWF;
+                      pipedata.response = SEND_SWF;
                       response = httpnull_swf;
                       rsize = sizeof httpnull_swf - 1;
                     } else if (!strcasecmp(ext, ".ico")) {
-                      status = SEND_ICO;
+                      TESTPRINT("Sending ico response\n");
+                      pipedata.response = SEND_ICO;
                       response = httpnull_ico;
                       rsize = sizeof httpnull_ico - 1;
-                    } else if (!strcasecmp(ext, ".js")) {
-                      status = SEND_TXT;
-                      // text is default response, so no need to set it here
-                    } else {
-                      status = SEND_UNK_EXT;
-                      MYLOG(LOG_ERR, "unrecognized file extension %s from path %s", ext, path);
-                    }
-# else
-                    if ( !strncasecmp(ext, ".js", 3) ) {  /* .jsx ?*/
-                      status = SEND_TXT;
-                      TESTPRINT("Sending Txt response\n");
+                    } else if (!strncasecmp(ext, ".js", 3)) {  // .jsx ?
+                      pipedata.response = SEND_TXT;
+                      TESTPRINT("Sending txt response\n");
                       response = httpnulltext;
                       rsize = sizeof httpnulltext - 1;
+                    } else {
+                      TESTPRINT("Sending ufe response\n");
+                      pipedata.response = SEND_UNK_EXT;
+                      MYLOG(LOG_ERR, "unrecognized file extension %s from path %s", ext, path);
                     }
-# endif
-                  /* add other response types here */
-# ifdef REDIRECT
                   }
-# endif // REDIRECT
                 }
               }
             }
           }
-# ifdef SSL_RESP
         }
-# endif
       }
     }
   } // select() > 0
 
   // done processing socket connection; now handle selected result action
-  if (status == EXIT_FAILURE) {
+  if (pipedata.response == FAIL_GENERAL) {
     // log general error status in case it wasn't caught above
-    syslog(LOG_WARNING, "browser request processing completed with EXIT_FAILURE status");
-  } else if (status != FAIL_TIMEOUT && status != FAIL_CLOSED) {
+    syslog(LOG_WARNING, "browser request processing completed with FAIL_GENERAL status");
+  } else if (pipedata.response != FAIL_TIMEOUT && pipedata.response != FAIL_CLOSED) {
     // only attempt to send response if we've chosen a valid response type
-#else   // !TEXT_REPLY
-  {
-    status = SEND_GIF;
-    TESTPRINT("Sending a gif response\n");
-#endif  // TEXT_REPLY
+    //
     // send response
     // this is currently a blocking call, so zero should not be returned
     rv = send(new_fd, response, rsize, MSG_NOSIGNAL);
-#if defined(STATS_REPLY) || defined(REDIRECT)
-    if (aspbuf) {
-//      if (response == aspbuf) {
-//        response = NULL;
-//      }
-      // free memory allocated by asprintf()
-      free(aspbuf);
-//      aspbuf = NULL;
-    }
-#endif // STATS_REPLY || REDIRECT
-    /* check for error message, but don't bother checking that all bytes sent */
+    // check for error message, but don't bother checking that all bytes sent
     if (rv < 0) {
-      if (rv == EPIPE) {
+      if (errno == EPIPE) {
         // client closed socket sometime after initial check
-        MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", status);
-        status = FAIL_CLOSED;
+        MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", pipedata.response);
+        pipedata.response = FAIL_CLOSED;
       } else {
         // some other error
-        syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", status);
-        status = EXIT_FAILURE;
+        syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", pipedata.response);
+        pipedata.response = FAIL_GENERAL;
       }
+    }
+    // free memory allocated by asprintf() (if any)
+    if (aspbuf) {
+      free(aspbuf);
+      aspbuf = NULL;
     }
   }
 
   // signal the socket connection that we're done writing
-  if (shutdown(new_fd, SHUT_WR) == OK
-      && status != FAIL_CLOSED) {
+  if (!shutdown(new_fd, SHUT_WR) && pipedata.response != FAIL_CLOSED) {
     // socket may still be open for read, so read any data that is still waiting
     do {
       // check whether socket is ready for read
@@ -665,16 +571,14 @@ responsetypes socket_handler(const int new_fd
       FD_SET(new_fd, &select_set);
       timeout.tv_sec = select_timeout;
       timeout.tv_usec = 0;
-      /* select returns 0 if timeout, 1 if input available, -1 if error */
+      // select returns 0 if timeout, 1 if input available, -1 if error
       select_rv = select(new_fd + 1, &select_set, NULL, NULL, &timeout);
       if (select_rv > 0) {
         // something is there; attempt to read it
         rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
-#ifdef STATS_PIPE
         if (rv > 0) {
-          rx_total += rv;
+          pipedata.rx_total += rv;
         }
-#endif
       }
       // if we got something, repeat until we don't
     } while (select_rv > 0 && rv > 0);
@@ -684,30 +588,25 @@ responsetypes socket_handler(const int new_fd
   shutdown(new_fd, SHUT_RD);
   close(new_fd);
 
-#ifdef STATS_PIPE
-  // if we read any data, write rx_total to pipe
+  // write pipedata to pipe
   // note that the parent must not perform a blocking pipe read without checking
   //  for available data, or else it may deadlock when we don't write anything
-  if (rx_total > 0) {
-    rv = write(pipefd, &rx_total, sizeof(rx_total));
-    if (rv < 0) {
-      syslog(LOG_WARNING, "write() to pipe returned error: %m");
-    } else if (rv == 0) {
-      syslog(LOG_WARNING, "write() reports no data written to pipe but no error");
-    } else if (rv != sizeof(rx_total)) {
-      syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %d", rv, sizeof(rx_total));
-    }
+  rv = write(pipefd, &pipedata, sizeof(pipedata));
+  if (rv < 0) {
+    syslog(LOG_WARNING, "write() to pipe returned error: %m");
+  } else if (rv == 0) {
+    syslog(LOG_WARNING, "write() reports no data written to pipe but no error");
+  } else if (rv != sizeof(pipedata)) {
+    syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %d", rv, sizeof(pipedata));
   }
+
   // child no longer needs write pipe, so close descriptor
   // this is probably redundant since we are about to exit() anyway
   close(pipefd);
-#endif
 
-  if (status == EXIT_FAILURE) {
+  if (pipedata.response == FAIL_GENERAL) {
     // complain (possibly again) about general failure status, in case it wasn't
     //  caught previously
-    syslog(LOG_WARNING, "connection handler exiting with EXIT_FAILURE status");
+    syslog(LOG_WARNING, "connection handler exiting with FAIL_GENERAL status");
   }
-
-  return status;
 }
