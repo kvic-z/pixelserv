@@ -215,11 +215,11 @@ static const char httpnull_ico[] =
   "\x80\xF8\x9C\x41"; // AND ?
 
 static const char SSL_no[] =
-  "\x15"  // Alert 21
-  "\3\0"  // Version 3.0
-  "\0\2"  // length 2
-  "\2"    // fatal
-  "\x31"; // 0 close notify, 0x28 Handshake failure 40, 0x31 TLS access denied 49
+  "\x15"     // Alert (21)
+  "\x03\x00" // Version 3.0
+  "\x00\x02" // length 2
+  "\x02"     // fatal
+  "\x31";    // 0 close notify, 0x28 Handshake failure 40, 0x31 TLS access denied 49
 
 // private functions for socket_handler() use
 #ifdef HEX_DUMP
@@ -359,19 +359,19 @@ void socket_handler(const int new_fd
   select_rv = select(new_fd + 1, &select_set, NULL, NULL, &timeout);
   if (select_rv < 0) {          // some kind of error
     syslog(LOG_ERR, "select() returned error: %m");
-    pipedata.response = FAIL_GENERAL;
+    pipedata.status = FAIL_GENERAL;
   } else if (select_rv == 0) {  // timeout
     MYLOG(LOG_ERR, "select() timed out");
-    pipedata.response = FAIL_TIMEOUT;
+    pipedata.status = FAIL_TIMEOUT;
   } else {                      // socket is ready for read
     // read some data from the socket to buf
     rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
     if (rv < 0) {               // some kind of error
       syslog(LOG_ERR, "recv() returned error: %m");
-      pipedata.response = FAIL_GENERAL;
+      pipedata.status = FAIL_GENERAL;
     } else if (rv == 0) {       // EOF
       MYLOG(LOG_ERR, "client closed connection without sending any data");
-      pipedata.response = FAIL_CLOSED;
+      pipedata.status = FAIL_CLOSED;
     } else {                    // got some data
       buf[rv] = '\0';
       TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
@@ -380,9 +380,9 @@ void socket_handler(const int new_fd
 #ifdef HEX_DUMP
       hex_dump(buf, rv);
 #endif
-      if (buf[0] == '\x16'){
+      if (buf[0] == '\x16') {
         TESTPRINT("SSL handshake request received\n");
-        pipedata.response = SEND_SSL;
+        pipedata.status = SEND_SSL;
         response = SSL_no;
         rsize = sizeof SSL_no - 1;
       } else {
@@ -394,21 +394,21 @@ void socket_handler(const int new_fd
           TESTPRINT("method: '%s'\n", method);
           if ( strcmp(method, "GET") ) {  //methods are case-sensitive
             MYLOG(LOG_ERR, "unknown method: %s", method);
-            pipedata.response = SEND_BAD;
+            pipedata.status = SEND_BAD;
             TESTPRINT("Sending 501 response\n");
             response = http501;
             rsize = sizeof http501 - 1;
           } else {
             // ----------------------------------------------
             // send default from here, no matter what happens
-            pipedata.response = DEFAULT_REPLY;
+            pipedata.status = DEFAULT_REPLY;
             // trim up to non path chars
             char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
             if (path == NULL) {
-              pipedata.response = SEND_NO_URL;
+              pipedata.status = SEND_NO_URL;
               syslog(LOG_ERR, "client did not specify URL for GET request");
             } else if (!strcmp(path, stats_url)) {
-              pipedata.response = SEND_STATS;
+              pipedata.status = SEND_STATS;
               version_string = get_version(program_name);
               stat_string = get_stats(1, 0);
               rsize = asprintf(&aspbuf,
@@ -424,7 +424,7 @@ void socket_handler(const int new_fd
               free(stat_string);
               response = aspbuf;
             } else if (!strcmp(path, stats_text_url)) {
-              pipedata.response = SEND_STATSTEXT;
+              pipedata.status = SEND_STATSTEXT;
               version_string = get_version(program_name);
               stat_string = get_stats(0, 1);
               rsize = asprintf(&aspbuf,
@@ -439,7 +439,7 @@ void socket_handler(const int new_fd
               free(stat_string);
               response = aspbuf;
             } else if (do_204 && !strcasecmp(path, "/generate_204")) {
-              pipedata.response = SEND_204;
+              pipedata.status = SEND_204;
               response = http204;
               rsize = sizeof http204 - 1;
             } else {
@@ -470,7 +470,7 @@ void socket_handler(const int new_fd
                 }
               }
               if (do_redirect && url) {
-                pipedata.response = SEND_REDIRECT;
+                pipedata.status = SEND_REDIRECT;
                 rsize = asprintf(&aspbuf, httpredirect, url);
                 response = aspbuf;
                 TESTPRINT("Sending redirect: %s\n", url);
@@ -478,49 +478,49 @@ void socket_handler(const int new_fd
               } else {
                 char *file = strrchr(strtok(path, "?#;="), '/');
                 if (file == NULL) {
-                  pipedata.response = SEND_BAD_PATH;
+                  pipedata.status = SEND_BAD_PATH;
                   syslog(LOG_ERR, "invalid file path %s", path);
                 } else {
                   TESTPRINT("file: '%s'\n", file);
                   char *ext = strrchr(file, '.');
                   if (ext == NULL) {
-                    pipedata.response = SEND_NO_EXT;
+                    pipedata.status = SEND_NO_EXT;
                     MYLOG(LOG_ERR, "no file extension %s from path %s", file, path);
                   } else {
                     TESTPRINT("ext: '%s'\n", ext);
                     if (!strcasecmp(ext, ".gif")) {
                       TESTPRINT("Sending gif response\n");
-                      pipedata.response = SEND_GIF;
+                      pipedata.status = SEND_GIF;
                       response = httpnullpixel;
                       rsize = sizeof httpnullpixel - 1;
                     } else if (!strcasecmp(ext, ".png")) {
                       TESTPRINT("Sending png response\n");
-                      pipedata.response = SEND_PNG;
+                      pipedata.status = SEND_PNG;
                       response = httpnull_png;
                       rsize = sizeof httpnull_png - 1;
                     } else if (!strncasecmp(ext, ".jp", 3)) {
                       TESTPRINT("Sending jpg response\n");
-                      pipedata.response = SEND_JPG;
+                      pipedata.status = SEND_JPG;
                       response = httpnull_jpg;
                       rsize = sizeof httpnull_jpg - 1;
                     } else if (!strcasecmp(ext, ".swf")) {
                       TESTPRINT("Sending swf response\n");
-                      pipedata.response = SEND_SWF;
+                      pipedata.status = SEND_SWF;
                       response = httpnull_swf;
                       rsize = sizeof httpnull_swf - 1;
                     } else if (!strcasecmp(ext, ".ico")) {
                       TESTPRINT("Sending ico response\n");
-                      pipedata.response = SEND_ICO;
+                      pipedata.status = SEND_ICO;
                       response = httpnull_ico;
                       rsize = sizeof httpnull_ico - 1;
                     } else if (!strncasecmp(ext, ".js", 3)) {  // .jsx ?
-                      pipedata.response = SEND_TXT;
+                      pipedata.status = SEND_TXT;
                       TESTPRINT("Sending txt response\n");
                       response = httpnulltext;
                       rsize = sizeof httpnulltext - 1;
                     } else {
                       TESTPRINT("Sending ufe response\n");
-                      pipedata.response = SEND_UNK_EXT;
+                      pipedata.status = SEND_UNK_EXT;
                       MYLOG(LOG_ERR, "unrecognized file extension %s from path %s", ext, path);
                     }
                   }
@@ -534,10 +534,10 @@ void socket_handler(const int new_fd
   } // select() > 0
 
   // done processing socket connection; now handle selected result action
-  if (pipedata.response == FAIL_GENERAL) {
+  if (pipedata.status == FAIL_GENERAL) {
     // log general error status in case it wasn't caught above
     syslog(LOG_WARNING, "browser request processing completed with FAIL_GENERAL status");
-  } else if (pipedata.response != FAIL_TIMEOUT && pipedata.response != FAIL_CLOSED) {
+  } else if (pipedata.status != FAIL_TIMEOUT && pipedata.status != FAIL_CLOSED) {
     // only attempt to send response if we've chosen a valid response type
     //
     // send response
@@ -547,13 +547,15 @@ void socket_handler(const int new_fd
     if (rv < 0) {
       if (errno == EPIPE) {
         // client closed socket sometime after initial check
-        MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", pipedata.response);
-        pipedata.response = FAIL_CLOSED;
+        MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
+        pipedata.status = FAIL_CLOSED;
       } else {
         // some other error
-        syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", pipedata.response);
-        pipedata.response = FAIL_GENERAL;
+        syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
+        pipedata.status = FAIL_GENERAL;
       }
+    } else if (rv != rsize) {
+      syslog(LOG_WARNING, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
     }
     // free memory allocated by asprintf() (if any)
     if (aspbuf) {
@@ -563,7 +565,10 @@ void socket_handler(const int new_fd
   }
 
   // signal the socket connection that we're done writing
-  if (!shutdown(new_fd, SHUT_WR) && pipedata.response != FAIL_CLOSED) {
+  errno = 0;
+  if (shutdown(new_fd, SHUT_WR) < 0) {
+    syslog(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
+  } else if (pipedata.status != FAIL_CLOSED) {
     // socket may still be open for read, so read any data that is still waiting
     do {
       // check whether socket is ready for read
@@ -585,8 +590,14 @@ void socket_handler(const int new_fd
   }
 
   // signal that we're done reading and then close the connection
-  shutdown(new_fd, SHUT_RD);
-  close(new_fd);
+  rv = shutdown(new_fd, SHUT_RD);
+  if (rv < 0 && errno != ENOTCONN) {
+    syslog(LOG_WARNING, "shutdown(new_fd, SHUT_RD) reported error: %m");
+  }
+
+  if (errno != ENOTCONN && close(new_fd) < 0) {
+    syslog(LOG_WARNING, "close(new_fd) reported error: %m");
+  }
 
   // write pipedata to pipe
   // note that the parent must not perform a blocking pipe read without checking
@@ -604,7 +615,7 @@ void socket_handler(const int new_fd
   // this is probably redundant since we are about to exit() anyway
   close(pipefd);
 
-  if (pipedata.response == FAIL_GENERAL) {
+  if (pipedata.status == FAIL_GENERAL) {
     // complain (possibly again) about general failure status, in case it wasn't
     //  caught previously
     syslog(LOG_WARNING, "connection handler exiting with FAIL_GENERAL status");

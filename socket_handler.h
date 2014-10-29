@@ -26,7 +26,7 @@ typedef enum {
 } response_enum;
 
 typedef struct {
-    response_enum response;
+    response_enum status;
     int rx_total;
 } response_struct;
 

@@ -21,7 +21,7 @@
 #include <unistd.h>             // close(), setuid(), TEMP_FAILURE_RETRY, fork()
 
 // preprocessor defines
-#define VERSION "V35.HZ11WIP4"
+#define VERSION "V35.HZ11WIP5"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!

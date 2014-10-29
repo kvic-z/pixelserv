@@ -383,7 +383,7 @@ int main (int argc, char *argv[]) // program start
         syslog(LOG_WARNING, "pipe read() got %d bytes, but %d bytes were expected - discarding", rv, sizeof(pipedata));
       } else {
         // process response type
-        switch (pipedata.response) {
+        switch (pipedata.status) {
           case FAIL_GENERAL:   ++err; break;
           case FAIL_TIMEOUT:   ++tmo; break;
           case FAIL_CLOSED:    ++cls; break;
@@ -404,12 +404,12 @@ int main (int argc, char *argv[]) // program start
           case SEND_NO_URL:    ++nou; break;
           case SEND_BAD_PATH:  ++pth; break;
           default:
-            syslog(LOG_ERR, "Socket handler child process reported unknown response value: %d", pipedata.response);
+            syslog(LOG_ERR, "Socket handler child process reported unknown response value: %d", pipedata.status);
         }
 
         // count only positive receive sizes
         if (pipedata.rx_total <= 0) {
-          syslog(LOG_WARNING, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
+          MYLOG(LOG_WARNING, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
         } else {
           // calculate as a double and add rounding factor for implicit integer
           //  truncation
@@ -439,8 +439,8 @@ int main (int argc, char *argv[]) // program start
     }
 
     new_fd = accept(sockfd, (struct sockaddr *) &their_addr, &sin_size);
-    if (new_fd < 1) {
-      MYLOG(LOG_WARNING, "accept: %m");
+    if (new_fd < 0) {
+      syslog(LOG_WARNING, "accept: %m");
       continue;
     }
 
