@@ -15,6 +15,8 @@ Explanation of stats:
 * req: number of connection requests
 * avg: average request size in bytes
 * rmx: maximum request size in bytes
+* tav: average request processing time in milliseconds
+* tmx: maximum request processing time in milliseconds
 * err: number of connections resulting in processing errors (syslog may have details)
 * tmo: number of connections that timed out while trying to read a request from the client
 * cls: number of connections that were closed by the client while reading or replying to the request

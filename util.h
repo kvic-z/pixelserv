@@ -19,9 +19,10 @@
 //#include <sys/socket.h>       // doesn't seem to be needed
 //#include <sys/types.h>        // doesn't seem to be needed
 #include <unistd.h>             // close(), setuid(), TEMP_FAILURE_RETRY, fork()
+#include <time.h>               // struct timespec, clock_gettime(), difftime()
 
 // preprocessor defines
-#define VERSION "V35.HZ11WIP7"
+#define VERSION "V35.HZ11WIP8"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -29,7 +30,6 @@
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
 #define DEFAULT_TIMEOUT 10      // default timeout for select() calls, in seconds
-
 
 #define SECOND_PORT "443"
 #define MAX_PORTS 10
@@ -59,6 +59,9 @@ extern volatile sig_atomic_t count; // req
 extern volatile sig_atomic_t avg; // cumulative moving average request size
 extern volatile sig_atomic_t act; // avg count (updated at time of average calculation)
 extern volatile sig_atomic_t rmx; // maximum encountered request size
+extern volatile sig_atomic_t tct; // time count
+extern volatile sig_atomic_t tav; // cumulative moving average time in msec
+extern volatile sig_atomic_t tmx; // max time in msec
 extern volatile sig_atomic_t err;
 extern volatile sig_atomic_t tmo;
 extern volatile sig_atomic_t cls;

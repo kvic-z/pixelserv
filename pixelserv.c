@@ -103,37 +103,33 @@ int main (int argc, char *argv[]) // program start
   int do_foreground = 0;
 #endif // !TEST
   int do_redirect = 1;
+  int warning_time = 0;
 
   // command line arguments processing
   for (i = 1; i < argc && error == 0; ++i) {
     if (argv[i][0] == '-') {
       // handle arguments that don't require a subsequent argument
       switch (argv[i][1]) {
-        case '2':
-          do_204 = 0;
-        continue;
+        case '2': do_204 = 0;                                 continue;
 #ifndef TEST
-        case 'f':
-          do_foreground = 1;
-        continue;
+        case 'f': do_foreground = 1;                          continue;
 #endif // !TEST
         case 'r':
           // deprecated - ignore
 //          do_redirect = 1;
         continue;
-        case 'R':
-          do_redirect = 0;
-        continue;
+        case 'R': do_redirect = 0;                            continue;
+        // no default here because we want to move on to the next section
       }
       // handle arguments that require a subsequent argument
-      if ( (i + 1) < argc ) {
+      if ((i + 1) < argc) {
         // switch on parameter letter and process subsequent argument
         switch (argv[i++][1]) {
 #ifdef IF_MODE
           case 'n':
             ifname = argv[i];
             use_if = 1;
-          break;
+          continue;
 #endif
           case 'o':
             errno = 0;
@@ -141,27 +137,21 @@ int main (int argc, char *argv[]) // program start
             if (errno) {
               error = 1;
             }
-          break;
+          continue;
           case 'p':
             if (num_ports < MAX_PORTS) {
               ports[num_ports++] = argv[i];
             } else {
               error = 1;
             }
-          break;
-          case 's':
-            stats_url = argv[i];
-          break;
-          case 't':
-            stats_text_url = argv[i];
-          break;
+          continue;
+          case 's': stats_url = argv[i];                      continue;
+          case 't': stats_text_url = argv[i];                 continue;
 #ifdef DROP_ROOT
-          case 'u':
-            user = argv[i];
-          break;
+          case 'u': user = argv[i];                           continue;
 #endif
-          default:
-            error = 1;
+          case 'w': warning_time = strtol(argv[i], NULL, 10); continue;
+          default:  error = 1;                                continue;
         }
       } else {
         error = 1;
@@ -201,6 +191,7 @@ int main (int argc, char *argv[]) // program start
 #ifdef DROP_ROOT
            " [-u user (\"nobody\")]"
 #endif // DROP_ROOT
+           " [-w warning_time (warn when elapsed connection time exceeds value in msec)"
            "\n", argv[0], DEFAULT_TIMEOUT);
     exit(EXIT_FAILURE);
   }
@@ -431,6 +422,14 @@ int main (int argc, char *argv[]) // program start
             rmx = pipedata.rx_total;
           }
         }
+
+        // update request time stats
+        // calculate moving average, adding 0.5 for rounding
+        tav += ((pipedata.run_time - tav) / ++tct) + 0.5;
+        // look for a new high score, adding 0.5 for rounding
+        if (pipedata.run_time + 0.5 > tmx) {
+          tmx = (pipedata.run_time + 0.5);
+        }
       }
       --select_rv;
       continue;
@@ -486,6 +485,7 @@ int main (int argc, char *argv[]) // program start
                     ,argv[0]
                     ,do_204
                     ,do_redirect
+                    ,warning_time
                     );
       exit(0);
     } // end of forked child process

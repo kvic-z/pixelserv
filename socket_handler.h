@@ -29,6 +29,7 @@ typedef enum {
 typedef struct {
     response_enum status;
     int rx_total;
+    double run_time;
 } response_struct;
 
 void socket_handler(const int new_fd
@@ -39,6 +40,7 @@ void socket_handler(const int new_fd
                    ,const char* const program_name
                    ,const int do_204
                    ,const int do_redirect
+                   ,const int warning_time
                    );
 
 #endif // SOCKET_HANDLER_H

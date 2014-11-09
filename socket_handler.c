@@ -323,6 +323,31 @@ void urldecode(char* const decoded, char* const encoded) {
   *pbuf = '\0';
 }
 
+double elapsed_time_msec(const struct timespec start_time) {
+  struct timespec current_time = {0, 0};
+  struct timespec diff_time = {0, 0};
+
+  if (!start_time.tv_sec) {
+    MYLOG(LOG_WARNING, "check_time(): returning because start_time not set");
+    return -1.0;
+  }
+
+  if (clock_gettime(CLOCK_MONOTONIC, &current_time) < 0) {
+    syslog(LOG_WARNING, "clock_gettime() reported failure getting current time: %m");
+    return -1.0;
+  }
+
+  diff_time.tv_sec = difftime(current_time.tv_sec, start_time.tv_sec) + 0.5;
+  diff_time.tv_nsec = current_time.tv_nsec - start_time.tv_nsec;
+  if (diff_time.tv_nsec < 0) {
+    // normalize nanoseconds
+    diff_time.tv_sec  -= 1;
+    diff_time.tv_nsec += 1000000000;
+  }
+
+  return diff_time.tv_sec * 1000 + ((double)diff_time.tv_nsec / 1000000);
+}
+
 void socket_handler(const int new_fd
                    ,const time_t select_timeout
                    ,const int pipefd
@@ -331,15 +356,16 @@ void socket_handler(const int new_fd
                    ,const char* const program_name
                    ,const int do_204
                    ,const int do_redirect
+                   ,const int warning_time
                    ) {
   // NOTES:
   // - from here on, all exit points should be counted or at least logged
   // - exit() should not be called from the child process
-  response_struct pipedata = { FAIL_GENERAL, 0 };
+  response_struct pipedata = {FAIL_GENERAL, 0, 0.0};
   fd_set select_set;
-  struct timeval timeout;
-  int select_rv;
-  int rv;
+  struct timeval timeout = {select_timeout, 0};
+  int select_rv = 0;
+  int rv = 0;
   char buf[CHAR_BUF_SIZE + 1];
   char *bufptr = NULL;
   char *url = NULL;
@@ -348,14 +374,21 @@ void socket_handler(const int new_fd
   int rsize = sizeof httpnulltext - 1;
   char* version_string = NULL;
   char* stat_string = NULL;
+  struct timespec start_time = {0, 0};
+  double time_msec = 0.0;
+  int do_warning = (warning_time > 0);
+
+  // note the time
+  if (clock_gettime(CLOCK_MONOTONIC, &start_time) < 0) {
+    syslog(LOG_WARNING, "clock_gettime() reported failure getting start time: %m");
+  }
+
   // the socket is connected, but we need to perform a blocking check for
   //  incoming data
   // select() is used because we want to give up after a specified timeout
   //  period, in case the client is messing with us
   FD_ZERO(&select_set);
   FD_SET(new_fd, &select_set);
-  timeout.tv_sec = select_timeout;
-  timeout.tv_usec = 0;
   select_rv = select(new_fd + 1, &select_set, NULL, NULL, &timeout);
   if (select_rv < 0) {          // some kind of error
     syslog(LOG_ERR, "select() returned error: %m");
@@ -364,6 +397,13 @@ void socket_handler(const int new_fd
     MYLOG(LOG_ERR, "select() timed out");
     pipedata.status = FAIL_TIMEOUT;
   } else {                      // socket is ready for read
+    if (do_warning) {
+      do_warning = 0; // warn only once
+      time_msec = elapsed_time_msec(start_time);
+      if (time_msec > warning_time) {
+        syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following initial pre-read select()", time_msec, warning_time);
+      }
+    }
     // read some data from the socket to buf
     rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
     if (rv < 0) {               // some kind of error
@@ -373,6 +413,13 @@ void socket_handler(const int new_fd
       MYLOG(LOG_ERR, "client closed connection without sending any data");
       pipedata.status = FAIL_CLOSED;
     } else {                    // got some data
+      if (do_warning) {
+        do_warning = 0; // warn only once
+        time_msec = elapsed_time_msec(start_time);
+        if (time_msec > warning_time) {
+          syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following initial recv()", time_msec, warning_time);
+        }
+      }
       buf[rv] = '\0';
       TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
 
@@ -540,6 +587,13 @@ void socket_handler(const int new_fd
       }
     }
   } // select() > 0
+  if (do_warning) {
+    do_warning = 0; // warn only once
+    time_msec = elapsed_time_msec(start_time);
+    if (time_msec > warning_time) {
+      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following response selection", time_msec, warning_time);
+    }
+  }
 
   // done processing socket connection; now handle selected result action
   if (pipedata.status == FAIL_GENERAL) {
@@ -572,6 +626,13 @@ void socket_handler(const int new_fd
     }
   }
   // *** NOTE: pipedata.status should not be altered after this point ***
+  if (do_warning) {
+    do_warning = 0; // warn only once
+    time_msec = elapsed_time_msec(start_time);
+    if (time_msec > warning_time) {
+      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following response send()", time_msec, warning_time);
+    }
+  }
 
   // signal the socket connection that we're done writing
   errno = 0;
@@ -582,24 +643,30 @@ void socket_handler(const int new_fd
       syslog(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
     }
   } else if (pipedata.status != FAIL_CLOSED) {
-    // socket may still be open for read, so read any data that is still waiting
-    do {
-      // check whether socket is ready for read
-      FD_ZERO(&select_set);
-      FD_SET(new_fd, &select_set);
-      timeout.tv_sec = select_timeout;
-      timeout.tv_usec = 0;
-      // select returns 0 if timeout, 1 if input available, -1 if error
-      select_rv = select(new_fd + 1, &select_set, NULL, NULL, &timeout);
-      if (select_rv > 0) {
-        // something is there; attempt to read it
-        rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
-        if (rv > 0) {
-          pipedata.rx_total += rv;
-        }
+    if (do_warning) {
+      do_warning = 0; // warn only once
+      time_msec = elapsed_time_msec(start_time);
+      if (time_msec > warning_time) {
+        syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following socket write shutdown()", time_msec, warning_time);
       }
-      // if we got something, repeat until we don't
-    } while (select_rv > 0 && rv > 0);
+    }
+
+    // socket may still be open for read, so read any data that is still waiting
+    errno = 0;
+    do {
+      // use non-blocking reads to avoid the need to call select()
+      rv = recv(new_fd, buf, CHAR_BUF_SIZE, MSG_DONTWAIT);
+    } while (rv >= 0);
+    if (rv < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+      syslog(LOG_WARNING, "Final recv() reported unexpected error: %m");
+    }
+    if (do_warning) {
+      do_warning = 0; // warn only once
+      time_msec = elapsed_time_msec(start_time);
+      if (time_msec > warning_time) {
+        syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following final recv() loop", time_msec, warning_time);
+      }
+    }
   }
 
   // signal that we're done reading
@@ -609,6 +676,13 @@ void socket_handler(const int new_fd
       MYLOG(LOG_WARNING, "shutdown(new_fd, SHUT_RD) reported error: %m");
     } else {
       syslog(LOG_WARNING, "shutdown(new_fd, SHUT_RD) reported error: %m");
+    }
+  }
+  if (do_warning) {
+    do_warning = 0; // warn only once
+    time_msec = elapsed_time_msec(start_time);
+    if (time_msec > warning_time) {
+      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following socket read shutdown()", time_msec, warning_time);
     }
   }
 
@@ -621,6 +695,16 @@ void socket_handler(const int new_fd
       syslog(LOG_WARNING, "close(new_fd) reported error: %m");
     }
   }
+  if (do_warning) {
+    do_warning = 0; // warn only once
+    time_msec = elapsed_time_msec(start_time);
+    if (time_msec > warning_time) {
+      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following socket close()", time_msec, warning_time);
+    }
+  }
+
+  // store time delta in milliseconds
+  pipedata.run_time = elapsed_time_msec(start_time);
 
   // write pipedata to pipe
   // note that the parent must not perform a blocking pipe read without checking
@@ -644,5 +728,12 @@ void socket_handler(const int new_fd
     // complain (possibly again) about general failure status, in case it wasn't
     //  caught previously
     syslog(LOG_WARNING, "connection handler exiting with FAIL_GENERAL status");
+  }
+  if (do_warning) {
+    do_warning = 0; // warn only once
+    time_msec = elapsed_time_msec(start_time);
+    if (time_msec > warning_time) {
+      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following socket_handler() exit", time_msec, warning_time);
+    }
   }
 }
