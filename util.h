@@ -21,7 +21,7 @@
 #include <unistd.h>             // close(), setuid(), TEMP_FAILURE_RETRY, fork()
 
 // preprocessor defines
-#define VERSION "V35.HZ11WIP5"
+#define VERSION "V35.HZ11WIP6"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -55,14 +55,20 @@
 #endif
 
 // cross-thread count variables
-extern volatile sig_atomic_t count;
+extern volatile sig_atomic_t count; // req
 extern volatile sig_atomic_t avg; // cumulative moving average request size
-extern volatile sig_atomic_t act; // count (updated at time of average calculation)
+extern volatile sig_atomic_t act; // avg count (updated at time of average calculation)
 extern volatile sig_atomic_t rmx; // maximum encountered request size
-extern volatile sig_atomic_t gif;
 extern volatile sig_atomic_t err;
-extern volatile sig_atomic_t txt;
+extern volatile sig_atomic_t tmo;
+extern volatile sig_atomic_t cls;
+extern volatile sig_atomic_t nou;
+extern volatile sig_atomic_t pth;
+extern volatile sig_atomic_t nfe;
+extern volatile sig_atomic_t ufe;
+extern volatile sig_atomic_t gif;
 extern volatile sig_atomic_t bad;
+extern volatile sig_atomic_t txt;
 extern volatile sig_atomic_t jpg;
 extern volatile sig_atomic_t png;
 extern volatile sig_atomic_t swf;
@@ -72,12 +78,7 @@ extern volatile sig_atomic_t sta; // so meta!
 extern volatile sig_atomic_t stt;
 extern volatile sig_atomic_t noc;
 extern volatile sig_atomic_t rdr;
-extern volatile sig_atomic_t tmo;
-extern volatile sig_atomic_t cls;
-extern volatile sig_atomic_t nou;
-extern volatile sig_atomic_t pth;
-extern volatile sig_atomic_t nfe;
-extern volatile sig_atomic_t ufe;
+extern volatile sig_atomic_t pst;
 
 // util.c functions
 

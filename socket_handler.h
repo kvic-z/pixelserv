@@ -22,7 +22,8 @@ typedef enum {
   SEND_NO_EXT,
   SEND_UNK_EXT,
   SEND_NO_URL,
-  SEND_BAD_PATH
+  SEND_BAD_PATH,
+  SEND_POST
 } response_enum;
 
 typedef struct {

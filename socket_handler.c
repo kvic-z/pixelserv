@@ -392,13 +392,21 @@ void socket_handler(const int new_fd
           syslog(LOG_ERR, "client did not specify method");
         } else {
           TESTPRINT("method: '%s'\n", method);
-          if ( strcmp(method, "GET") ) {  //methods are case-sensitive
-            MYLOG(LOG_ERR, "unknown method: %s", method);
-            pipedata.status = SEND_BAD;
+          if (strcmp(method, "GET")) {  //methods are case-sensitive
+            // something other than GET
+            if (strcmp(method, "POST")) {
+              // something other than GET or POST
+              syslog(LOG_WARNING, "Sending HTTP 501 response for unknown method: %s", method);
+              pipedata.status = SEND_BAD;
+            } else {
+              // POST
+              pipedata.status = SEND_POST;
+            }
             TESTPRINT("Sending 501 response\n");
             response = http501;
             rsize = sizeof http501 - 1;
           } else {
+            // GET
             // ----------------------------------------------
             // send default from here, no matter what happens
             pipedata.status = DEFAULT_REPLY;
@@ -545,7 +553,7 @@ void socket_handler(const int new_fd
     rv = send(new_fd, response, rsize, MSG_NOSIGNAL);
     // check for error message, but don't bother checking that all bytes sent
     if (rv < 0) {
-      if (errno == EPIPE) {
+      if (errno == EPIPE || errno == ECONNRESET) {
         // client closed socket sometime after initial check
         MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
         pipedata.status = FAIL_CLOSED;
@@ -563,11 +571,16 @@ void socket_handler(const int new_fd
       aspbuf = NULL;
     }
   }
+  // *** NOTE: pipedata.status should not be altered after this point ***
 
   // signal the socket connection that we're done writing
   errno = 0;
   if (shutdown(new_fd, SHUT_WR) < 0) {
-    syslog(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
+    if (errno == ENOTCONN) {
+      MYLOG(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
+    } else {
+      syslog(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
+    }
   } else if (pipedata.status != FAIL_CLOSED) {
     // socket may still be open for read, so read any data that is still waiting
     do {
@@ -589,14 +602,24 @@ void socket_handler(const int new_fd
     } while (select_rv > 0 && rv > 0);
   }
 
-  // signal that we're done reading and then close the connection
-  rv = shutdown(new_fd, SHUT_RD);
-  if (rv < 0 && errno != ENOTCONN) {
-    syslog(LOG_WARNING, "shutdown(new_fd, SHUT_RD) reported error: %m");
+  // signal that we're done reading
+  errno = 0;
+  if (shutdown(new_fd, SHUT_RD) < 0) {
+    if (errno == ENOTCONN) {
+      MYLOG(LOG_WARNING, "shutdown(new_fd, SHUT_RD) reported error: %m");
+    } else {
+      syslog(LOG_WARNING, "shutdown(new_fd, SHUT_RD) reported error: %m");
+    }
   }
 
-  if (errno != ENOTCONN && close(new_fd) < 0) {
-    syslog(LOG_WARNING, "close(new_fd) reported error: %m");
+  // close the connection
+  errno = 0;
+  if (close(new_fd) < 0) {
+    if (errno == ENOTCONN) {
+      MYLOG(LOG_WARNING, "close(new_fd) reported error: %m");
+    } else {
+      syslog(LOG_WARNING, "close(new_fd) reported error: %m");
+    }
   }
 
   // write pipedata to pipe
@@ -613,7 +636,9 @@ void socket_handler(const int new_fd
 
   // child no longer needs write pipe, so close descriptor
   // this is probably redundant since we are about to exit() anyway
-  close(pipefd);
+  if (close(pipefd) < 0) {
+    syslog(LOG_WARNING, "close(pipefd) reported error: %m");
+  }
 
   if (pipedata.status == FAIL_GENERAL) {
     // complain (possibly again) about general failure status, in case it wasn't
