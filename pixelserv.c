@@ -99,6 +99,9 @@ int main (int argc, char *argv[]) // program start
   char* stats_url = DEFAULT_STATS_URL;
   char* stats_text_url = DEFAULT_STATS_TEXT_URL;
   int do_204 = 1;
+#ifndef TEST
+  int do_foreground = 0;
+#endif // !TEST
   int do_redirect = 1;
 
   // command line arguments processing
@@ -109,6 +112,11 @@ int main (int argc, char *argv[]) // program start
         case '2':
           do_204 = 0;
         continue;
+#ifndef TEST
+        case 'f':
+          do_foreground = 1;
+        continue;
+#endif // !TEST
         case 'r':
           // deprecated - ignore
 //          do_redirect = 1;
@@ -170,6 +178,9 @@ int main (int argc, char *argv[]) // program start
     printf("Usage:%s"
            " [IP No/hostname (all)]"
            " [-2 (disables HTTP 204 reply to generate_204 URLs)]"
+#ifndef TEST
+           " [-f (stay in foreground - don't daemonize)]"
+#endif // !TEST
 #ifdef IF_MODE
            " [-n i/f (all)]"
 #endif // IF_MODE
@@ -204,7 +215,7 @@ int main (int argc, char *argv[]) // program start
   }
 
 #ifndef TEST
-  if (daemon(0, 0)) {
+  if (!do_foreground && daemon(0, 0)) {
     syslog(LOG_ERR, "failed to daemonize, exit: %m");
     exit(EXIT_FAILURE);
   }
