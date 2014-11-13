@@ -350,7 +350,9 @@ double elapsed_time_msec(const struct timespec start_time) {
 
 #ifdef DEBUG
 static unsigned long LINE_NUMBER = __LINE__;
-# define SET_LINE_NUMBER(x) LINE_NUMBER = x
+# define SET_LINE_NUMBER(x) {\
+  LINE_NUMBER = x;\
+}
 
 void child_signal_handler(int sig)
 {
@@ -407,9 +409,7 @@ void socket_handler(const int new_fd
   // - from here on, all exit points should be counted or at least logged
   // - exit() should not be called from the child process
   response_struct pipedata = {FAIL_GENERAL, 0, 0.0};
-  fd_set select_set;
   struct timeval timeout = {select_timeout, 0};
-  int select_rv = 0;
   int rv = 0;
   char buf[CHAR_BUF_SIZE + 1];
   char *bufptr = NULL;
@@ -452,204 +452,204 @@ void socket_handler(const int new_fd
     syslog(LOG_WARNING, "clock_gettime() reported failure getting start time: %m");
   }
 
-  // the socket is connected, but we need to perform a blocking check for
-  //  incoming data
+  // the socket is connected, but we need to perform a check for incoming data
+  // since we're using blocking checks, we first want to set a timeout
+  if (setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval)) < 0) {
+    syslog(LOG_WARNING, "setsockopt(timeout) reported error: %m");
+  }
+
   // select() is used because we want to give up after a specified timeout
   //  period, in case the client is messing with us
-  FD_ZERO(&select_set);
-  FD_SET(new_fd, &select_set);
-  select_rv = select(new_fd + 1, &select_set, NULL, NULL, &timeout);
-  if (select_rv < 0) {          // some kind of error
-    syslog(LOG_ERR, "select() returned error: %m");
-    pipedata.status = FAIL_GENERAL;
-  } else if (select_rv == 0) {  // timeout
-    MYLOG(LOG_ERR, "select() timed out");
-    pipedata.status = FAIL_TIMEOUT;
-  } else {                      // socket is ready for read
-    TIME_CHECK("initial pre-read select()");
-    // read some data from the socket to buf
-    rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
 
-    SET_LINE_NUMBER(__LINE__);
+  SET_LINE_NUMBER(__LINE__);
 
-    if (rv < 0) {               // some kind of error
-      syslog(LOG_ERR, "recv() returned error: %m");
-      pipedata.status = FAIL_GENERAL;
-    } else if (rv == 0) {       // EOF
-      MYLOG(LOG_ERR, "client closed connection without sending any data");
+  // read some data from the socket to buf
+  rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+  if (rv < 0) {               // some kind of error
+    if (errno == ECONNRESET) {
+      MYLOG(LOG_WARNING, "recv() reported connection error: %m");
       pipedata.status = FAIL_CLOSED;
-    } else {                    // got some data
-      TIME_CHECK("initial recv()");
-      buf[rv] = '\0';
-      TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      MYLOG(LOG_WARNING, "recv() reported timeout error: %m");
+      pipedata.status = FAIL_TIMEOUT;
+    } else {
+      syslog(LOG_ERR, "recv() reported error: %m");
+      pipedata.status = FAIL_GENERAL;
+    }
+  } else if (rv == 0) {       // EOF
+    MYLOG(LOG_ERR, "client closed connection without sending any data");
+    pipedata.status = FAIL_CLOSED;
+  } else {                    // got some data
+    TIME_CHECK("initial recv()");
+    buf[rv] = '\0';
+    TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
 
-      pipedata.rx_total = rv;  // record number of bytes read so far during this loop pass
+    pipedata.rx_total = rv;  // record number of bytes read so far during this loop pass
 #ifdef HEX_DUMP
-      hex_dump(buf, rv);
+    hex_dump(buf, rv);
 #endif
-      if (buf[0] == '\x16') {
-        TESTPRINT("SSL handshake request received\n");
-        pipedata.status = SEND_SSL;
-        response = SSL_no;
-        rsize = sizeof SSL_no - 1;
+    if (buf[0] == '\x16') {
+      TESTPRINT("SSL handshake request received\n");
+      pipedata.status = SEND_SSL;
+      response = SSL_no;
+      rsize = sizeof SSL_no - 1;
+    } else {
+      char *req = strtok_r(buf, "\r\n", &bufptr);
+      char *method = strtok(req, " ");
+      if (method == NULL) {
+        syslog(LOG_ERR, "client did not specify method");
       } else {
-        char *req = strtok_r(buf, "\r\n", &bufptr);
-        char *method = strtok(req, " ");
-        if (method == NULL) {
-          syslog(LOG_ERR, "client did not specify method");
-        } else {
-          TESTPRINT("method: '%s'\n", method);
-          if (strcmp(method, "GET")) {  //methods are case-sensitive
-            // something other than GET
-            if (strcmp(method, "POST")) {
-              // something other than GET or POST, possibly even non-HTTP
-              syslog(LOG_WARNING, "Sending HTTP 501 response for unknown method or non-SSL, non-HTTP request: %s", method);
-              pipedata.status = SEND_BAD;
-            } else {
-              // POST
-              pipedata.status = SEND_POST;
-            }
-            TESTPRINT("Sending 501 response\n");
-            response = http501;
-            rsize = sizeof http501 - 1;
+        TESTPRINT("method: '%s'\n", method);
+        if (strcmp(method, "GET")) {  //methods are case-sensitive
+          // something other than GET
+          if (strcmp(method, "POST")) {
+            // something other than GET or POST, possibly even non-HTTP
+            syslog(LOG_WARNING, "Sending HTTP 501 response for unknown method or non-SSL, non-HTTP request: %s", method);
+            pipedata.status = SEND_BAD;
           } else {
-            // GET
-            // ----------------------------------------------
-            // send default from here, no matter what happens
-            pipedata.status = DEFAULT_REPLY;
-            // trim up to non path chars
-            char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
-            if (path == NULL) {
-              pipedata.status = SEND_NO_URL;
-              syslog(LOG_ERR, "client did not specify URL for GET request");
-            } else if (!strcmp(path, stats_url)) {
-              pipedata.status = SEND_STATS;
-              version_string = get_version(program_name);
-              stat_string = get_stats(1, 0);
-              rsize = asprintf(&aspbuf,
-                               "%s%d%s%s%s<br>%s%s",
-                               httpstats1,
-                               statsbaselen + strlen(version_string) + 4 + strlen(stat_string),
-                               httpstats2,
-                               httpstats3,
-                               version_string,
-                               stat_string,
-                               httpstats4);
-              free(version_string);
-              free(stat_string);
-              response = aspbuf;
-            } else if (!strcmp(path, stats_text_url)) {
-              pipedata.status = SEND_STATSTEXT;
-              version_string = get_version(program_name);
-              stat_string = get_stats(0, 1);
-              rsize = asprintf(&aspbuf,
-                               "%s%d%s%s\n%s%s",
-                               txtstats1,
-                               strlen(version_string) + 1 + strlen(stat_string) + 2,
-                               txtstats2,
-                               version_string,
-                               stat_string,
-                               txtstats3);
-              free(version_string);
-              free(stat_string);
-              response = aspbuf;
-            } else if (do_204 && !strcasecmp(path, "/generate_204")) {
-              pipedata.status = SEND_204;
-              response = http204;
-              rsize = sizeof http204 - 1;
-            } else {
-              // pick out encoded urls (usually advert redirects)
+            // POST
+            pipedata.status = SEND_POST;
+          }
+          TESTPRINT("Sending 501 response\n");
+          response = http501;
+          rsize = sizeof http501 - 1;
+        } else {
+          // GET
+          // ----------------------------------------------
+          // send default from here, no matter what happens
+          pipedata.status = DEFAULT_REPLY;
+          // trim up to non path chars
+          char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
+          if (path == NULL) {
+            pipedata.status = SEND_NO_URL;
+            syslog(LOG_ERR, "client did not specify URL for GET request");
+          } else if (!strcmp(path, stats_url)) {
+            pipedata.status = SEND_STATS;
+            version_string = get_version(program_name);
+            stat_string = get_stats(1, 0);
+            rsize = asprintf(&aspbuf,
+                             "%s%d%s%s%s<br>%s%s",
+                             httpstats1,
+                             statsbaselen + strlen(version_string) + 4 + strlen(stat_string),
+                             httpstats2,
+                             httpstats3,
+                             version_string,
+                             stat_string,
+                             httpstats4);
+            free(version_string);
+            free(stat_string);
+            response = aspbuf;
+          } else if (!strcmp(path, stats_text_url)) {
+            pipedata.status = SEND_STATSTEXT;
+            version_string = get_version(program_name);
+            stat_string = get_stats(0, 1);
+            rsize = asprintf(&aspbuf,
+                             "%s%d%s%s\n%s%s",
+                             txtstats1,
+                             strlen(version_string) + 1 + strlen(stat_string) + 2,
+                             txtstats2,
+                             version_string,
+                             stat_string,
+                             txtstats3);
+            free(version_string);
+            free(stat_string);
+            response = aspbuf;
+          } else if (do_204 && !strcasecmp(path, "/generate_204")) {
+            pipedata.status = SEND_204;
+            response = http204;
+            rsize = sizeof http204 - 1;
+          } else {
+            // pick out encoded urls (usually advert redirects)
 //                  if (do_redirect && strstr(path, "=http") && strchr(path, '%')) {
-              if (do_redirect && strcasestr(path, "=http")) {
-                char *decoded = malloc(strlen(path)+1);
-                urldecode(decoded, path);
+            if (do_redirect && strcasestr(path, "=http")) {
+              char *decoded = malloc(strlen(path)+1);
+              urldecode(decoded, path);
 
-                SET_LINE_NUMBER(__LINE__);
+              SET_LINE_NUMBER(__LINE__);
 
-                // double decode
-                urldecode(path, decoded);
+              // double decode
+              urldecode(path, decoded);
 
-                SET_LINE_NUMBER(__LINE__);
+              SET_LINE_NUMBER(__LINE__);
 
-                free(decoded);
-                url = strstr_last(path, "http://");
-                if (url == NULL) {
-                  url = strstr_last(path, "https://");
-                }
-                // WORKAROUND: google analytics block - request bomb on pages with conversion callbacks (see in chrome)
-                if (url) {
-                  char *tok = NULL;
-
-                  SET_LINE_NUMBER(__LINE__);
-
-                  for (tok = strtok_r(NULL, "\r\n", &bufptr); tok; tok = strtok_r(NULL, "\r\n", &bufptr)) {
-                    char *hkey = strtok(tok, ":");
-                    char *hvalue = strtok(NULL, "\r\n");
-                    if (strstr(hkey, "Referer") && strstr(hvalue, url)) {
-                      url = NULL;
-                      TESTPRINT("Not redirecting likely callback URL: %s:%s\n", hkey, hvalue);
-                      break;
-                    }
-                  }
-
-                  SET_LINE_NUMBER(__LINE__);
-
-                }
+              free(decoded);
+              url = strstr_last(path, "http://");
+              if (url == NULL) {
+                url = strstr_last(path, "https://");
               }
-              if (do_redirect && url) {
-                pipedata.status = SEND_REDIRECT;
-                rsize = asprintf(&aspbuf, httpredirect, url);
-                response = aspbuf;
-                TESTPRINT("Sending redirect: %s\n", url);
-                url = NULL;
+              // WORKAROUND: google analytics block - request bomb on pages with conversion callbacks (see in chrome)
+              if (url) {
+                char *tok = NULL;
+
+                SET_LINE_NUMBER(__LINE__);
+
+                for (tok = strtok_r(NULL, "\r\n", &bufptr); tok; tok = strtok_r(NULL, "\r\n", &bufptr)) {
+                  char *hkey = strtok(tok, ":");
+                  char *hvalue = strtok(NULL, "\r\n");
+                  if (strstr(hkey, "Referer") && strstr(hvalue, url)) {
+                    url = NULL;
+                    TESTPRINT("Not redirecting likely callback URL: %s:%s\n", hkey, hvalue);
+                    break;
+                  }
+                }
+
+                SET_LINE_NUMBER(__LINE__);
+
+              }
+            }
+            if (do_redirect && url) {
+              pipedata.status = SEND_REDIRECT;
+              rsize = asprintf(&aspbuf, httpredirect, url);
+              response = aspbuf;
+              TESTPRINT("Sending redirect: %s\n", url);
+              url = NULL;
+            } else {
+              char *file = strrchr(strtok(path, "?#;="), '/');
+              if (file == NULL) {
+                pipedata.status = SEND_BAD_PATH;
+                syslog(LOG_ERR, "invalid file path %s", path);
               } else {
-                char *file = strrchr(strtok(path, "?#;="), '/');
-                if (file == NULL) {
-                  pipedata.status = SEND_BAD_PATH;
-                  syslog(LOG_ERR, "invalid file path %s", path);
+                TESTPRINT("file: '%s'\n", file);
+                char *ext = strrchr(file, '.');
+                if (ext == NULL) {
+                  pipedata.status = SEND_NO_EXT;
+                  MYLOG(LOG_ERR, "no file extension %s from path %s", file, path);
                 } else {
-                  TESTPRINT("file: '%s'\n", file);
-                  char *ext = strrchr(file, '.');
-                  if (ext == NULL) {
-                    pipedata.status = SEND_NO_EXT;
-                    MYLOG(LOG_ERR, "no file extension %s from path %s", file, path);
+                  TESTPRINT("ext: '%s'\n", ext);
+                  if (!strcasecmp(ext, ".gif")) {
+                    TESTPRINT("Sending gif response\n");
+                    pipedata.status = SEND_GIF;
+                    response = httpnullpixel;
+                    rsize = sizeof httpnullpixel - 1;
+                  } else if (!strcasecmp(ext, ".png")) {
+                    TESTPRINT("Sending png response\n");
+                    pipedata.status = SEND_PNG;
+                    response = httpnull_png;
+                    rsize = sizeof httpnull_png - 1;
+                  } else if (!strncasecmp(ext, ".jp", 3)) {
+                    TESTPRINT("Sending jpg response\n");
+                    pipedata.status = SEND_JPG;
+                    response = httpnull_jpg;
+                    rsize = sizeof httpnull_jpg - 1;
+                  } else if (!strcasecmp(ext, ".swf")) {
+                    TESTPRINT("Sending swf response\n");
+                    pipedata.status = SEND_SWF;
+                    response = httpnull_swf;
+                    rsize = sizeof httpnull_swf - 1;
+                  } else if (!strcasecmp(ext, ".ico")) {
+                    TESTPRINT("Sending ico response\n");
+                    pipedata.status = SEND_ICO;
+                    response = httpnull_ico;
+                    rsize = sizeof httpnull_ico - 1;
+                  } else if (!strncasecmp(ext, ".js", 3)) {  // .jsx ?
+                    pipedata.status = SEND_TXT;
+                    TESTPRINT("Sending txt response\n");
+                    response = httpnulltext;
+                    rsize = sizeof httpnulltext - 1;
                   } else {
-                    TESTPRINT("ext: '%s'\n", ext);
-                    if (!strcasecmp(ext, ".gif")) {
-                      TESTPRINT("Sending gif response\n");
-                      pipedata.status = SEND_GIF;
-                      response = httpnullpixel;
-                      rsize = sizeof httpnullpixel - 1;
-                    } else if (!strcasecmp(ext, ".png")) {
-                      TESTPRINT("Sending png response\n");
-                      pipedata.status = SEND_PNG;
-                      response = httpnull_png;
-                      rsize = sizeof httpnull_png - 1;
-                    } else if (!strncasecmp(ext, ".jp", 3)) {
-                      TESTPRINT("Sending jpg response\n");
-                      pipedata.status = SEND_JPG;
-                      response = httpnull_jpg;
-                      rsize = sizeof httpnull_jpg - 1;
-                    } else if (!strcasecmp(ext, ".swf")) {
-                      TESTPRINT("Sending swf response\n");
-                      pipedata.status = SEND_SWF;
-                      response = httpnull_swf;
-                      rsize = sizeof httpnull_swf - 1;
-                    } else if (!strcasecmp(ext, ".ico")) {
-                      TESTPRINT("Sending ico response\n");
-                      pipedata.status = SEND_ICO;
-                      response = httpnull_ico;
-                      rsize = sizeof httpnull_ico - 1;
-                    } else if (!strncasecmp(ext, ".js", 3)) {  // .jsx ?
-                      pipedata.status = SEND_TXT;
-                      TESTPRINT("Sending txt response\n");
-                      response = httpnulltext;
-                      rsize = sizeof httpnulltext - 1;
-                    } else {
-                      TESTPRINT("Sending ufe response\n");
-                      pipedata.status = SEND_UNK_EXT;
-                      MYLOG(LOG_ERR, "unrecognized file extension %s from path %s", ext, path);
-                    }
+                    TESTPRINT("Sending ufe response\n");
+                    pipedata.status = SEND_UNK_EXT;
+                    MYLOG(LOG_ERR, "unrecognized file extension %s from path %s", ext, path);
                   }
                 }
               }
@@ -658,7 +658,7 @@ void socket_handler(const int new_fd
         }
       }
     }
-  } // select() > 0
+  }
 
   if (pipedata.status != FAIL_TIMEOUT) {
     TIME_CHECK("response selection");
@@ -707,7 +707,8 @@ void socket_handler(const int new_fd
     } else {
       syslog(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
     }
-  } else if (pipedata.status != FAIL_CLOSED) {
+  } else if (pipedata.status != FAIL_TIMEOUT &&
+             pipedata.status != FAIL_CLOSED) { // only check for additional data if we didn't detect a timeout or close initially
     TIME_CHECK("socket write shutdown()");
     SET_LINE_NUMBER(__LINE__);
 
@@ -721,9 +722,11 @@ void socket_handler(const int new_fd
     } while (rv > 0); // rv=0 means peer performed orderly shutdown
     if (rv < 0) {
       if (errno == ECONNRESET) {
-        MYLOG(LOG_WARNING, "Final recv() reported unexpected error: %m");
+        MYLOG(LOG_WARNING, "Final recv() reported connection error: %m");
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        MYLOG(LOG_WARNING, "Final recv() reported timeout error: %m");
       } else {
-        syslog(LOG_WARNING, "Final recv() reported unexpected error: %m");
+        syslog(LOG_WARNING, "Final recv() reported error: %m");
       }
     }
 
@@ -767,7 +770,7 @@ void socket_handler(const int new_fd
   //  for available data, or else it may deadlock when we don't write anything
   rv = write(pipefd, &pipedata, sizeof(pipedata));
   if (rv < 0) {
-    syslog(LOG_WARNING, "write() to pipe returned error: %m");
+    syslog(LOG_WARNING, "write() to pipe reported error: %m");
   } else if (rv == 0) {
     syslog(LOG_WARNING, "write() reports no data written to pipe but no error");
   } else if (rv != sizeof(pipedata)) {
