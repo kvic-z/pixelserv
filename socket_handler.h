@@ -40,7 +40,9 @@ void socket_handler(const int new_fd
                    ,const char* const program_name
                    ,const int do_204
                    ,const int do_redirect
+#ifdef DEBUG
                    ,const int warning_time
+#endif //DEBUG
                    );
 
 #endif // SOCKET_HANDLER_H

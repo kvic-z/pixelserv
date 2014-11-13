@@ -348,6 +348,49 @@ double elapsed_time_msec(const struct timespec start_time) {
   return diff_time.tv_sec * 1000 + ((double)diff_time.tv_nsec / 1000000);
 }
 
+#ifdef DEBUG
+static unsigned long LINE_NUMBER = __LINE__;
+# define SET_LINE_NUMBER(x) LINE_NUMBER = x
+
+void child_signal_handler(int sig)
+{
+  if (sig != SIGTERM
+   && sig != SIGUSR1) {
+    syslog(LOG_WARNING, "Child process ignoring unsupported signal number: %d", sig);
+    return;
+  }
+
+  if (sig == SIGTERM) {
+    // Ignore this signal while we are quitting
+    signal(SIGTERM, SIG_IGN);
+  }
+
+  syslog(LOG_INFO, "Child process caught signal %d near line number %lu", sig, LINE_NUMBER);
+
+  if (sig == SIGTERM) {
+    // exit program on SIGTERM
+    syslog(LOG_NOTICE, "Child process exit on SIGTERM");
+    exit(EXIT_SUCCESS);
+  }
+
+  return;
+}
+
+#define TIME_CHECK(x) {\
+  if (do_warning) {\
+    do_warning = 0;\
+    time_msec = elapsed_time_msec(start_time);\
+    if (time_msec > warning_time) {\
+      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following operation: %s", time_msec, warning_time, x);\
+    }\
+  }\
+}
+
+#else
+# define SET_LINE_NUMBER(x)
+# define TIME_CHECK(x,y...)
+#endif //DEBUG
+
 void socket_handler(const int new_fd
                    ,const time_t select_timeout
                    ,const int pipefd
@@ -356,7 +399,9 @@ void socket_handler(const int new_fd
                    ,const char* const program_name
                    ,const int do_204
                    ,const int do_redirect
+#ifdef DEBUG
                    ,const int warning_time
+#endif //DEBUG
                    ) {
   // NOTES:
   // - from here on, all exit points should be counted or at least logged
@@ -375,8 +420,32 @@ void socket_handler(const int new_fd
   char* version_string = NULL;
   char* stat_string = NULL;
   struct timespec start_time = {0, 0};
+#ifdef DEBUG
   double time_msec = 0.0;
   int do_warning = (warning_time > 0);
+
+  SET_LINE_NUMBER(__LINE__);
+
+  // set up signal handling
+  {
+    struct sigaction sa;
+    sa.sa_handler = child_signal_handler;
+    sigemptyset(&sa.sa_mask);
+
+    // set signal handler for termination
+    if (sigaction(SIGTERM, &sa, NULL)) {
+      syslog(LOG_WARNING, "sigaction(SIGTERM) reported error: %m");
+    }
+
+    // set signal handler for info
+    sa.sa_flags = SA_RESTART; // prevent EINTR from interrupted library calls
+    if (sigaction(SIGUSR1, &sa, NULL)) {
+      syslog(LOG_WARNING, "sigaction(SIGUSR1) reported error: %m");
+    }
+  }
+
+  SET_LINE_NUMBER(__LINE__);
+#endif
 
   // note the time
   if (clock_gettime(CLOCK_MONOTONIC, &start_time) < 0) {
@@ -397,15 +466,12 @@ void socket_handler(const int new_fd
     MYLOG(LOG_ERR, "select() timed out");
     pipedata.status = FAIL_TIMEOUT;
   } else {                      // socket is ready for read
-    if (do_warning) {
-      do_warning = 0; // warn only once
-      time_msec = elapsed_time_msec(start_time);
-      if (time_msec > warning_time) {
-        syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following initial pre-read select()", time_msec, warning_time);
-      }
-    }
+    TIME_CHECK("initial pre-read select()");
     // read some data from the socket to buf
     rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+
+    SET_LINE_NUMBER(__LINE__);
+
     if (rv < 0) {               // some kind of error
       syslog(LOG_ERR, "recv() returned error: %m");
       pipedata.status = FAIL_GENERAL;
@@ -413,13 +479,7 @@ void socket_handler(const int new_fd
       MYLOG(LOG_ERR, "client closed connection without sending any data");
       pipedata.status = FAIL_CLOSED;
     } else {                    // got some data
-      if (do_warning) {
-        do_warning = 0; // warn only once
-        time_msec = elapsed_time_msec(start_time);
-        if (time_msec > warning_time) {
-          syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following initial recv()", time_msec, warning_time);
-        }
-      }
+      TIME_CHECK("initial recv()");
       buf[rv] = '\0';
       TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
 
@@ -442,8 +502,8 @@ void socket_handler(const int new_fd
           if (strcmp(method, "GET")) {  //methods are case-sensitive
             // something other than GET
             if (strcmp(method, "POST")) {
-              // something other than GET or POST
-              syslog(LOG_WARNING, "Sending HTTP 501 response for unknown method: %s", method);
+              // something other than GET or POST, possibly even non-HTTP
+              syslog(LOG_WARNING, "Sending HTTP 501 response for unknown method or non-SSL, non-HTTP request: %s", method);
               pipedata.status = SEND_BAD;
             } else {
               // POST
@@ -503,8 +563,14 @@ void socket_handler(const int new_fd
               if (do_redirect && strcasestr(path, "=http")) {
                 char *decoded = malloc(strlen(path)+1);
                 urldecode(decoded, path);
+
+                SET_LINE_NUMBER(__LINE__);
+
                 // double decode
                 urldecode(path, decoded);
+
+                SET_LINE_NUMBER(__LINE__);
+
                 free(decoded);
                 url = strstr_last(path, "http://");
                 if (url == NULL) {
@@ -513,6 +579,9 @@ void socket_handler(const int new_fd
                 // WORKAROUND: google analytics block - request bomb on pages with conversion callbacks (see in chrome)
                 if (url) {
                   char *tok = NULL;
+
+                  SET_LINE_NUMBER(__LINE__);
+
                   for (tok = strtok_r(NULL, "\r\n", &bufptr); tok; tok = strtok_r(NULL, "\r\n", &bufptr)) {
                     char *hkey = strtok(tok, ":");
                     char *hvalue = strtok(NULL, "\r\n");
@@ -522,6 +591,9 @@ void socket_handler(const int new_fd
                       break;
                     }
                   }
+
+                  SET_LINE_NUMBER(__LINE__);
+
                 }
               }
               if (do_redirect && url) {
@@ -587,12 +659,9 @@ void socket_handler(const int new_fd
       }
     }
   } // select() > 0
-  if (do_warning) {
-    do_warning = 0; // warn only once
-    time_msec = elapsed_time_msec(start_time);
-    if (time_msec > warning_time) {
-      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following response selection", time_msec, warning_time);
-    }
+
+  if (pipedata.status != FAIL_TIMEOUT) {
+    TIME_CHECK("response selection");
   }
 
   // done processing socket connection; now handle selected result action
@@ -600,13 +669,14 @@ void socket_handler(const int new_fd
     // log general error status in case it wasn't caught above
     syslog(LOG_WARNING, "browser request processing completed with FAIL_GENERAL status");
   } else if (pipedata.status != FAIL_TIMEOUT && pipedata.status != FAIL_CLOSED) {
+    SET_LINE_NUMBER(__LINE__);
+
     // only attempt to send response if we've chosen a valid response type
     //
     // send response
     // this is currently a blocking call, so zero should not be returned
     rv = send(new_fd, response, rsize, MSG_NOSIGNAL);
-    // check for error message, but don't bother checking that all bytes sent
-    if (rv < 0) {
+    if (rv < 0) { // check for error message, but don't bother checking that all bytes sent
       if (errno == EPIPE || errno == ECONNRESET) {
         // client closed socket sometime after initial check
         MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
@@ -626,13 +696,8 @@ void socket_handler(const int new_fd
     }
   }
   // *** NOTE: pipedata.status should not be altered after this point ***
-  if (do_warning) {
-    do_warning = 0; // warn only once
-    time_msec = elapsed_time_msec(start_time);
-    if (time_msec > warning_time) {
-      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following response send()", time_msec, warning_time);
-    }
-  }
+
+  TIME_CHECK("response send()");
 
   // signal the socket connection that we're done writing
   errno = 0;
@@ -643,31 +708,29 @@ void socket_handler(const int new_fd
       syslog(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
     }
   } else if (pipedata.status != FAIL_CLOSED) {
-    if (do_warning) {
-      do_warning = 0; // warn only once
-      time_msec = elapsed_time_msec(start_time);
-      if (time_msec > warning_time) {
-        syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following socket write shutdown()", time_msec, warning_time);
-      }
-    }
+    TIME_CHECK("socket write shutdown()");
+    SET_LINE_NUMBER(__LINE__);
 
     // socket may still be open for read, so read any data that is still waiting
     errno = 0;
     do {
-      // use non-blocking reads to avoid the need to call select()
-      rv = recv(new_fd, buf, CHAR_BUF_SIZE, MSG_DONTWAIT);
-    } while (rv >= 0);
-    if (rv < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-      syslog(LOG_WARNING, "Final recv() reported unexpected error: %m");
-    }
-    if (do_warning) {
-      do_warning = 0; // warn only once
-      time_msec = elapsed_time_msec(start_time);
-      if (time_msec > warning_time) {
-        syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following final recv() loop", time_msec, warning_time);
+      rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+      if (rv > 0) {
+        pipedata.rx_total += rv;
+      }
+    } while (rv > 0); // rv=0 means peer performed orderly shutdown
+    if (rv < 0) {
+      if (errno == ECONNRESET) {
+        MYLOG(LOG_WARNING, "Final recv() reported unexpected error: %m");
+      } else {
+        syslog(LOG_WARNING, "Final recv() reported unexpected error: %m");
       }
     }
+
+    TIME_CHECK("final recv() loop");
   }
+
+  SET_LINE_NUMBER(__LINE__);
 
   // signal that we're done reading
   errno = 0;
@@ -678,13 +741,9 @@ void socket_handler(const int new_fd
       syslog(LOG_WARNING, "shutdown(new_fd, SHUT_RD) reported error: %m");
     }
   }
-  if (do_warning) {
-    do_warning = 0; // warn only once
-    time_msec = elapsed_time_msec(start_time);
-    if (time_msec > warning_time) {
-      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following socket read shutdown()", time_msec, warning_time);
-    }
-  }
+
+  TIME_CHECK("socket read shutdown()")
+  SET_LINE_NUMBER(__LINE__);
 
   // close the connection
   errno = 0;
@@ -695,16 +754,13 @@ void socket_handler(const int new_fd
       syslog(LOG_WARNING, "close(new_fd) reported error: %m");
     }
   }
-  if (do_warning) {
-    do_warning = 0; // warn only once
-    time_msec = elapsed_time_msec(start_time);
-    if (time_msec > warning_time) {
-      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following socket close()", time_msec, warning_time);
-    }
-  }
+
+  TIME_CHECK("socket close()");
 
   // store time delta in milliseconds
   pipedata.run_time = elapsed_time_msec(start_time);
+
+  SET_LINE_NUMBER(__LINE__);
 
   // write pipedata to pipe
   // note that the parent must not perform a blocking pipe read without checking
@@ -718,22 +774,20 @@ void socket_handler(const int new_fd
     syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %d", rv, sizeof(pipedata));
   }
 
+  TIME_CHECK("pipe write()");
+  SET_LINE_NUMBER(__LINE__);
+
   // child no longer needs write pipe, so close descriptor
   // this is probably redundant since we are about to exit() anyway
   if (close(pipefd) < 0) {
     syslog(LOG_WARNING, "close(pipefd) reported error: %m");
   }
 
+  TIME_CHECK("pipe close()");
+
   if (pipedata.status == FAIL_GENERAL) {
     // complain (possibly again) about general failure status, in case it wasn't
     //  caught previously
     syslog(LOG_WARNING, "connection handler exiting with FAIL_GENERAL status");
-  }
-  if (do_warning) {
-    do_warning = 0; // warn only once
-    time_msec = elapsed_time_msec(start_time);
-    if (time_msec > warning_time) {
-      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following socket_handler() exit", time_msec, warning_time);
-    }
   }
 }

@@ -79,11 +79,11 @@ int main (int argc, char *argv[]) // program start
   response_struct pipedata = { FAIL_GENERAL, 0 };
   char* ports[MAX_PORTS];
   ports[0] = DEFAULT_PORT;
+  ports[1] = SECOND_PORT;
   char *port = NULL;
   fd_set readfds;
   fd_set selectfds;
   int sockfds[MAX_PORTS];
-  ports[1] = SECOND_PORT;
   int select_rv = 0;
   int nfds = 0;
   int num_ports = 0;
@@ -103,7 +103,9 @@ int main (int argc, char *argv[]) // program start
   int do_foreground = 0;
 #endif // !TEST
   int do_redirect = 1;
+#ifdef DEBUG
   int warning_time = 0;
+#endif //DEBUG
 
   // command line arguments processing
   for (i = 1; i < argc && error == 0; ++i) {
@@ -150,7 +152,9 @@ int main (int argc, char *argv[]) // program start
 #ifdef DROP_ROOT
           case 'u': user = argv[i];                           continue;
 #endif
+#ifdef DEBUG
           case 'w': warning_time = strtol(argv[i], NULL, 10); continue;
+#endif //DEBUG
           default:  error = 1;                                continue;
         }
       } else {
@@ -191,7 +195,9 @@ int main (int argc, char *argv[]) // program start
 #ifdef DROP_ROOT
            " [-u user (\"nobody\")]"
 #endif // DROP_ROOT
+#ifdef DEBUG
            " [-w warning_time (warn when elapsed connection time exceeds value in msec)"
+#endif //DEBUG
            "\n", argv[0], DEFAULT_TIMEOUT);
     exit(EXIT_FAILURE);
   }
@@ -219,7 +225,8 @@ int main (int argc, char *argv[]) // program start
     hints.ai_flags = AI_PASSIVE;  // use my IP
   }
 
-  if (num_ports == 0) {
+  // if no ports selected on command line, use the defaults
+  if (!num_ports) {
     num_ports = 2;
   }
 
@@ -485,7 +492,9 @@ int main (int argc, char *argv[]) // program start
                     ,argv[0]
                     ,do_204
                     ,do_redirect
+#ifdef DEBUG
                     ,warning_time
+#endif //DEBUG
                     );
       exit(0);
     } // end of forked child process
