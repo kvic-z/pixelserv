@@ -37,6 +37,7 @@ Explanation of stats:
 * 204: number of requests for /generate_204 URLs
 * rdr: number of requests resulting in a redirect
 * pst: number of requests for HTTP POST method
+* hed: number of requests for HTTP HEAD method
 
 Sources
 -------

@@ -413,6 +413,7 @@ int main (int argc, char *argv[]) // program start
           case SEND_NO_URL:    ++nou; break;
           case SEND_BAD_PATH:  ++pth; break;
           case SEND_POST:      ++pst; break;
+          case SEND_HEAD:      ++hed; break;
           default:
             syslog(LOG_ERR, "Socket handler child process reported unknown response value: %d", pipedata.status);
         }

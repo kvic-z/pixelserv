@@ -484,7 +484,7 @@ void socket_handler(const int new_fd
     buf[rv] = '\0';
     TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
 
-    pipedata.rx_total = rv;  // record number of bytes read so far during this loop pass
+    pipedata.rx_total = rv;
 #ifdef HEX_DUMP
     hex_dump(buf, rv);
 #endif
@@ -501,14 +501,17 @@ void socket_handler(const int new_fd
       } else {
         TESTPRINT("method: '%s'\n", method);
         if (strcmp(method, "GET")) {  //methods are case-sensitive
-          // something other than GET
-          if (strcmp(method, "POST")) {
-            // something other than GET or POST, possibly even non-HTTP
-            syslog(LOG_WARNING, "Sending HTTP 501 response for unknown method or non-SSL, non-HTTP request: %s", method);
-            pipedata.status = SEND_BAD;
-          } else {
+          // something other than GET - send 501 response
+          if (!strcmp(method, "POST")) {
             // POST
             pipedata.status = SEND_POST;
+          } else if (!strcmp(method, "HEAD")) {
+            // HEAD (TODO: send header of what the actual response type would be?)
+            pipedata.status = SEND_HEAD;
+          } else {
+            // something else, possibly even non-HTTP
+            syslog(LOG_WARNING, "Sending HTTP 501 response for unknown HTTP method or non-SSL, non-HTTP request: %s", method);
+            pipedata.status = SEND_BAD;
           }
           TESTPRINT("Sending 501 response\n");
           response = http501;
