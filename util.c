@@ -1,5 +1,12 @@
 #include "util.h"
 
+// make gcc happy
+#ifdef DEBUG
+void dummy() {
+  SET_LINE_NUMBER(__LINE__)
+}
+#endif
+
 // stats data
 // note that child processes inherit a snapshot copy
 // public data (should probably change to a struct)

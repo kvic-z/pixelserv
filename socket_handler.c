@@ -349,15 +349,10 @@ double elapsed_time_msec(const struct timespec start_time) {
 }
 
 #ifdef DEBUG
-static unsigned long LINE_NUMBER = __LINE__;
-# define SET_LINE_NUMBER(x) {\
-  LINE_NUMBER = x;\
-}
-
 void child_signal_handler(int sig)
 {
   if (sig != SIGTERM
-   && sig != SIGUSR1) {
+   && sig != SIGUSR2) {
     syslog(LOG_WARNING, "Child process ignoring unsupported signal number: %d", sig);
     return;
   }
@@ -367,7 +362,7 @@ void child_signal_handler(int sig)
     signal(SIGTERM, SIG_IGN);
   }
 
-  syslog(LOG_INFO, "Child process caught signal %d near line number %lu", sig, LINE_NUMBER);
+  syslog(LOG_INFO, "Child process caught signal %d near line number %lu of file %s", sig, LINE_NUMBER, __FILE__);
 
   if (sig == SIGTERM) {
     // exit program on SIGTERM
@@ -389,7 +384,6 @@ void child_signal_handler(int sig)
 }
 
 #else
-# define SET_LINE_NUMBER(x)
 # define TIME_CHECK(x,y...)
 #endif //DEBUG
 
@@ -439,8 +433,8 @@ void socket_handler(const int new_fd
 
     // set signal handler for info
     sa.sa_flags = SA_RESTART; // prevent EINTR from interrupted library calls
-    if (sigaction(SIGUSR1, &sa, NULL)) {
-      syslog(LOG_WARNING, "sigaction(SIGUSR1) reported error: %m");
+    if (sigaction(SIGUSR2, &sa, NULL)) {
+      syslog(LOG_WARNING, "sigaction(SIGUSR2) reported error: %m");
     }
   }
 

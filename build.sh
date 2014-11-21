@@ -4,7 +4,8 @@ PREFIX=""
 # Tomato cross-compiler toolchain
 #PREFIX="mipsel-uclibc-"
 # UPX compressor
-UPX="../upx/upx -9"
+#UPX="../upx/upx -9"
+UPX="upx -9"
 
 SRC="util.c socket_handler.c pixelserv.c"
 OUT=dist/pixelserv

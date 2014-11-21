@@ -22,27 +22,37 @@
 void signal_handler(int sig)
 {
   if (sig != SIGTERM
-   && sig != SIGUSR1) {
+   && sig != SIGUSR1
+#ifdef DEBUG
+   && sig != SIGUSR2
+#endif
+  ) {
     syslog(LOG_WARNING, "Ignoring unsupported signal number: %d", sig);
     return;
   }
+#ifdef DEBUG
+  if (sig == SIGUSR2) {
+    syslog(LOG_INFO, "Main process caught signal %d near line number %lu of file %s", sig, LINE_NUMBER, __FILE__);
+  } else {
+#endif
+    if (sig == SIGTERM) {
+      // Ignore this signal while we are quitting
+      signal(SIGTERM, SIG_IGN);
+    }
 
-  if (sig == SIGTERM) {
-    // Ignore this signal while we are quitting
-    signal(SIGTERM, SIG_IGN);
+    // log stats
+    char* stats_string = get_stats(0, 0);
+    syslog(LOG_INFO, "%s", stats_string);
+    free(stats_string);
+
+    if (sig == SIGTERM) {
+      // exit program on SIGTERM
+      syslog(LOG_NOTICE, "exit on SIGTERM");
+      exit(EXIT_SUCCESS);
+    }
+#ifdef DEBUG
   }
-
-  // log stats
-  char* stats_string = get_stats(0, 0);
-  syslog(LOG_INFO, "%s", stats_string);
-  free(stats_string);
-
-  if (sig == SIGTERM) {
-    // exit program on SIGTERM
-    syslog(LOG_NOTICE, "exit on SIGTERM");
-    exit(EXIT_SUCCESS);
-  }
-
+#endif
   return;
 }
 
@@ -107,6 +117,8 @@ int main (int argc, char *argv[]) // program start
   int warning_time = 0;
 #endif //DEBUG
 
+  SET_LINE_NUMBER(__LINE__);
+
   // command line arguments processing
   for (i = 1; i < argc && error == 0; ++i) {
     if (argv[i][0] == '-') {
@@ -168,6 +180,8 @@ int main (int argc, char *argv[]) // program start
     } // -
   } // for
 
+  SET_LINE_NUMBER(__LINE__);
+
   if (error) {
     printf("Usage:%s"
            " [IP No/hostname (all)]"
@@ -202,6 +216,8 @@ int main (int argc, char *argv[]) // program start
     exit(EXIT_FAILURE);
   }
 
+  SET_LINE_NUMBER(__LINE__);
+
   openlog("pixelserv", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
   version_string = get_version(argv[0]);
   if (version_string) {
@@ -211,12 +227,16 @@ int main (int argc, char *argv[]) // program start
     exit(EXIT_FAILURE);
   }
 
+  SET_LINE_NUMBER(__LINE__);
+
 #ifndef TEST
   if (!do_foreground && daemon(0, 0)) {
     syslog(LOG_ERR, "failed to daemonize, exit: %m");
     exit(EXIT_FAILURE);
   }
 #endif
+
+  SET_LINE_NUMBER(__LINE__);
 
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_INET;  // AF_UNSPEC - AF_INET restricts to IPV4
@@ -232,6 +252,8 @@ int main (int argc, char *argv[]) // program start
 
   // clear the set
   FD_ZERO(&readfds);
+
+  SET_LINE_NUMBER(__LINE__);
 
   for (i = 0; i < num_ports; i++) {
     port = ports[i];
@@ -259,6 +281,8 @@ int main (int argc, char *argv[]) // program start
       exit(EXIT_FAILURE);
     }
 
+    SET_LINE_NUMBER(__LINE__);
+
     sockfds[i] = sockfd;
     // add descriptor to the set
     FD_SET(sockfd, &readfds);
@@ -268,6 +292,8 @@ int main (int argc, char *argv[]) // program start
   }
 
   freeaddrinfo(servinfo); // all done with this structure
+
+  SET_LINE_NUMBER(__LINE__);
 
   // set up signal handling
   {
@@ -294,7 +320,17 @@ int main (int argc, char *argv[]) // program start
       syslog(LOG_ERR, "SIGUSR1 %m");
       exit(EXIT_FAILURE);
     }
+#ifdef DEBUG
+    // set signal handler for debug
+    sa.sa_flags = SA_RESTART; // prevent EINTR from interrupted library calls
+    if (sigaction(SIGUSR2, &sa, NULL)) {
+      syslog(LOG_ERR, "SIGUSR2 %m");
+      exit(EXIT_FAILURE);
+    }
+#endif
   }
+
+  SET_LINE_NUMBER(__LINE__);
 
 #ifdef DROP_ROOT // no longer fatal error if doesn't work
   if ( (pw = getpwnam(user)) == NULL ) {
@@ -304,6 +340,8 @@ int main (int argc, char *argv[]) // program start
     syslog(LOG_WARNING, "setuid %d: %m", pw->pw_uid);
   }
 #endif
+
+  SET_LINE_NUMBER(__LINE__);
 
   for (i = 0; i < num_ports; i++) {
     port = ports[i];
@@ -318,6 +356,8 @@ int main (int argc, char *argv[]) // program start
   //  SIGPIPE signals
   signal(SIGPIPE, SIG_IGN);
 
+  SET_LINE_NUMBER(__LINE__);
+
   // open pipe for children to use for writing data back to main
   if (pipe(pipefd) == -1) {
     syslog(LOG_ERR, "pipe() error: %m");
@@ -329,6 +369,8 @@ int main (int argc, char *argv[]) // program start
     syslog(LOG_ERR, "fcntl() error setting O_NONBLOCK on read end of pipe: %m");
     exit(EXIT_FAILURE);
   }
+
+  SET_LINE_NUMBER(__LINE__);
 
   // FYI, this shows 4096 on mips K26
   MYLOG(LOG_INFO, "opened pipe with buffer size %d bytes", PIPE_BUF);
@@ -346,8 +388,13 @@ int main (int argc, char *argv[]) // program start
 
   sin_size = sizeof their_addr;
 
+  SET_LINE_NUMBER(__LINE__);
+
   // main accept() loop
   while(1) {
+
+    SET_LINE_NUMBER(__LINE__);
+
     // only call select() if we have something more to process
     if (select_rv <= 0) {
       // select() modifies its fd set, so make a working copy
@@ -367,6 +414,8 @@ int main (int argc, char *argv[]) // program start
       }
     }
 
+    SET_LINE_NUMBER(__LINE__);
+
     // find first socket descriptor that is ready to read (if any)
     // note that even though multiple sockets may be ready, we only process one
     //  per loop iteration; subsequent ones will be handled on subsequent passes
@@ -379,6 +428,8 @@ int main (int argc, char *argv[]) // program start
         break;
       }
     }
+
+    SET_LINE_NUMBER(__LINE__);
 
     // if select() didn't return due to a socket connection, check for pipe I/O
     if (!sockfd && FD_ISSET(pipefd[0], &selectfds)) {
@@ -418,6 +469,8 @@ int main (int argc, char *argv[]) // program start
             syslog(LOG_ERR, "Socket handler child process reported unknown response value: %d", pipedata.status);
         }
 
+        SET_LINE_NUMBER(__LINE__);
+
         // count only positive receive sizes
         if (pipedata.rx_total <= 0) {
           MYLOG(LOG_WARNING, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
@@ -443,6 +496,8 @@ int main (int argc, char *argv[]) // program start
       continue;
     }
 
+    SET_LINE_NUMBER(__LINE__);
+
     // if select() returned but no fd's of interest were found, give up
     // note that this is bad because it means that select() will probably never
     //  block again because something will always be waiting on the unhandled
@@ -465,13 +520,17 @@ int main (int argc, char *argv[]) // program start
 
     count++;
 
+    SET_LINE_NUMBER(__LINE__);
+
     if (fork() == 0) {
       // this is the child process
       //
       // detach child from signal handler
       signal(SIGTERM, SIG_DFL); // default is kill?
       signal(SIGUSR1, SIG_DFL); // default is ignore?
-
+#ifdef DEBUG
+      signal(SIGUSR2, SIG_DFL); // default is ignore?
+#endif
       // close unneeded file handles inherited from the parent process
       close(sockfd);
 
@@ -500,9 +559,13 @@ int main (int argc, char *argv[]) // program start
       exit(0);
     } // end of forked child process
 
+    SET_LINE_NUMBER(__LINE__);
+
     // this is guaranteed to be the parent process, as the child calls exit()
     //  above when it's done instead of proceeding to this point
     close(new_fd);  // parent doesn't need this
+
+    SET_LINE_NUMBER(__LINE__);
 
     // reap any zombie child processes that have exited
     // irony note: I wrote this while watching The Walking Dead :p
@@ -511,6 +574,8 @@ int main (int argc, char *argv[]) // program start
         syslog(LOG_WARNING, "waitpid() reported error: %m");
       }
     }
+
+    SET_LINE_NUMBER(__LINE__);
   } // end of perpetual accept() loop
 //  Never get here while(1)
 //  return (EXIT_SUCCESS);

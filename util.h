@@ -22,7 +22,7 @@
 #include <time.h>               // struct timespec, clock_gettime(), difftime()
 
 // preprocessor defines
-#define VERSION "V35.HZ11WIP11"
+#define VERSION "V35.HZ11WIP12"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -53,6 +53,15 @@
 #else  // rely on optimiser to remove redundant code
 # define MYLOG(x,y...)
 #endif
+
+#ifdef DEBUG
+static unsigned long LINE_NUMBER = __LINE__;
+# define SET_LINE_NUMBER(x) {\
+  LINE_NUMBER = x;\
+}
+#else
+# define SET_LINE_NUMBER(x)
+#endif //DEBUG
 
 // cross-thread count variables
 extern volatile sig_atomic_t count; // req
