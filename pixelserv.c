@@ -272,6 +272,7 @@ int main (int argc, char *argv[]) // program start
 #endif
       || (bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen))
       || (listen(sockfd, BACKLOG))
+      || (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK))  // set non-blocking mode
        ) {
 #ifdef IF_MODE
       syslog(LOG_ERR, "Abort: %m - %s:%s:%s", ifname, ip_addr, port);
@@ -289,9 +290,14 @@ int main (int argc, char *argv[]) // program start
     if (sockfd > nfds) {
       nfds = sockfd;
     }
-  }
 
-  freeaddrinfo(servinfo); // all done with this structure
+    freeaddrinfo(servinfo); // all done with this structure
+#ifdef IF_MODE
+    syslog(LOG_NOTICE, "Listening on %s:%s:%s", ifname, ip_addr, port);
+#else
+    syslog(LOG_NOTICE, "Listening on %s:%s", ip_addr, port);
+#endif
+  }
 
   SET_LINE_NUMBER(__LINE__);
 
@@ -342,15 +348,6 @@ int main (int argc, char *argv[]) // program start
 #endif
 
   SET_LINE_NUMBER(__LINE__);
-
-  for (i = 0; i < num_ports; i++) {
-    port = ports[i];
-#ifdef IF_MODE
-    syslog(LOG_NOTICE, "Listening on %s:%s:%s", ifname, ip_addr, port);
-#else
-    syslog(LOG_NOTICE, "Listening on %s:%s", ip_addr, port);
-#endif
-  }
 
   // cause failed pipe I/O calls to result in error return values instead of
   //  SIGPIPE signals
@@ -514,7 +511,15 @@ int main (int argc, char *argv[]) // program start
 
     new_fd = accept(sockfd, (struct sockaddr *) &their_addr, &sin_size);
     if (new_fd < 0) {
-      syslog(LOG_WARNING, "accept: %m");
+      if (errno == EAGAIN
+       || errno == EWOULDBLOCK) {
+        // client closed connection before we got a chance to accept it
+        MYLOG(LOG_INFO, "accept: %m");
+        count++;
+        cls++;
+      } else {
+        syslog(LOG_WARNING, "accept: %m");
+      }
       continue;
     }
 
