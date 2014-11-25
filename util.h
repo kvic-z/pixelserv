@@ -22,7 +22,7 @@
 #include <time.h>               // struct timespec, clock_gettime(), difftime()
 
 // preprocessor defines
-#define VERSION "V35.HZ11WIP13"
+#define VERSION "V35.HZ11"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -98,7 +98,7 @@ extern volatile sig_atomic_t hed;
 // generate version string
 // note that caller is expected to call free()
 //  on the return value when done using it
-char* get_version(const char* const program_name);
+char* get_version(int argc, char* argv[]);
 
 // stats string generator
 // NOTES:

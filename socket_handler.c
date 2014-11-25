@@ -387,7 +387,9 @@ void child_signal_handler(int sig)
 # define TIME_CHECK(x,y...)
 #endif //DEBUG
 
-void socket_handler(const int new_fd
+void socket_handler(int argc
+                   ,char* argv[]
+                   ,const int new_fd
                    ,const time_t select_timeout
                    ,const int pipefd
                    ,const char* const stats_url
@@ -522,7 +524,7 @@ void socket_handler(const int new_fd
             syslog(LOG_ERR, "client did not specify URL for GET request");
           } else if (!strcmp(path, stats_url)) {
             pipedata.status = SEND_STATS;
-            version_string = get_version(program_name);
+            version_string = get_version(argc, argv);
             stat_string = get_stats(1, 0);
             rsize = asprintf(&aspbuf,
                              "%s%d%s%s%s<br>%s%s",
@@ -538,7 +540,7 @@ void socket_handler(const int new_fd
             response = aspbuf;
           } else if (!strcmp(path, stats_text_url)) {
             pipedata.status = SEND_STATSTEXT;
-            version_string = get_version(program_name);
+            version_string = get_version(argc, argv);
             stat_string = get_stats(0, 1);
             rsize = asprintf(&aspbuf,
                              "%s%d%s%s\n%s%s",

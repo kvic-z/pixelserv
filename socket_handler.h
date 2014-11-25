@@ -33,7 +33,9 @@ typedef struct {
     double run_time;
 } response_struct;
 
-void socket_handler(const int new_fd
+void socket_handler(int argc
+                   ,char* argv[]
+                   ,const int new_fd
                    ,const time_t select_timeout
                    ,const int pipefd
                    ,const char* const stats_url

@@ -68,7 +68,7 @@ void *get_in_addr(struct sockaddr *sa)
 }
 #endif
 
-int main (int argc, char *argv[]) // program start
+int main (int argc, char* argv[]) // program start
 {
   int sockfd = 0;  // listen on sock_fd
   int new_fd = 0;  // new connection on new_fd
@@ -148,7 +148,7 @@ int main (int argc, char *argv[]) // program start
           case 'o':
             errno = 0;
             select_timeout = strtol(argv[i], NULL, 10);
-            if (errno) {
+            if (errno || select_timeout <= 0) {
               error = 1;
             }
           continue;
@@ -165,7 +165,13 @@ int main (int argc, char *argv[]) // program start
           case 'u': user = argv[i];                           continue;
 #endif
 #ifdef DEBUG
-          case 'w': warning_time = strtol(argv[i], NULL, 10); continue;
+          case 'w':
+            errno = 0;
+            warning_time = strtol(argv[i], NULL, 10);
+            if (errno || warning_time <= 0) {
+              error = 1;
+            }
+          continue;
 #endif //DEBUG
           default:  error = 1;                                continue;
         }
@@ -219,7 +225,7 @@ int main (int argc, char *argv[]) // program start
   SET_LINE_NUMBER(__LINE__);
 
   openlog("pixelserv", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
-  version_string = get_version(argv[0]);
+  version_string = get_version(argc, argv);
   if (version_string) {
     syslog(LOG_INFO, "%s", version_string);
     free(version_string);
@@ -549,7 +555,9 @@ int main (int argc, char *argv[]) // program start
       printf("server: got connection from %s\n", ntop_buf);
 #endif
       // call handler function
-      socket_handler(new_fd
+      socket_handler(argc
+                    ,argv
+                    ,new_fd
                     ,select_timeout
                     ,pipefd[1]
                     ,stats_url
