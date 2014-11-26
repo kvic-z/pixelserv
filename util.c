@@ -59,18 +59,21 @@ char* get_version(int argc, char* argv[]) {
   // determine total size of all arguments
   for (i = 1; i < argc; ++i)
   {
-    arglen[i] = strlen(argv[i]);
+    arglen[i] = strlen(argv[i]) + 1; // add 1 for leading space
     optlen += arglen[i];
   }
-  // allocate a buffer to hold all arguments
-  optbuf = malloc((optlen * sizeof(char)) + 1);
+  if (optlen > 0) {
+    // allocate a buffer to hold all arguments
+    optbuf = malloc((optlen * sizeof(char)) + 1);
+  }
   if (optbuf) {
     for (i = 1, optlen = 0; i < argc; ++i) {
-      strncpy(optbuf + optlen, argv[i], arglen[i]);
+      optbuf[optlen] = ' '; // prepend a space to each argument
+      strncpy(optbuf + optlen + 1, argv[i], arglen[i]);
       optlen += arglen[i];
     }
     optbuf[optlen] = '\0';
-    asprintf(&retbuf, "%s version: %s compiled: %s options: %s", argv[0], VERSION, __DATE__ " " __TIME__, optbuf);
+    asprintf(&retbuf, "%s version: %s compiled: %s options:%s", argv[0], VERSION, __DATE__ " " __TIME__, optbuf);
     free(optbuf);
   } else {
     asprintf(&retbuf, "%s version: %s compiled: %s options: <malloc() error>", argv[0], VERSION, __DATE__ " " __TIME__);
