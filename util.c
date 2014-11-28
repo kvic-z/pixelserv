@@ -45,7 +45,7 @@ static struct timespec startup_time = {0, 0};
 char* get_version(int argc, char* argv[]) {
   char* retbuf = NULL;
   char* optbuf = NULL;
-  unsigned int optlen = 0, i = 1;
+  unsigned int optlen = 0, i = 1, freeoptbuf = 0;
   unsigned int arglen[argc];
 
   // capture startup_time if not yet set
@@ -65,18 +65,27 @@ char* get_version(int argc, char* argv[]) {
   if (optlen > 0) {
     // allocate a buffer to hold all arguments
     optbuf = malloc((optlen * sizeof(char)) + 1);
-  }
-  if (optbuf) {
-    for (i = 1, optlen = 0; i < argc; ++i) {
-      optbuf[optlen] = ' '; // prepend a space to each argument
-      strncpy(optbuf + optlen + 1, argv[i], arglen[i]);
-      optlen += arglen[i];
+    if (optbuf) {
+      freeoptbuf = 1;
+      // concatenate arguments into buffer
+      for (i = 1, optlen = 0; i < argc; ++i) {
+        optbuf[optlen] = ' '; // prepend a space to each argument
+        strncpy(optbuf + optlen + 1, argv[i], arglen[i]);
+        optlen += arglen[i];
+      }
+      optbuf[optlen] = '\0';
+    } else {
+      optbuf = " <malloc error>";
     }
-    optbuf[optlen] = '\0';
-    asprintf(&retbuf, "%s version: %s compiled: %s options:%s", argv[0], VERSION, __DATE__ " " __TIME__, optbuf);
-    free(optbuf);
   } else {
-    asprintf(&retbuf, "%s version: %s compiled: %s options: <malloc() error>", argv[0], VERSION, __DATE__ " " __TIME__);
+    optbuf = " <none>";
+  }
+
+  asprintf(&retbuf, "%s version: %s compiled: %s options:%s", argv[0], VERSION, __DATE__ " " __TIME__, optbuf);
+
+  if (freeoptbuf) {
+    free(optbuf);
+    freeoptbuf = 0;
   }
 
   return retbuf;
