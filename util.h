@@ -22,7 +22,7 @@
 #include <time.h>               // struct timespec, clock_gettime(), difftime()
 
 // preprocessor defines
-#define VERSION "V35.HZ11FIX2"
+#define VERSION "V35.HZ12WIP1"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -94,6 +94,10 @@ extern volatile sig_atomic_t pst;
 extern volatile sig_atomic_t hed;
 
 // util.c functions
+
+// encapsulation of clock_gettime() to perform one-time degradation of source
+//  when necessary
+void get_time(struct timespec *time);
 
 // generate version string
 // note that caller is expected to call free()

@@ -327,15 +327,13 @@ double elapsed_time_msec(const struct timespec start_time) {
   struct timespec current_time = {0, 0};
   struct timespec diff_time = {0, 0};
 
-  if (!start_time.tv_sec) {
+  if (!start_time.tv_sec &&
+      !start_time.tv_nsec) {
     MYLOG(LOG_WARNING, "check_time(): returning because start_time not set");
     return -1.0;
   }
 
-  if (clock_gettime(CLOCK_MONOTONIC, &current_time) < 0) {
-    syslog(LOG_WARNING, "clock_gettime() reported failure getting current time: %m");
-    return -1.0;
-  }
+  get_time(&current_time);
 
   diff_time.tv_sec = difftime(current_time.tv_sec, start_time.tv_sec) + 0.5;
   diff_time.tv_nsec = current_time.tv_nsec - start_time.tv_nsec;
@@ -444,9 +442,7 @@ void socket_handler(int argc
 #endif
 
   // note the time
-  if (clock_gettime(CLOCK_MONOTONIC, &start_time) < 0) {
-    syslog(LOG_WARNING, "clock_gettime() reported failure getting start time: %m");
-  }
+  get_time(&start_time);
 
   // the socket is connected, but we need to perform a check for incoming data
   // since we're using blocking checks, we first want to set a timeout

@@ -41,6 +41,22 @@ volatile sig_atomic_t hed = 0;
 
 // private data
 static struct timespec startup_time = {0, 0};
+static clockid_t clock_source = CLOCK_MONOTONIC;
+
+void get_time(struct timespec *time) {
+  if (clock_gettime(clock_source, time) < 0) {
+    if (errno == EINVAL &&
+        clock_source == CLOCK_MONOTONIC) {
+      clock_source = CLOCK_REALTIME;
+      syslog(LOG_WARNING, "clock_gettime() reports CLOCK_MONOTONIC not supported; switching to less accurate CLOCK_REALTIME");
+      get_time(time); // try again with new clock setting
+    } else {
+      // this should never happen
+      syslog(LOG_ERR, "clock_gettime() reported failure getting time: %m");
+      time->tv_sec = time->tv_nsec = 0;
+    }
+  }
+}
 
 char* get_version(int argc, char* argv[]) {
   char* retbuf = NULL;
@@ -50,10 +66,7 @@ char* get_version(int argc, char* argv[]) {
 
   // capture startup_time if not yet set
   if (!startup_time.tv_sec) {
-    if (clock_gettime(CLOCK_MONOTONIC, &startup_time) < 0) {
-      syslog(LOG_ERR, "clock_gettime() reported failure getting startup time: %m");
-      return NULL;
-    }
+    get_time(&startup_time);
   }
 
   // determine total size of all arguments
@@ -96,10 +109,7 @@ char* get_stats(const int sta_offset, const int stt_offset) {
   struct timespec current_time;
   double uptime;
 
-  if (clock_gettime(CLOCK_MONOTONIC, &current_time) < 0) {
-    syslog(LOG_WARNING, "clock_gettime() reported failure getting current time: %m");
-    current_time = startup_time;
-  }
+  get_time(&current_time);
   uptime = difftime(current_time.tv_sec, startup_time.tv_sec);
 
   asprintf(&retbuf
