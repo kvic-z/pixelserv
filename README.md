@@ -5,6 +5,27 @@ Tiny webserver that responds to all requests with "nothing".  Particularly usefu
 
 This fork merges the mstombs and h0tw1r3 forks back together, and adds some additional cleanups and enhancements (most notably a stats reporting URL and finer-grained stats collection, as well as command-line configurable timeouts).
 
+Releases
+--------
+
+Starting with HZ12, binary releases are available in the following flavors:
+* x86 and x86-64:
+  * PC versions (32- and 64-bit, respectively)
+  * Built natively in Xubuntu LTS x86_64
+  * Statically-linked versions are not provided because glibc has forced dynamic dependencies.
+* mips:
+  * MIPS K24 (for older routers such as WRT54G)
+  * Built via Shibby brcm uclibc cross-compiler toolchain
+  * The dynamically-linked versions should be highly-compatible with various K24 and K26 Linux router firmwares.
+* tomatoware:
+  * MIPS K26 (for newer routers such as RT-N16 and RT-N66U)
+  * Built natively on RT-N66U via Tomatoware
+  * The statically-linked versions use newer libraries from Tomatoware than are provided by most firmwares.
+
+ARM builds are currently provided unofficially by the linksysinfo.org forum community.
+
+Also, jerrm has been graciously providing recent releases of both Adblock and pixelserv here, including ARM builds: http://tomato-adblock.weebly.com/
+
 Stats
 -----
 

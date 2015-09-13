@@ -523,7 +523,7 @@ void socket_handler(int argc
             version_string = get_version(argc, argv);
             stat_string = get_stats(1, 0);
             rsize = asprintf(&aspbuf,
-                             "%s%d%s%s%s<br>%s%s",
+                             "%s%u%s%s%s<br>%s%s",
                              httpstats1,
                              statsbaselen + strlen(version_string) + 4 + strlen(stat_string),
                              httpstats2,
@@ -539,7 +539,7 @@ void socket_handler(int argc
             version_string = get_version(argc, argv);
             stat_string = get_stats(0, 1);
             rsize = asprintf(&aspbuf,
-                             "%s%d%s%s\n%s%s",
+                             "%s%u%s%s\n%s%s",
                              txtstats1,
                              strlen(version_string) + 1 + strlen(stat_string) + 2,
                              txtstats2,
@@ -769,7 +769,7 @@ void socket_handler(int argc
   } else if (rv == 0) {
     syslog(LOG_WARNING, "write() reports no data written to pipe but no error");
   } else if (rv != sizeof(pipedata)) {
-    syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %d", rv, sizeof(pipedata));
+    syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %u", rv, sizeof(pipedata));
   }
 
   TIME_CHECK("pipe write()");

@@ -443,7 +443,7 @@ int main (int argc, char* argv[]) // program start
       } else if (rv == 0) {
         syslog(LOG_WARNING, "pipe read() returned zero");
       } else if (rv != sizeof(pipedata)) {
-        syslog(LOG_WARNING, "pipe read() got %d bytes, but %d bytes were expected - discarding", rv, sizeof(pipedata));
+        syslog(LOG_WARNING, "pipe read() got %d bytes, but %u bytes were expected - discarding", rv, sizeof(pipedata));
       } else {
         // process response type
         switch (pipedata.status) {

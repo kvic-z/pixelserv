@@ -70,8 +70,7 @@ char* get_version(int argc, char* argv[]) {
   }
 
   // determine total size of all arguments
-  for (i = 1; i < argc; ++i)
-  {
+  for (i = 1; i < argc; ++i) {
     arglen[i] = strlen(argv[i]) + 1; // add 1 for leading space
     optlen += arglen[i];
   }
@@ -94,7 +93,9 @@ char* get_version(int argc, char* argv[]) {
     optbuf = " <none>";
   }
 
-  asprintf(&retbuf, "%s version: %s compiled: %s options:%s", argv[0], VERSION, __DATE__ " " __TIME__, optbuf);
+  if (asprintf(&retbuf, "%s version: %s compiled: %s options:%s", argv[0], VERSION, __DATE__ " " __TIME__, optbuf) < 1) {
+    retbuf = " <asprintf error>";
+  }
 
   if (freeoptbuf) {
     free(optbuf);
@@ -112,10 +113,12 @@ char* get_stats(const int sta_offset, const int stt_offset) {
   get_time(&current_time);
   uptime = difftime(current_time.tv_sec, startup_time.tv_sec);
 
-  asprintf(&retbuf
+  if (asprintf(&retbuf
          , "%.0f uts, %d req, %d avg, %d rmx, %d tav, %d tmx, %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif, %d bad, %d txt, %d jpg, %d png, %d swf, %d ico, %d ssl, %d sta, %d stt, %d 204, %d rdr, %d pst, %d hed"
          , uptime, count, avg, rmx, tav, tmx, err, tmo, cls, nou, pth, nfe, ufe, gif, bad, txt, jpg, png, swf, ico, ssl, sta + sta_offset, stt + stt_offset, noc, rdr, pst, hed
-  );
+  ) < 1) {
+    retbuf = " <asprintf error>";
+  }
 
   return retbuf;
 }
