@@ -3,6 +3,10 @@
 
 #include <ctype.h> // isprint(), isdigit(), tolower()
 
+#include <sys/stat.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 // private data for socket_handler() use
 
   // HTTP 204 No Content for Google generate_204 URLs
@@ -385,6 +389,66 @@ void child_signal_handler(int sig)
 # define TIME_CHECK(x,y...)
 #endif //DEBUG
 
+extern int access_log;
+extern const char *tls_pem;
+extern int tls_ports[];
+extern int num_tls_ports;
+
+static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
+{
+    SSL_CTX *sslctx;
+    tlsext_cb_arg_struct *tlsext_cb_arg = arg;
+    const char* pem_dir = tlsext_cb_arg->tls_pem;
+    tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name);
+    char servername[255];
+    strcpy(servername, SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name));
+#ifdef DEBUG
+    printf("https request for hostname: %s\n", servername);
+#endif
+    int dot_count=0;
+    char *pem_file = strchr(servername, '.');
+    
+    while(pem_file != NULL){
+        dot_count++;
+        pem_file = strchr(pem_file+1, '.');
+    }
+    if (dot_count > 1){
+        pem_file = strchr(servername, '.');
+        *(--pem_file) = '_';
+    } else
+        pem_file = servername;    
+#ifdef DEBUG
+    printf("pem file name: %s\n", pem_file);
+#endif
+    char full_pem_path[1024];
+    strcpy(full_pem_path, pem_dir);
+    strcat(full_pem_path, "/");
+    strcat(full_pem_path, pem_file);
+#ifdef DEBUG
+    printf("full_pem_path: %s\n",full_pem_path);
+#endif
+    struct stat st;
+    int result = stat(full_pem_path, &st);
+    if(result != 0){
+        syslog(LOG_NOTICE, "%s %s missing", tlsext_cb_arg->servername, pem_file);        
+        SSL_shutdown(cSSL);
+        SSL_free(cSSL);
+        exit(1);
+    }
+
+    sslctx = SSL_CTX_new(TLSv1_2_server_method());
+    SSL_CTX_set_options(sslctx, SSL_OP_SINGLE_DH_USE);
+    if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0 ||
+        SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0) {
+        syslog(LOG_NOTICE, "Cannot use %s\n",full_pem_path);
+        SSL_shutdown(cSSL);
+        SSL_free(cSSL);
+        exit(1);
+    }
+    SSL_set_SSL_CTX(cSSL, sslctx);
+    return SSL_TLSEXT_ERR_OK;
+}
+
 void socket_handler(int argc
                    ,char* argv[]
                    ,const int new_fd
@@ -402,11 +466,12 @@ void socket_handler(int argc
   // NOTES:
   // - from here on, all exit points should be counted or at least logged
   // - exit() should not be called from the child process
-  response_struct pipedata = {FAIL_GENERAL, 0, 0.0};
+  response_struct pipedata = {FAIL_GENERAL, 0, 0.0, 0};
   struct timeval timeout = {select_timeout, 0};
   int rv = 0;
   char buf[CHAR_BUF_SIZE + 1];
   char *bufptr = NULL;
+  char* buf_backup = NULL;
   char *url = NULL;
   char* aspbuf = NULL;
   const char* response = httpnulltext;
@@ -414,6 +479,8 @@ void socket_handler(int argc
   char* version_string = NULL;
   char* stat_string = NULL;
   struct timespec start_time = {0, 0};
+  int ssl = 0;
+
 #ifdef DEBUG
   double time_msec = 0.0;
   int do_warning = (warning_time > 0);
@@ -454,9 +521,63 @@ void socket_handler(int argc
   //  period, in case the client is messing with us
 
   SET_LINE_NUMBER(__LINE__);
+  
+    // determine https port or not
+    {
+        struct sockaddr_storage sin_addr;
+        socklen_t sin_addr_len = sizeof(sin_addr);
+        char port[NI_MAXSERV] = {'\0'};
+    
+        getsockname(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
+        if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, NULL, 0, port, \
+                    sizeof port, NI_NUMERICSERV) != 0)
+            perror("getnameinfo");
+    
+        int i;
+        for(i=0; i<num_tls_ports; i++)
+            if(atoi(port) == tls_ports[i]) ssl = 1;
+#ifdef DEBUG    
+        printf("socket handler port number %s\n", port);
 
-  // read some data from the socket to buf
-  rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+        char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
+        getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
+        if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
+                sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
+            perror("getnameinfo");    
+
+        printf("socket handler Connection from %s\n", client_ip);
+#endif
+    }
+    
+    static SSL_CTX *sslctx = NULL;
+    SSL *cSSL = NULL;
+    tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL };
+  
+    if(ssl){
+        if(sslctx == NULL) {
+            sslctx = SSL_CTX_new(TLSv1_2_server_method());
+            SSL_CTX_set_options(sslctx, SSL_OP_SINGLE_DH_USE);
+            SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
+            SSL_CTX_set_tlsext_servername_arg(sslctx, &tlsext_cb_arg);
+        }
+        cSSL = SSL_new(sslctx);
+        SSL_set_fd(cSSL, new_fd );
+        int ssl_err = SSL_accept(cSSL);
+
+        if(ssl_err <= 0) {
+            SSL_shutdown(cSSL);
+            SSL_free(cSSL);
+            exit(1);
+        }
+        TIME_CHECK("SSL setup");
+        rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
+        pipedata.ssl = 1;
+        TESTPRINT("SSL handshake request received\n");
+    } else {
+        // read some data from the socket to buf
+        rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+    }
+
   if (rv < 0) {               // some kind of error
     if (errno == ECONNRESET) {
       MYLOG(LOG_WARNING, "recv() reported connection error: %m");
@@ -480,19 +601,16 @@ void socket_handler(int argc
 #ifdef HEX_DUMP
     hex_dump(buf, rv);
 #endif
-    if (buf[0] == '\x16') {
-      TESTPRINT("SSL handshake request received\n");
-      pipedata.status = SEND_SSL;
-      response = SSL_no;
-      rsize = sizeof SSL_no - 1;
+    buf_backup = malloc(sizeof(buf));
+    memcpy(buf_backup, buf, sizeof(buf));
+    
+    char *req = strtok_r(buf, "\r\n", &bufptr);
+    char *method = strtok(req, " ");
+    if (method == NULL) {
+      syslog(LOG_ERR, "client did not specify method");
     } else {
-      char *req = strtok_r(buf, "\r\n", &bufptr);
-      char *method = strtok(req, " ");
-      if (method == NULL) {
-        syslog(LOG_ERR, "client did not specify method");
-      } else {
-        TESTPRINT("method: '%s'\n", method);
-        if (strcmp(method, "GET")) {  //methods are case-sensitive
+      TESTPRINT("method: '%s'\n", method);
+      if (strcmp(method, "GET")) {  //methods are case-sensitive
           // something other than GET - send 501 response
           if (!strcmp(method, "POST")) {
             // POST
@@ -508,7 +626,7 @@ void socket_handler(int argc
           TESTPRINT("Sending 501 response\n");
           response = http501;
           rsize = sizeof http501 - 1;
-        } else {
+      } else {
           // GET
           // ----------------------------------------------
           // send default from here, no matter what happens
@@ -525,7 +643,7 @@ void socket_handler(int argc
             rsize = asprintf(&aspbuf,
                              "%s%u%s%s%s<br>%s%s",
                              httpstats1,
-                             statsbaselen + strlen(version_string) + 4 + strlen(stat_string),
+                             (unsigned int)(statsbaselen + strlen(version_string) + 4 + strlen(stat_string)),
                              httpstats2,
                              httpstats3,
                              version_string,
@@ -541,7 +659,7 @@ void socket_handler(int argc
             rsize = asprintf(&aspbuf,
                              "%s%u%s%s\n%s%s",
                              txtstats1,
-                             strlen(version_string) + 1 + strlen(stat_string) + 2,
+                             (unsigned int)(strlen(version_string) + 1 + strlen(stat_string) + 2),
                              txtstats2,
                              version_string,
                              stat_string,
@@ -651,7 +769,6 @@ void socket_handler(int argc
             }
           }
         }
-      }
     }
   }
 
@@ -667,10 +784,12 @@ void socket_handler(int argc
     SET_LINE_NUMBER(__LINE__);
 
     // only attempt to send response if we've chosen a valid response type
-    //
-    // send response
-    // this is currently a blocking call, so zero should not be returned
-    rv = send(new_fd, response, rsize, MSG_NOSIGNAL);
+    if (ssl)
+      rv = SSL_write(cSSL, response, rsize);
+    else
+      // this is currently a blocking call, so zero should not be returned
+      rv = send(new_fd, response, rsize, MSG_NOSIGNAL);
+    
     if (rv < 0) { // check for error message, but don't bother checking that all bytes sent
       if (errno == EPIPE || errno == ECONNRESET) {
         // client closed socket sometime after initial check
@@ -694,6 +813,30 @@ void socket_handler(int argc
 
   TIME_CHECK("response send()");
 
+    if (access_log) {
+        struct sockaddr_storage sin_addr;
+        socklen_t sin_addr_len = sizeof(sin_addr);
+        char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
+        
+        getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
+        if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
+                sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
+            perror("getnameinfo");    
+
+        char *req = strtok_r(buf_backup, "\r\n", &bufptr);
+        char *host = strtok_r(NULL, "\r\n", &bufptr);
+        strtok(host, ":");
+        host = strtok(NULL, "\r\n"); 
+        syslog(LOG_NOTICE, "%s:%s %s%s", client_ip, host, req, (tlsext_cb_arg.servername) ? " secure" : "");
+        
+        free(buf_backup);
+    }
+    
+    if(ssl){
+        SSL_shutdown(cSSL);
+        SSL_free(cSSL);
+    }
+    
   // signal the socket connection that we're done writing
   errno = 0;
   if (shutdown(new_fd, SHUT_WR) < 0) {
@@ -754,6 +897,7 @@ void socket_handler(int argc
   }
 
   TIME_CHECK("socket close()");
+  
 
   // store time delta in milliseconds
   pipedata.run_time = elapsed_time_msec(start_time);
@@ -769,7 +913,7 @@ void socket_handler(int argc
   } else if (rv == 0) {
     syslog(LOG_WARNING, "write() reports no data written to pipe but no error");
   } else if (rv != sizeof(pipedata)) {
-    syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %u", rv, sizeof(pipedata));
+    syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %u", rv, (unsigned int)sizeof(pipedata));
   }
 
   TIME_CHECK("pipe write()");

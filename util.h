@@ -20,9 +20,10 @@
 //#include <sys/types.h>        // doesn't seem to be needed
 #include <unistd.h>             // close(), setuid(), TEMP_FAILURE_RETRY, fork()
 #include <time.h>               // struct timespec, clock_gettime(), difftime()
+#include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "V35.HZ12"
+#define VERSION "V35.HZ12.Kc"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -33,6 +34,8 @@
 
 #define SECOND_PORT "443"
 #define MAX_PORTS 10
+#define MAX_TLS_PORTS 9         // PLEASE ENSURE MAX_TLS_PORTS < MAX_PORTS
+#define DEFAULT_PEM_PATH "/opt/var/cache/pixelserv"
 
 #ifdef DROP_ROOT
 # define DEFAULT_USER "nobody"  // nobody used by dnsmasq

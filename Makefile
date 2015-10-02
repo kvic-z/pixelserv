@@ -5,13 +5,19 @@ CC        := gcc
 OPTS      := -DDROP_ROOT -DIF_MODE
 SRCS      := util.c socket_handler.c pixelserv.c
 
+ROOT      := .
+CFLAGS    := -I$(ROOT)/openssl/include
+LDFLAGS    = -L$(ROOT)/openssl/$(ARCH)
+SHAREDLIB := -lssl -lcrypto -ldl
+STATICLIB  = $(ROOT)/openssl/$(ARCH)/libssl.a $(ROOT)/openssl/$(ARCH)/libcrypto.a
+
 # debug flags
-CFLAGS_D  := $(CFLAGS) -g -Wall
-LDFLAGS_D := $(LDFLAGS)
+CFLAGS_D   = $(CFLAGS) -g -Wall -DDEBUG -DTEST
+LDFLAGS_D  = $(LDFLAGS)
 
 # performance flags
-CFLAGS_P  := $(CFLAGS) -O3 -s -Wall -ffunction-sections -fdata-sections -fno-strict-aliasing
-LDFLAGS_P := $(LDFLAGS) -Wl,--gc-sections
+CFLAGS_P   = $(CFLAGS) -O3 -s -Wall -ffunction-sections -fdata-sections -fno-strict-aliasing
+LDFLAGS_P  = $(LDFLAGS) -Wl,--gc-sections
 
 # aggressive strip command
 # note that this breaks the x86 build on x86-64 for some reason
@@ -21,7 +27,7 @@ STRIP     := strip -s -R .note -R .comment -R .gnu.version -R .gnu.version_r
 UPX       := upx -9
 
 # packaging macros
-PFILES    := LICENSE README.md
+PFILES     = LICENSE README.md dist/$(DISTNAME).$(ARCH).*
 PVERSION  := $(shell grep VERSION util.h | awk '{print $$NF}' | sed 's|\"||g')
 PCMD      := zip
 
@@ -34,15 +40,15 @@ CC64      := $(CC) -m64
 # MIPS environment
 # I set my path ahead of time, so I've commented out the path command macro below
 MIPSTOOLS := /opt/brcm/hndtools-mipsel-uclibc/bin:/opt/brcm/hndtools-mipsel-linux/bin
-#MIPSPATH  := PATH=$(MIPSTOOLS):$(PATH)
+MIPSPATH  := PATH=$(MIPSTOOLS):$(PATH)
 MIPSREFIX := mipsel-uclibc-
 MIPSCC    := $(MIPSREFIX)$(CC)
 MIPSSTRIP := $(MIPSREFIX)$(STRIP)
 
 # ARM environment
-ARMTOOLS  := /usr/local/x-tools/arm-unknown-linux-gnueabihf/bin
-#ARMPATH   := PATH=$(ARMTOOLS):$(PATH)
-ARMPREFIX := arm-unknown-linux-gnueabihf-
+ARMTOOLS  := /opt/brcm-arm/bin
+ARMPATH   := PATH=$(ARMTOOLS):$(PATH)
+ARMPREFIX := arm-brcm-linux-uclibcgnueabi-
 ARMCC     := $(ARMPREFIX)$(CC)
 ARMSTRIP  := $(ARMPREFIX)$(STRIP)
 
@@ -56,7 +62,7 @@ ARMSTRIP  := $(ARMPREFIX)$(STRIP)
 
 .PHONY: all clean distclean printver x86 x86_x64 mips arm tomatoware
 
-all: x86 x86_64 mips #arm
+all: amd64 arm mips #x86
 	@echo "=== Built all x86 and cross-compiler targets ==="
 
 clean:
@@ -78,43 +84,51 @@ x86: printver dist
 	@echo "=== Building x86 ==="
 	$(CC32) $(CFLAGS_D) $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.dynamic
 	$(CC32) $(CFLAGS_P) $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.dynamic
-#	$(CC32) $(CFLAGS_D) -static $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.static
-#	$(CC32) $(CFLAGS_P) -static $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.static
+	$(CC32) $(CFLAGS_D) -static $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.static
+	$(CC32) $(CFLAGS_P) -static $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.static
 	$(STRIP) dist/$(DISTNAME).$@.performance.*
 	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
-x86_64: printver dist
-	@echo "=== Building x86-64 ==="
-	$(CC64) $(CFLAGS_D) $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.dynamic
-	$(CC64) $(CFLAGS_P) $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.dynamic
-#	$(CC64) $(CFLAGS_D) -static $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.static
-#	$(CC64) $(CFLAGS_P) -static $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.static
-	$(STRIP) dist/$(DISTNAME).$@.performance.*
+amd64: ARCH = amd64
+amd64: printver dist
+	@echo "=== Building amd64 ==="
+	$(CC64) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
+	$(CC64) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB) 
+	$(CC64) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_D) $(SHAREDLIB)
+	$(CC64) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
+	        $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_P) $(SHAREDLIB)
+#	$(STRIP) dist/$(DISTNAME).$@.performance.*
 	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
+mips: ARCH = mips
 mips: printver dist
 	@echo "=== Building MIPS ==="
-	$(MIPSPATH) $(MIPSCC) $(CFLAGS_D) $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.dynamic
-	$(MIPSPATH) $(MIPSCC) $(CFLAGS_P) $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.dynamic
-	$(MIPSPATH) $(MIPSCC) $(CFLAGS_D) -static $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.static
-	$(MIPSPATH) $(MIPSCC) $(CFLAGS_P) -static $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.static
+	$(MIPSPATH) $(MIPSCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
+	$(MIPSPATH) $(MIPSCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
+	$(MIPSPATH) $(MIPSCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static \
+	        $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_D) $(SHAREDLIB)
+	$(MIPSPATH) $(MIPSCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
+	        $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_P) $(SHAREDLIB)
 	$(MIPSPATH) $(MIPSSTRIP) dist/$(DISTNAME).$@.performance.*
-	$(UPX) dist/$(DISTNAME).$@.performance.*
+#	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
+arm: ARCH = arm
 arm: printver dist
 	@echo "=== Building ARM ==="
-	$(ARMPATH) $(ARMCC) $(CFLAGS_D) $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.dynamic
-	$(ARMPATH) $(ARMCC) $(CFLAGS_P) $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.dynamic
-	$(ARMPATH) $(ARMCC) $(CFLAGS_D) -static $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.static
-	$(ARMPATH) $(ARMCC) $(CFLAGS_P) -static $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.static
+	$(ARMPATH) $(ARMCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB) 
+	$(ARMPATH) $(ARMCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
+	$(ARMPATH) $(ARMCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static \
+	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_D) 
+	$(ARMPATH) $(ARMCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
+	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_P)
 	$(ARMPATH) $(ARMSTRIP) dist/$(DISTNAME).$@.performance.*
-	$(UPX) dist/$(DISTNAME).$@.performance.*
+#	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 

@@ -31,8 +31,14 @@ typedef struct {
     response_enum status;
     int rx_total;
     double run_time;
+    int ssl;
 } response_struct;
 
+typedef struct {
+    const char *tls_pem;
+    const char *servername;
+} tlsext_cb_arg_struct;
+  
 void socket_handler(int argc
                    ,char* argv[]
                    ,const int new_fd

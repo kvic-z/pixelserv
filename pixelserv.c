@@ -19,6 +19,9 @@
 # include <arpa/inet.h> // inet_ntop()
 #endif
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 void signal_handler(int sig)
 {
   if (sig != SIGTERM
@@ -56,18 +59,11 @@ void signal_handler(int sig)
   return;
 }
 
-#ifdef TEST
-// get sockaddr, IPv4 or IPv6
-void *get_in_addr(struct sockaddr *sa)
-{
-  if (sa->sa_family == AF_INET) {
-    return &(( (struct sockaddr_in*) sa )->sin_addr);
-  }
-
-  return &(( (struct sockaddr_in6*) sa )->sin6_addr);
-}
-#endif
-
+int access_log = 0;
+const char *tls_pem = DEFAULT_PEM_PATH;
+int tls_ports[MAX_TLS_PORTS] = {0};
+int num_tls_ports = 0;
+  
 int main (int argc, char* argv[]) // program start
 {
   int sockfd = 0;  // listen on sock_fd
@@ -82,14 +78,12 @@ int main (int argc, char* argv[]) // program start
   int use_ip = 0;
   struct addrinfo hints, *servinfo;
   int error = 0;
-#ifdef TEST
-  char ntop_buf[INET6_ADDRSTRLEN];
-#endif
   int pipefd[2];  // IPC pipe ends (0 = read, 1 = write)
-  response_struct pipedata = { FAIL_GENERAL, 0 };
+  response_struct pipedata = { FAIL_GENERAL, 0, 0.0, 0 };
   char* ports[MAX_PORTS];
   ports[0] = DEFAULT_PORT;
   ports[1] = SECOND_PORT;
+  tls_ports[0] = atoi(SECOND_PORT);
   char *port = NULL;
   fd_set readfds;
   fd_set selectfds;
@@ -128,6 +122,7 @@ int main (int argc, char* argv[]) // program start
 #ifndef TEST
         case 'f': do_foreground = 1;                          continue;
 #endif // !TEST
+        case 'l': access_log = 1; continue;
         case 'r':
           // deprecated - ignore
 //          do_redirect = 1;
@@ -152,6 +147,12 @@ int main (int argc, char* argv[]) // program start
               error = 1;
             }
           continue;
+          case 'k':
+            if (num_tls_ports < MAX_TLS_PORTS)
+              tls_ports[num_tls_ports++] = atoi(argv[i]);
+            else
+              error = 1;
+              // fall through to case 'p'
           case 'p':
             if (num_ports < MAX_PORTS) {
               ports[num_ports++] = argv[i];
@@ -173,6 +174,9 @@ int main (int argc, char* argv[]) // program start
             }
           continue;
 #endif //DEBUG
+          case 'z':
+            tls_pem = argv[i];
+          continue;
           default:  error = 1;                                continue;
         }
       } else {
@@ -189,36 +193,41 @@ int main (int argc, char* argv[]) // program start
   SET_LINE_NUMBER(__LINE__);
 
   if (error) {
-    printf("Usage:%s"
-           " [IP No/hostname (all)]"
-           " [-2 (disables HTTP 204 reply to generate_204 URLs)]"
+    printf("Usage:%s" "\n"
+           "\t" "ip_addr/hostname (all if omitted)" "\n"
+           "\t" "-2 (disable HTTP 204 reply to generate_204 URLs)" "\n"
 #ifndef TEST
-           " [-f (stay in foreground - don't daemonize)]"
+           "\t" "-f (stay in foreground - don't daemonize)" "\n"
 #endif // !TEST
-#ifdef IF_MODE
-           " [-n i/f (all)]"
-#endif // IF_MODE
-           " [-o select_timeout (%d seconds)]"
-           " [-p port ("
-           DEFAULT_PORT
-           ") & ("
+           "\t" "-k https_port ("
            SECOND_PORT
-           ")]"
-           " [-r (deprecated - ignored)]"
-           " [-R (disables redirect to encoded path in tracker links)]"
-           " [-s /relative_stats_html_URL ("
+           " if omitted)" "\n"
+           "\t" "-l (log access to syslog)" "\n"
+#ifdef IF_MODE
+           "\t" "-n i/f (all interfaces if omitted)" "\n"
+#endif // IF_MODE
+           "\t" "-o select_timeout (%d seconds)" "\n"
+           "\t" "-p http_port ("
+           DEFAULT_PORT
+           " if omitted)" "\n"
+           "\t" "-r (deprecated - ignored)" "\n"
+           "\t" "-R (disable redirect to encoded path in tracker links)" "\n"
+           "\t" "-s /relative_stats_html_URL ("
            DEFAULT_STATS_URL
-           ")"
-           " [-t /relative_stats_txt_URL ("
+           " if omitted)" "\n"
+           "\t" "-t /relative_stats_txt_URL ("
            DEFAULT_STATS_TEXT_URL
-           ")"
+           " if omitted)" "\n"
 #ifdef DROP_ROOT
-           " [-u user (\"nobody\")]"
+           "\t" "-u user (\"nobody\" if omitted)" "\n"
 #endif // DROP_ROOT
 #ifdef DEBUG
-           " [-w warning_time (warn when elapsed connection time exceeds value in msec)"
+           "\t" "-w warning_time (warn when elapsed connection time exceeds value in msec)" "\n"
 #endif //DEBUG
-           "\n", argv[0], DEFAULT_TIMEOUT);
+           "\t" "-z path_to_https_certs ("
+           DEFAULT_PEM_PATH
+           " if omitted)" "\n"
+           , argv[0], DEFAULT_TIMEOUT);
     exit(EXIT_FAILURE);
   }
 
@@ -243,6 +252,9 @@ int main (int argc, char* argv[]) // program start
 #endif
 
   SET_LINE_NUMBER(__LINE__);
+  
+  SSL_library_init();
+//  SSL_load_error_strings();
 
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_INET;  // AF_UNSPEC - AF_INET restricts to IPV4
@@ -254,6 +266,7 @@ int main (int argc, char* argv[]) // program start
   // if no ports selected on command line, use the defaults
   if (!num_ports) {
     num_ports = 2;
+    num_tls_ports = 1;
   }
 
   // clear the set
@@ -376,7 +389,7 @@ int main (int argc, char* argv[]) // program start
   SET_LINE_NUMBER(__LINE__);
 
   // FYI, this shows 4096 on mips K26
-  MYLOG(LOG_INFO, "opened pipe with buffer size %d bytes", PIPE_BUF);
+  // MYLOG(LOG_INFO, "opened pipe with buffer size %d bytes", PIPE_BUF);
 
   // also have select() monitor the read end of the stats pipe
   FD_SET(pipefd[0], &readfds);
@@ -443,7 +456,7 @@ int main (int argc, char* argv[]) // program start
       } else if (rv == 0) {
         syslog(LOG_WARNING, "pipe read() returned zero");
       } else if (rv != sizeof(pipedata)) {
-        syslog(LOG_WARNING, "pipe read() got %d bytes, but %u bytes were expected - discarding", rv, sizeof(pipedata));
+        syslog(LOG_WARNING, "pipe read() got %d bytes, but %u bytes were expected - discarding", rv, (unsigned int)sizeof(pipedata));
       } else {
         // process response type
         switch (pipedata.status) {
@@ -457,7 +470,6 @@ int main (int argc, char* argv[]) // program start
           case SEND_SWF:       ++swf; break;
           case SEND_ICO:       ++ico; break;
           case SEND_BAD:       ++bad; break;
-          case SEND_SSL:       ++ssl; break;
           case SEND_STATS:     ++sta; break;
           case SEND_STATSTEXT: ++stt; break;
           case SEND_204:       ++noc; break;
@@ -471,6 +483,7 @@ int main (int argc, char* argv[]) // program start
           default:
             syslog(LOG_ERR, "Socket handler child process reported unknown response value: %d", pipedata.status);
         }
+        if(pipedata.ssl) ++ssl;
 
         SET_LINE_NUMBER(__LINE__);
 
@@ -542,6 +555,7 @@ int main (int argc, char* argv[]) // program start
 #ifdef DEBUG
       signal(SIGUSR2, SIG_DFL); // default is ignore?
 #endif
+
       // close unneeded file handles inherited from the parent process
       close(sockfd);
 
@@ -550,25 +564,21 @@ int main (int argc, char* argv[]) // program start
       //  inherit it
       close(pipefd[0]);
 
-#ifdef TEST
-      inet_ntop(their_addr.ss_family, get_in_addr( (struct sockaddr *) &their_addr ), ntop_buf, sizeof ntop_buf);
-      printf("server: got connection from %s\n", ntop_buf);
-#endif
       // call handler function
-      socket_handler(argc
-                    ,argv
-                    ,new_fd
-                    ,select_timeout
-                    ,pipefd[1]
-                    ,stats_url
-                    ,stats_text_url
-                    ,argv[0]
-                    ,do_204
-                    ,do_redirect
+      socket_handler( argc
+                ,argv
+                ,new_fd
+                ,select_timeout
+                ,pipefd[1]
+                ,stats_url
+                ,stats_text_url
+                ,argv[0]
+                ,do_204
+                ,do_redirect
 #ifdef DEBUG
-                    ,warning_time
+                ,warning_time
 #endif //DEBUG
-                    );
+                );
       exit(0);
     } // end of forked child process
 
