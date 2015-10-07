@@ -99,8 +99,8 @@ amd64: printver dist
 	$(CC64) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_D) $(SHAREDLIB)
 	$(CC64) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
 	        $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_P) $(SHAREDLIB)
-#	$(STRIP) dist/$(DISTNAME).$@.performance.*
-	$(UPX) dist/$(DISTNAME).$@.performance.*
+	$(STRIP) dist/$(DISTNAME).$@.performance.*
+#	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 

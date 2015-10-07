@@ -428,12 +428,13 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
     printf("full_pem_path: %s\n",full_pem_path);
 #endif
     struct stat st;
-    int result = stat(full_pem_path, &st);
-    if(result != 0){
+    if(stat(full_pem_path, &st) != 0){
         syslog(LOG_NOTICE, "%s %s missing", tlsext_cb_arg->servername, pem_file);        
-        SSL_shutdown(cSSL);
-        SSL_free(cSSL);
-        exit(1);
+        tlsext_cb_arg->status = SSL_MISS;
+        return SSL_TLSEXT_ERR_ALERT_FATAL;
+//        SSL_shutdown(cSSL);
+//        SSL_free(cSSL);
+//        exit(1);
     }
 
     sslctx = SSL_CTX_new(TLSv1_2_server_method());
@@ -441,10 +442,13 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
     if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0 ||
         SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0) {
         syslog(LOG_NOTICE, "Cannot use %s\n",full_pem_path);
-        SSL_shutdown(cSSL);
-        SSL_free(cSSL);
-        exit(1);
+        tlsext_cb_arg->status = SSL_ERR;
+        return SSL_TLSEXT_ERR_ALERT_FATAL;        
+//        SSL_shutdown(cSSL);
+//        SSL_free(cSSL);
+//        exit(1);
     }
+    tlsext_cb_arg->status = SSL_HIT;
     SSL_set_SSL_CTX(cSSL, sslctx);
     return SSL_TLSEXT_ERR_OK;
 }
@@ -466,7 +470,7 @@ void socket_handler(int argc
   // NOTES:
   // - from here on, all exit points should be counted or at least logged
   // - exit() should not be called from the child process
-  response_struct pipedata = {FAIL_GENERAL, 0, 0.0, 0};
+  response_struct pipedata = {FAIL_GENERAL, 0, 0.0, SSL_NOT_TLS};
   struct timeval timeout = {select_timeout, 0};
   int rv = 0;
   char buf[CHAR_BUF_SIZE + 1];
@@ -551,7 +555,7 @@ void socket_handler(int argc
     
     static SSL_CTX *sslctx = NULL;
     SSL *cSSL = NULL;
-    tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL };
+    tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL, SSL_UNKNOWN };
   
     if(ssl){
         if(sslctx == NULL) {
@@ -564,14 +568,18 @@ void socket_handler(int argc
         SSL_set_fd(cSSL, new_fd );
         int ssl_err = SSL_accept(cSSL);
 
-        if(ssl_err <= 0) {
-            SSL_shutdown(cSSL);
-            SSL_free(cSSL);
-            exit(1);
-        }
+//kvic
+//        if(ssl_err <= 0) {
+//            SSL_shutdown(cSSL);
+//            SSL_free(cSSL);
+//            exit(1);
+//        }
+
         TIME_CHECK("SSL setup");
-        rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
-        pipedata.ssl = 1;
+        pipedata.ssl = tlsext_cb_arg.status;
+        if(ssl_err > 0) {
+          rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
+        }
         TESTPRINT("SSL handshake request received\n");
     } else {
         // read some data from the socket to buf

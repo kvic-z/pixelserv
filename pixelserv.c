@@ -483,8 +483,18 @@ int main (int argc, char* argv[]) // program start
           default:
             syslog(LOG_ERR, "Socket handler child process reported unknown response value: %d", pipedata.status);
         }
-        if(pipedata.ssl) ++ssl;
-
+        
+        switch (pipedata.ssl) {
+          case SSL_HIT:        ++slh; break;
+          case SSL_MISS:       ++slm; break;
+          case SSL_ERR:        ++sle; break;
+          case SSL_NOT_TLS:    break;
+          default:
+            ++slu;
+#ifdef DEBUG
+            MYLOG(LOG_ERR, "Socket handler child process reported unknown ssl state: %d", pipedata.ssl);
+#endif
+        }
         SET_LINE_NUMBER(__LINE__);
 
         // count only positive receive sizes

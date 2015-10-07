@@ -14,7 +14,6 @@ typedef enum {
   SEND_SWF,
   SEND_ICO,
   SEND_BAD,
-  SEND_SSL,
   SEND_STATS,
   SEND_STATSTEXT,
   SEND_204,
@@ -27,16 +26,25 @@ typedef enum {
   SEND_HEAD
 } response_enum;
 
+typedef enum {
+  SSL_NOT_TLS,
+  SSL_ERR,
+  SSL_MISS,
+  SSL_HIT,
+  SSL_UNKNOWN
+} ssl_enum;
+
 typedef struct {
     response_enum status;
     int rx_total;
     double run_time;
-    int ssl;
+    ssl_enum ssl;
 } response_struct;
 
 typedef struct {
     const char *tls_pem;
     const char *servername;
+    ssl_enum status;
 } tlsext_cb_arg_struct;
   
 void socket_handler(int argc

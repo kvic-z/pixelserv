@@ -31,13 +31,17 @@ volatile sig_atomic_t jpg = 0;
 volatile sig_atomic_t png = 0;
 volatile sig_atomic_t swf = 0;
 volatile sig_atomic_t ico = 0;
-volatile sig_atomic_t ssl = 0;
 volatile sig_atomic_t sta = 0;
 volatile sig_atomic_t stt = 0;
 volatile sig_atomic_t noc = 0;
 volatile sig_atomic_t rdr = 0;
 volatile sig_atomic_t pst = 0;
 volatile sig_atomic_t hed = 0;
+
+volatile sig_atomic_t slh = 0;
+volatile sig_atomic_t slm = 0;
+volatile sig_atomic_t sle = 0;
+volatile sig_atomic_t slu = 0;
 
 // private data
 static struct timespec startup_time = {0, 0};
@@ -114,8 +118,8 @@ char* get_stats(const int sta_offset, const int stt_offset) {
   uptime = difftime(current_time.tv_sec, startup_time.tv_sec);
 
   if (asprintf(&retbuf
-         , "%.0f uts, %d req, %d avg, %d rmx, %d tav, %d tmx, %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif, %d bad, %d txt, %d jpg, %d png, %d swf, %d ico, %d ssl, %d sta, %d stt, %d 204, %d rdr, %d pst, %d hed"
-         , uptime, count, avg, rmx, tav, tmx, err, tmo, cls, nou, pth, nfe, ufe, gif, bad, txt, jpg, png, swf, ico, ssl, sta + sta_offset, stt + stt_offset, noc, rdr, pst, hed
+         , "%.0f uts, %d req, %d avg, %d rmx, %d tav, %d tmx, %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif, %d bad, %d txt, %d jpg, %d png, %d swf, %d ico, %d slh, %d slm, %d sle, %d slu, %d sta, %d stt, %d 204, %d rdr, %d pst, %d hed"
+         , uptime, count, avg, rmx, tav, tmx, err, tmo, cls, nou, pth, nfe, ufe, gif, bad, txt, jpg, png, swf, ico, slh, slm, sle, slu, sta + sta_offset, stt + stt_offset, noc, rdr, pst, hed
   ) < 1) {
     retbuf = " <asprintf error>";
   }
