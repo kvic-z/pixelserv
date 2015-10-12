@@ -19,8 +19,11 @@
 # include <arpa/inet.h> // inet_ntop()
 #endif
 
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include "certs.h"
 
 void signal_handler(int sig)
 {
@@ -233,6 +236,14 @@ int main (int argc, char* argv[]) // program start
 
   SET_LINE_NUMBER(__LINE__);
 
+#ifndef TEST
+  if (!do_foreground && daemon(0, 0)) {
+    syslog(LOG_ERR, "failed to daemonize, exit: %m");
+    exit(EXIT_FAILURE);
+  }
+#endif
+  SET_LINE_NUMBER(__LINE__);
+
   openlog("pixelserv", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
   version_string = get_version(argc, argv);
   if (version_string) {
@@ -244,17 +255,15 @@ int main (int argc, char* argv[]) // program start
 
   SET_LINE_NUMBER(__LINE__);
 
-#ifndef TEST
-  if (!do_foreground && daemon(0, 0)) {
-    syslog(LOG_ERR, "failed to daemonize, exit: %m");
-    exit(EXIT_FAILURE);
-  }
-#endif
-
-  SET_LINE_NUMBER(__LINE__);
-  
   SSL_library_init();
 //  SSL_load_error_strings();
+  mkfifo(PIXEL_CERT_PIPE, 0600);
+  {
+    if(fork() == 0){
+      cert_generator(&(cert_tlstor_t){tls_pem});
+      exit(0);
+    }
+  }
 
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_INET;  // AF_UNSPEC - AF_INET restricts to IPV4
@@ -611,5 +620,7 @@ int main (int argc, char* argv[]) // program start
     SET_LINE_NUMBER(__LINE__);
   } // end of perpetual accept() loop
 //  Never get here while(1)
+//  pthread_cancel(cert_gen_thread);
+//  pthread_join(cert_gen_thread, NULL);
 //  return (EXIT_SUCCESS);
 }

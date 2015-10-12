@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <fcntl.h>
+#include "certs.h"
 
 // private data for socket_handler() use
 
@@ -400,7 +402,7 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
     tlsext_cb_arg_struct *tlsext_cb_arg = arg;
     const char* pem_dir = tlsext_cb_arg->tls_pem;
     tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name);
-    char servername[255];
+    char *servername = malloc(PIXELSERV_MAX_SERVER_NAME);
     strcpy(servername, SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name));
 #ifdef DEBUG
     printf("https request for hostname: %s\n", servername);
@@ -420,7 +422,7 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
 #ifdef DEBUG
     printf("pem file name: %s\n", pem_file);
 #endif
-    char full_pem_path[1024];
+    char *full_pem_path = malloc(PIXELSERV_MAX_PATH);
     strcpy(full_pem_path, pem_dir);
     strcat(full_pem_path, "/");
     strcat(full_pem_path, pem_file);
@@ -431,10 +433,14 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
     if(stat(full_pem_path, &st) != 0){
         syslog(LOG_NOTICE, "%s %s missing", tlsext_cb_arg->servername, pem_file);        
         tlsext_cb_arg->status = SSL_MISS;
+        int fd = open(PIXEL_CERT_PIPE, O_WRONLY);
+        if(fd == -1)
+            syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
+        else {
+            write(fd, strcat(pem_file,":"), strlen(pem_file)+1);
+            close(fd);
+        }
         return SSL_TLSEXT_ERR_ALERT_FATAL;
-//        SSL_shutdown(cSSL);
-//        SSL_free(cSSL);
-//        exit(1);
     }
 
     sslctx = SSL_CTX_new(TLSv1_2_server_method());
@@ -444,12 +450,14 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
         syslog(LOG_NOTICE, "Cannot use %s\n",full_pem_path);
         tlsext_cb_arg->status = SSL_ERR;
         return SSL_TLSEXT_ERR_ALERT_FATAL;        
-//        SSL_shutdown(cSSL);
-//        SSL_free(cSSL);
-//        exit(1);
     }
     tlsext_cb_arg->status = SSL_HIT;
     SSL_set_SSL_CTX(cSSL, sslctx);
+
+//free_all:
+    free(full_pem_path);
+    free(servername);
+
     return SSL_TLSEXT_ERR_OK;
 }
 
@@ -567,13 +575,6 @@ void socket_handler(int argc
         cSSL = SSL_new(sslctx);
         SSL_set_fd(cSSL, new_fd );
         int ssl_err = SSL_accept(cSSL);
-
-//kvic
-//        if(ssl_err <= 0) {
-//            SSL_shutdown(cSSL);
-//            SSL_free(cSSL);
-//            exit(1);
-//        }
 
         TIME_CHECK("SSL setup");
         pipedata.ssl = tlsext_cb_arg.status;

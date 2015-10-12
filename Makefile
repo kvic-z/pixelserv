@@ -3,11 +3,11 @@
 DISTNAME  := pixelserv
 CC        := gcc
 OPTS      := -DDROP_ROOT -DIF_MODE
-SRCS      := util.c socket_handler.c pixelserv.c
+SRCS      := util.c socket_handler.c pixelserv.c certs.c
 
 ROOT      := .
 CFLAGS    := -I$(ROOT)/openssl/include
-LDFLAGS    = -L$(ROOT)/openssl/$(ARCH)
+LDFLAGS    = -L$(ROOT)/openssl/$(ARCH) -L$(ROOT)/openssl/$(ARCH)
 SHAREDLIB := -lssl -lcrypto -ldl
 STATICLIB  = $(ROOT)/openssl/$(ARCH)/libssl.a $(ROOT)/openssl/$(ARCH)/libcrypto.a
 
