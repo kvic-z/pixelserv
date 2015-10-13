@@ -41,11 +41,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, const char *issuer,
     name = X509_get_subject_name(x509);
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char *)pem_fn, -1, -1, 0);
     X509_set_pubkey(x509, key);
-#ifdef DEBUG
-    printf("%s: x509 initialized\n", __FUNCTION__);
-#endif        
     X509_sign_ctx(x509, p_ctx);
-
 #ifdef DEBUG
     printf("%s: x509 cert created\n", __FUNCTION__);
 #endif
@@ -96,8 +92,8 @@ static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) {
 void *cert_generator(void *cert_tlstor) {
     
     int fd = open(PIXEL_CERT_PIPE, O_RDONLY);
+    char *buf = malloc(PIXELSERV_MAX_SERVER_NAME*4);
     for (;;) {
-        char *buf = malloc(PIXELSERV_MAX_SERVER_NAME*4);
         int cnt;
         
         if(fd == -1)
@@ -133,7 +129,7 @@ void *cert_generator(void *cert_tlstor) {
                     break;
             }
             if (p_buf == NULL)
-                exit(0);
+                goto free_all;
 
             char issuer[65]; // max 64 characters as per X509 
             strcpy(fname, ((cert_tlstor_t*)cert_tlstor)->pem_dir);
@@ -167,9 +163,11 @@ void *cert_generator(void *cert_tlstor) {
                     generate_cert(p_buf, ((cert_tlstor_t*)cert_tlstor)->pem_dir, issuer, md_ctx);
                 p_buf = strtok_r(NULL, ":", &p_buf_sav);
             }
+free_all:
             EVP_MD_CTX_destroy(md_ctx);
             EVP_PKEY_free(key);
             free(fname);
+            free(buf);
             exit(0);
         }
         if(pid > 0){

@@ -399,6 +399,7 @@ extern int num_tls_ports;
 static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
 {
     SSL_CTX *sslctx;
+    int rv = SSL_TLSEXT_ERR_OK;
     tlsext_cb_arg_struct *tlsext_cb_arg = arg;
     const char* pem_dir = tlsext_cb_arg->tls_pem;
     tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name);
@@ -440,7 +441,8 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
             write(fd, strcat(pem_file,":"), strlen(pem_file)+1);
             close(fd);
         }
-        return SSL_TLSEXT_ERR_ALERT_FATAL;
+        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+        goto free_all;
     }
 
     sslctx = SSL_CTX_new(TLSv1_2_server_method());
@@ -449,16 +451,17 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
         SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0) {
         syslog(LOG_NOTICE, "Cannot use %s\n",full_pem_path);
         tlsext_cb_arg->status = SSL_ERR;
-        return SSL_TLSEXT_ERR_ALERT_FATAL;        
+        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+        goto free_all;
     }
     tlsext_cb_arg->status = SSL_HIT;
     SSL_set_SSL_CTX(cSSL, sslctx);
 
-//free_all:
+free_all:
     free(full_pem_path);
     free(servername);
 
-    return SSL_TLSEXT_ERR_OK;
+    return rv;
 }
 
 void socket_handler(int argc
