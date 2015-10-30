@@ -42,10 +42,10 @@ Explanation of stats:
 * png: number of requests for PNG images
 * swf: number of requests for Adobe Shockwave Flash files
 * ico: number of requests for ICO files (usually favicons)
-* slh: number of SSL requests succeeded (cert exists and used) 
-* slm: number of SSL requests failed (cert missing for ad domain)
-* sle: number of SSL requests failed (error in existing certs)
-* slu: number of SSL requests failed (none of ssh/ssm/sse)
+* slh: number of HTTPS requests with a good certifcate (cert exists and used) 
+* slm: number of HTTPS requests without a certficate (cert missing for ad domain)
+* sle: number of HTTPS requests with a bad cert (error in existing cert)
+* slu: number of unrecognized HTTPS requests (none of slh/slm/sle)
 * sta: number of requests for HTML stats
 * stt: number of requests for plaintext stats
 * 204: number of requests for /generate_204 URLs
