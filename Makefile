@@ -27,7 +27,7 @@ STRIP     := strip -s -R .note -R .comment -R .gnu.version -R .gnu.version_r
 UPX       := upx -9
 
 # packaging macros
-PFILES     = LICENSE README.md dist/$(DISTNAME).$(ARCH).*
+PFILES     = LICENSE README.md dist/$(DISTNAME).$(ARCH).performance.*
 PVERSION  := $(shell grep VERSION util.h | awk '{print $$NF}' | sed 's|\"||g')
 PCMD      := zip
 
@@ -45,12 +45,20 @@ MIPSREFIX := mipsel-uclibc-
 MIPSCC    := $(MIPSREFIX)$(CC)
 MIPSSTRIP := $(MIPSREFIX)$(STRIP)
 
-# ARM environment
+# ARM(Asuswrt) environment
 ARMTOOLS  := /opt/brcm-arm/bin
 ARMPATH   := PATH=$(ARMTOOLS):$(PATH)
 ARMPREFIX := arm-brcm-linux-uclibcgnueabi-
 ARMCC     := $(ARMPREFIX)$(CC)
 ARMSTRIP  := $(ARMPREFIX)$(STRIP)
+
+# ARM(Entware) environment
+ARMentTOOLS  := ../arm-unknown-linux-gnueabi/bin
+ARMentPATH   := PATH=$(ARMentTOOLS):$(PATH)
+ARMentPREFIX := arm-unknown-linux-gnueabi-
+ARMentCC     := $(ARMentPREFIX)$(CC)
+ARMentSTRIP  := $(ARMentPREFIX)$(STRIP)
+
 
 # tomatoware environment uses basic setup options because it compiles native
 
@@ -92,6 +100,8 @@ x86: printver dist
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
 amd64: ARCH = amd64
+amd64: LDFLAGS += -lpthread
+amd64: CFLAGS += -DUSE_PTHREAD
 amd64: printver dist
 	@echo "=== Building amd64 ==="
 	$(CC64) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
@@ -128,6 +138,22 @@ arm: printver dist
 	$(ARMPATH) $(ARMCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
 	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_P)
 	$(ARMPATH) $(ARMSTRIP) dist/$(DISTNAME).$@.performance.*
+#	$(UPX) dist/$(DISTNAME).$@.performance.*
+	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
+	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
+
+arm.ent: LDFLAGS += -Wl,-rpath=/opt/lib,--dynamic-linker=/opt/lib/ld-linux.so.3 -lpthread -L../arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot
+arm.ent: CFLAGS += -DUSE_PTHREAD -isystem../arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot/include
+arm.ent: ARCH = arm.ent
+arm.ent: printver dist
+	@echo "=== Building ARM (Entware) ==="
+	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB) 
+	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
+	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static \
+	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_D) 
+	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
+	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_P)
+	$(ARMentPATH) $(ARMentSTRIP) dist/$(DISTNAME).$@.performance.static
 #	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
