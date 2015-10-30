@@ -7,6 +7,11 @@
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 
+#ifdef USE_PTHREAD
+#include <pthread.h>
+#include <signal.h>
+#endif
+
 #include "certs.h"
 #include "util.h"
 
@@ -90,20 +95,22 @@ static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) {
 
 
 void *cert_generator(void *cert_tlstor) {
-    
-    int fd = open(PIXEL_CERT_PIPE, O_RDONLY);
+
     char *buf = malloc(PIXELSERV_MAX_SERVER_NAME*4);
+
     for (;;) {
-        int cnt;
-        
+        int cnt, fd = -1;
+
+        close(fd); //FIXME
+        fd = open(PIXEL_CERT_PIPE, O_RDONLY);
+
         if(fd == -1)
             syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
+
         if((cnt = read(fd, buf, PIXELSERV_MAX_SERVER_NAME*4)) == 0) {
 #ifdef DEBUG
              printf("%s: pipe EOF\n", __FUNCTION__);
 #endif
-            close(fd);
-            fd = open(PIXEL_CERT_PIPE, O_RDONLY);
             continue;
         }
         buf[cnt] = '\0';
@@ -111,8 +118,11 @@ void *cert_generator(void *cert_tlstor) {
         printf("%s: %s\n", __FUNCTION__, buf);
 #endif
 
+#ifndef USE_PTHREAD
         int pid = fork();
-        if(pid == 0) {
+        if(pid == 0)
+#endif
+        {
             char *p_buf=NULL, *p_buf_sav=NULL;
             char *fname = malloc(PIXELSERV_MAX_PATH);
             
@@ -164,16 +174,19 @@ void *cert_generator(void *cert_tlstor) {
                 p_buf = strtok_r(NULL, ":", &p_buf_sav);
             }
 free_all:
-            EVP_MD_CTX_destroy(md_ctx);
             EVP_PKEY_free(key);
+            EVP_MD_CTX_destroy(md_ctx);
             free(fname);
-            free(buf);
+#ifndef USE_PTHREAD
             exit(0);
+#endif
         }
+#ifndef USE_PTHREAD
         if(pid > 0){
             int status;
             wait(&status);
         }
+#endif
     }
     //free(buf);
     return NULL;

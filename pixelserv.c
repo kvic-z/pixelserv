@@ -25,6 +25,10 @@
 #include <openssl/err.h>
 #include "certs.h"
 
+#ifdef USE_PTHREAD
+#include <pthread.h>
+#endif
+
 void signal_handler(int sig)
 {
   if (sig != SIGTERM
@@ -259,10 +263,15 @@ int main (int argc, char* argv[]) // program start
 //  SSL_load_error_strings();
   mkfifo(PIXEL_CERT_PIPE, 0600);
   {
+#ifndef USE_PTHREAD
     if(fork() == 0){
       cert_generator(&(cert_tlstor_t){tls_pem});
       exit(0);
     }
+#else
+    pthread_t certgen_thread;
+    pthread_create(&certgen_thread, NULL, cert_generator, &(cert_tlstor_t){tls_pem});
+#endif
   }
 
   memset(&hints, 0, sizeof hints);
