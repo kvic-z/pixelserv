@@ -110,19 +110,20 @@ char* get_version(int argc, char* argv[]) {
 }
 
 char* get_stats(const int sta_offset, const int stt_offset) {
-  char* retbuf = NULL;
-  struct timespec current_time;
-  double uptime;
+    char* retbuf = NULL;
+    struct timespec current_time;
+    double uptime;
 
-  get_time(&current_time);
-  uptime = difftime(current_time.tv_sec, startup_time.tv_sec);
+    const char* sta_fmt = "<table><tr><td>uts</td><td>%.0f</td></tr><tr><td>req</td><td>%d</td></tr><tr><td>avg</td><td>%d</td></tr><tr><td>rmx</td><td>%d</td></tr><tr><td>tav</td><td>%d</td></tr><tr><td>tmx</td><td>%d</td></tr><tr><td>err</td><td>%d</td></tr><tr><td>tmo</td><td>%d</td></tr><tr><td>cls</td><td>%d</td></tr><tr><td>nou</td><td>%d</td></tr><tr><td>pth</td><td>%d</td></tr><tr><td>nfe</td><td>%d</td></tr><tr><td>ufe</td><td>%d</td></tr><tr><td>gif</td><td>%d</td></tr><tr><td>bad</td><td>%d</td></tr><tr><td>txt</td><td>%d</td></tr><tr><td>jpg</td><td>%d</td></tr><tr><td>png</td><td>%d</td></tr><tr><td>swf</td><td>%d</td></tr><tr><td>ico</td><td>%d</td></tr><tr><td>slh</td><td>%d</td></tr><tr><td>slm</td><td>%d</td></tr><tr><td>sle</td><td>%d</td></tr><tr><td>slu</td><td>%d</td></tr><tr><td>sta</td><td>%d</td></tr><tr><td>stt</td><td>%d</td></tr><tr><td>204</td><td>%d</td></tr><tr><td>rdr</td><td>%d</td></tr><tr><td>pst</td><td>%d</td></tr><tr><td>hed</td><td>%d</td></tr></table>";
+    const char* stt_fmt = "%.0f uts, %d req, %d avg, %d rmx, %d tav, %d tmx, %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif, %d bad, %d txt, %d jpg, %d png, %d swf, %d ico, %d slh, %d slm, %d sle, %d slu, %d sta, %d stt, %d 204, %d rdr, %d pst, %d hed";
+  
+    get_time(&current_time);
+    uptime = difftime(current_time.tv_sec, startup_time.tv_sec);
 
-  if (asprintf(&retbuf
-         , "%.0f uts, %d req, %d avg, %d rmx, %d tav, %d tmx, %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif, %d bad, %d txt, %d jpg, %d png, %d swf, %d ico, %d slh, %d slm, %d sle, %d slu, %d sta, %d stt, %d 204, %d rdr, %d pst, %d hed"
-         , uptime, count, avg, rmx, tav, tmx, err, tmo, cls, nou, pth, nfe, ufe, gif, bad, txt, jpg, png, swf, ico, slh, slm, sle, slu, sta + sta_offset, stt + stt_offset, noc, rdr, pst, hed
-  ) < 1) {
-    retbuf = " <asprintf error>";
-  }
+    if (asprintf(&retbuf, (stt_offset) ? stt_fmt : sta_fmt,
+        uptime, count, avg, rmx, tav, tmx, err, tmo, cls, nou, pth, nfe, ufe, gif, bad, txt, jpg, png, swf, ico, slh, slm, sle, slu, sta + sta_offset, stt + stt_offset, noc, rdr, pst, hed
+        ) < 1)
+        retbuf = " <asprintf error>";
 
-  return retbuf;
+    return retbuf;
 }
