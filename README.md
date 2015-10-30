@@ -3,28 +3,18 @@ pixelserv
 
 Tiny webserver that responds to all requests with "nothing".  Particularly useful for network connections with high latency and metered bandwidth.
 
-This fork merges the mstombs and h0tw1r3 forks back together, and adds some additional cleanups and enhancements (most notably a stats reporting URL and finer-grained stats collection, as well as command-line configurable timeouts).
+This fork adds HTTPS support. Certificates for adserver domains are automatically generated at real-time upon first access.
 
-Releases
+Binaries
 --------
 
-Starting with HZ12, binary releases are available in the following flavors:
-* x86 and x86-64:
-  * PC versions (32- and 64-bit, respectively)
-  * Built natively in Xubuntu LTS x86_64
-  * Statically-linked versions are not provided because glibc has forced dynamic dependencies.
-* mips:
-  * MIPS K24 (for older routers such as WRT54G)
-  * Built via Shibby brcm uclibc cross-compiler toolchain
-  * The dynamically-linked versions should be highly-compatible with various K24 and K26 Linux router firmwares.
-* tomatoware:
-  * MIPS K26 (for newer routers such as RT-N16 and RT-N66U)
-  * Built natively on RT-N66U via Tomatoware
-  * The statically-linked versions use newer libraries from Tomatoware than are provided by most firmwares.
-
-ARM builds are currently provided unofficially by the linksysinfo.org forum community.
-
-Also, jerrm has been graciously providing recent releases of both Adblock and pixelserv here, including ARM builds: http://tomato-adblock.weebly.com/
+Binary releases are available in the following flavors:
+* MIPS for Asuswrt/Merlin:
+  * Built via brcm uclibc cross-compiler toolchain from Asuswrt-Merlin
+* ARM for Asuswrt/Merlin:
+  * Built via brcm uclibc cross-compiler toolchain from Asuswrt-Merlin
+* Entware-ARM
+  * Built via glibc cross-compiler toolchain from Entware-ARM
 
 Stats
 -----
@@ -52,7 +42,10 @@ Explanation of stats:
 * png: number of requests for PNG images
 * swf: number of requests for Adobe Shockwave Flash files
 * ico: number of requests for ICO files (usually favicons)
-* ssl: number of SSL connection requests
+* ssh: number of SSL requests succeeded (cert exists and used) 
+* ssm: number of SSL requests failed (cert missing for ad domain)
+* sse: number of SSL requests failed (error in existing certs)
+* ssu: number of SSL requests failed (none of ssh/ssm/sse)
 * sta: number of requests for HTML stats
 * stt: number of requests for plaintext stats
 * 204: number of requests for /generate_204 URLs
@@ -63,6 +56,6 @@ Explanation of stats:
 Sources
 -------
 
-* https://github.com/flexiondotorg/nullserv (defunct)
+* http://www.snbforums.com/threads/pixelserv-a-better-one-pixel-webserver-for-adblock.26114
 * http://www.linksysinfo.org/index.php?threads/pixelserv-compiled-to-run-on-router-wrt54g.30509/page-3#post-229342
 * http://www.dd-wrt.com/phpBB2/viewtopic.php?p=685201
