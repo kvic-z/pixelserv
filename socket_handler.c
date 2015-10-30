@@ -33,7 +33,7 @@
   "\r\n";
   // split here because we care about the length of what follows
   static const char httpstats3[] =
-  "<!DOCTYPE html><html><head><title>pixelserv statistics</title></head><body>";
+  "<!DOCTYPE html><html><head><title>pixelserv statistics</title><style>td {min-width:100px;} body {font-family:Monaco;font-size:16px;}</style></head><body>";
   // stats text goes between these two strings
   static const char httpstats4[] =
   "</body></html>\r\n";
@@ -463,6 +463,7 @@ free_all:
 
     return rv;
 }
+
 
 void socket_handler(int argc
                    ,char* argv[]
