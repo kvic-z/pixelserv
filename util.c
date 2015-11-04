@@ -123,7 +123,7 @@ char* get_stats(const int sta_offset, const int stt_offset) {
     asprintf(&uptimeStr, "%d days %02d:%02d", (int)uptime/86400, (int)(uptime%86400)/3600, (int)((uptime%86400)%3600)/60);
 
     if (asprintf(&retbuf, (sta_offset) ? sta_fmt : stt_fmt,
-yipst        (sta_offset) ? (long)uptimeStr : (long)uptime, count, avg, rmx, tav, tmx, err, tmo, cls, nou, pth, nfe, ufe, gif, bad, txt, jpg, png, swf, ico, slh, slm, sle, slu, sta + sta_offset, stt + stt_offset, noc, rdr, pst, hed
+        (sta_offset) ? (long)uptimeStr : (long)uptime, count, avg, rmx, tav, tmx, err, tmo, cls, nou, pth, nfe, ufe, gif, bad, txt, jpg, png, swf, ico, slh, slm, sle, slu, sta + sta_offset, stt + stt_offset, noc, rdr, pst, hed
         ) < 1)
         retbuf = " <asprintf error>";
 

@@ -33,7 +33,7 @@
   "\r\n";
   // split here because we care about the length of what follows
   static const char httpstats3[] =
-  "<!DOCTYPE html><html><head><title>pixelserv statistics</title><style>td {min-width:100px;} body {font-family:Monaco;font-size:16px;}</style></head><body>";
+  "<!DOCTYPE html><html><head><title>pixelserv statistics</title><style>body {font-family:Monaco;font-size:16px;}</style></head><body>";
   // stats text goes between these two strings
   static const char httpstats4[] =
   "</body></html>\r\n";
@@ -572,7 +572,7 @@ void socket_handler(int argc
     if(ssl){
         if(sslctx == NULL) {
             sslctx = SSL_CTX_new(TLSv1_2_server_method());
-            SSL_CTX_set_options(sslctx, SSL_OP_SINGLE_DH_USE);
+            SSL_CTX_set_options(sslctx, /*SSL_OP_SINGLE_DH_USE*/ SSL_MODE_RELEASE_BUFFERS | SSL_OP_NO_COMPRESSION);
             SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
             SSL_CTX_set_tlsext_servername_arg(sslctx, &tlsext_cb_arg);
         }
@@ -816,11 +816,11 @@ void socket_handler(int argc
     } else if (rv != rsize) {
       syslog(LOG_WARNING, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
     }
+    
     // free memory allocated by asprintf() (if any)
-    if (aspbuf) {
-      free(aspbuf);
-      aspbuf = NULL;
-    }
+    free(aspbuf);
+    aspbuf = NULL;
+    response = httpnullpixel;
   }
   // *** NOTE: pipedata.status should not be altered after this point ***
 
