@@ -1,19 +1,22 @@
-# pixelserv-tls
-pixelserv-tls is a fork of pixelserv - the tiny webserver that responds to all requests with "nothing" and yet particularly useful for network connections with high latency and metered bandwidth. 
+## pixelserv-tls
+_pixelserv-tls_ is a fork of pixelserv - the tiny webserver that responds to all requests with "nothing" and yet particularly useful for network connections with high latency and metered bandwidth. 
 
-pixelserv-tls adds support for HTTPS connection, enable access log and have a better layout of stats in HTML. 
+_pixelserv-tls_ adds support for HTTPS connection, enables access log and comes with a better layout of stats in HTML. 
 
 Certificates for adserver domains are automatically generated at real-time upon first access. All requests to adserver are optionally written to syslogd. The stats in text format are preserved, good for command line parsing. The same stats in HTML format are revamped to be more legible.
 
 ### Prepare your Root CA cert
 
-Pixelserv is only capable of serving HTTPS requests when a root CA cert is configured. One way to generate a Root CA is to run Easy-RSA 3.0 from your PC. Follow this [EasyRSA Quickstart] guide, essentially only the first two steps:
+_pixelserv-tls_ is only capable of serving HTTPS requests when a root CA cert is configured. One way to generate a Root CA is to run Easy-RSA 3.0 from your PC. Follow this [EasyRSA Quickstart] guide. Only the first two steps are needed:
 * `./easyrsa init-pki`
 * `./easyrsa build-ca`
 
 EasyRSA will ask for a passphrase for the private key of this new Root CA cert. Save this passphrase separately as a text file named "ca.key.passphrase"
 
-When EasyRSA finishes, there are "ca.cert" and "ca.key" under "pki/private" sub-directory. Upload `ca.key`, `ca.crt` and `ca.key.passphrase` to `/opt/var/cache/pixelserv` on your router.
+When EasyRSA finishes, it places `ca.crt` and `ca.key` under `pki/private` sub-dir. Upload these two files together with `ca.key.passphrase` to `/opt/var/cache/pixelserv` on your router.
+
+The final step is to import `ca.crt` as a trusted Root CA into your client OS. Otherwise, we will see broke a pad-lock in browsers.
+OS X, Windows, iOS and Android are confirmed to work.
 
 ### Launch Pixelserv
 A few examples of launching Pixelserv:
