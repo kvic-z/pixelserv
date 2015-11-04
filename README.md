@@ -11,23 +11,25 @@ _pixelserv-tls_ is only capable of serving HTTPS requests when a root CA cert is
 * `./easyrsa init-pki`
 * `./easyrsa build-ca`
 
-EasyRSA will ask for a passphrase for the private key of this new Root CA cert. Save this passphrase separately as a text file named "ca.key.passphrase"
+EasyRSA will ask for a passphrase for the private key of this new Root CA cert. Save this passphrase in a separate text file. Name it `ca.key.passphrase`.
 
 When EasyRSA finishes, it places `ca.crt` and `ca.key` under `pki/private` sub-dir. Upload these two files together with `ca.key.passphrase` to `/opt/var/cache/pixelserv` on your router.
 
-The final step is to import `ca.crt` as a trusted Root CA into your client OS. Otherwise, we will see broke a pad-lock in browsers.
+The final step is to import `ca.crt` as a trusted Root CA into your client OS. Otherwise, we will see a broken pad-lock in browsers.
 OS X, Windows, iOS and Android are confirmed to work.
 
-### Launch Pixelserv
-A few examples of launching Pixelserv:
+### Launch pixelserv-tls
+A few examples of launching _pixelserv-tls_:
 * `/jffs/bin/pixelserv 192.168.1.1 -u admin`
 * `/jffs/bin/pixelserv 192.168.1.1 -p 80 -p 8080 -k 443 -k 2443 -u admin`
 
 The first example will run pixelserv as root where `admin` is the root account on ASUSWRT and its variants. Listen on port 80 for HTTP and 443 for HTTPS. The second example will additionally listen on 8080 for HTTP and 2443 for HTTPS.
 
+Also in the above examples, `pixelserv` in `/jffs/bin` is a symbolic link to the actual binary `pixelserv.arm.performance.static` on a different disk partition.
+
 ### Binaries
 
-Binary is provided for Asuswrt/Merlin (ARM & MIPS) in Releases section. Possibly also work on other ARM/MIPS firmware. Another binary is provided for Entware-ARM. For each architecture, it includes both static and dynamic binaries. Recommend to always use static version unless you want to save disk space at the expense of run-time RAM usage.
+Binary is provided for Asuswrt/Merlin (ARM & MIPS) in Releases section. Possibly also work on other ARM/MIPS firmware. Another binary is provided for Entware-ARM. For each architecture, it includes both static and dynamic versions. I recommend always using static version unless you want to save disk space at the expense of run-time RAM usage.
 
 ### New command line switches
 ```
@@ -50,45 +52,46 @@ Usage:bin/pixelserv
 ```
 `-k`, `-l` and `-z` are new options. `-k` specifies one https port and use multiple times for more ports.
 
-`-l` will log all ad requests to syslogd. If you don't specify in the command line, then no logging. This is an opt-in feature. Access logging can generate lots of data. Either use it only when trouble shoot browsing issue or have a more capable syslog installed on your router (e.g. syslog-ng + logrotate from Entware).
+`-l` will log all ad requests to syslogd. If we don't specify in the command line, no logging which is the default. Access logging can generate lots of data. Either use it only when troubleshoot a browsing issue or you have a more capable syslog on your router (e.g. syslog-ng + logrotate from Entware).
 
-`-z` specifies the path to certs storage. Each ad domain and its sub-domain will require one wildcard cert. Generated certs will be stored and re-used from here.
+`-z` specifies the path to certs storage. Each ad domain and its sub-domain will require one wildcard cert. Generated certs will be stored and re-used from there.
 
 ### Stats
 
 Stats are viewable by default at http://pixelservip/servstats.txt (for raw text format) or http://pixelservip/servstats for html format), where pixelserv ip is the ip address that pixelserv is listening on.
 
-Explanation of stats:
-* uts: uptime in seconds
-* req: number of connection requests
-* avg: average request size in bytes
-* rmx: maximum request size in bytes
-* tav: average request processing time in milliseconds
-* tmx: maximum request processing time in milliseconds
-* err: number of connections resulting in processing errors (syslog may have details)
-* tmo: number of connections that timed out while trying to read a request from the client
-* cls: number of connections that were closed by the client while reading or replying to the request
-* nou: number of requests that failed to include a URL
-* pth: number of requests for a path that could not be parsed
-* nfe: number of requests for a file with no extension
-* ufe: number of requests for an unrecognized/unhandled file extension
-* gif: number of requests for GIF images
-* bad: number of requests for unrecognized/unhandled HTTP methods
-* txt: number of requests for plaintext data formats
-* jpg: number of requests for JPEG images
-* png: number of requests for PNG images
-* swf: number of requests for Adobe Shockwave Flash files
-* ico: number of requests for ICO files (usually favicons)
-* slh: number of HTTPS requests with a good certifcate (cert exists and used) 
-* slm: number of HTTPS requests without a certficate (cert missing for ad domain)
-* sle: number of HTTPS requests with a bad cert (error in existing cert)
-* slu: number of unrecognized HTTPS requests (none of slh/slm/sle)
-* sta: number of requests for HTML stats
-* stt: number of requests for plaintext stats
-* 204: number of requests for /generate_204 URLs
-* rdr: number of requests resulting in a redirect
-* pst: number of requests for HTTP POST method
-* hed: number of requests for HTTP HEAD method
+|Mnemonics|Explanation
+|---------|-----------
+|uts|uptime in seconds
+|req|number of connection requests
+|avg|average request size in bytes
+|rmx|maximum request size in bytes
+|tav|average request processing time in milliseconds
+|tmx|maximum request processing time in milliseconds
+|err|number of connections resulting in processing errors (syslog may have details)
+|tmo|number of connections that timed out while trying to read a request from the client
+|cls|number of connections that were closed by the client while reading or replying to the request
+|nou|number of requests that failed to include a URL
+|pth|number of requests for a path that could not be parsed
+|nfe|number of requests for a file with no extension
+|ufe|number of requests for an unrecognized/unhandled file extension
+|gif|number of requests for GIF images
+|bad|number of requests for unrecognized/unhandled HTTP methods
+|txt|number of requests for plaintext data formats
+|jpg|number of requests for JPEG images
+|png|number of requests for PNG images
+|swf|number of requests for Adobe Shockwave Flash files
+|ico|number of requests for ICO files (usually favicons)
+|slh|number of HTTPS requests with a good certifcate (cert exists and used) 
+|slm|number of HTTPS requests without a certficate (cert missing for ad domain)
+|sle|number of HTTPS requests with a bad cert (error in existing cert)
+|slu|number of unrecognized HTTPS requests (none of slh/slm/sle)
+|sta|number of requests for HTML stats
+|stt|number of requests for plaintext stats
+|204|number of requests for /generate_204 URLs
+|rdr|number of requests resulting in a redirect
+|pst|number of requests for HTTP POST method
+|hed|number of requests for HTTP HEAD method
 
 ### Forum Threads
 * [pixelserv-tls]: Pixelserv with support for HTTPS born here.
