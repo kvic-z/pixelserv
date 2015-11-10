@@ -52,10 +52,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, const char *issuer,
 #endif
     // -- save cert
     if(pem_fn[0] == '*') pem_fn[0] = '_';
-    fname = malloc(PIXELSERV_MAX_PATH);
-    strcpy(fname, pem_dir);
-    strcat(fname, "/");
-    strcat(fname, pem_fn);
+    asprintf(&fname, "%s/%s", pem_dir, pem_fn);
     FILE *fp = fopen(fname, "wb");
     if(fp == NULL) {
         syslog(LOG_ERR, "Failed to open file %s", fname);
@@ -75,9 +72,9 @@ free_all:
 
 static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) { 
     int rv = 0;
-    char *fname = malloc(PIXELSERV_MAX_PATH);
-    strcpy(fname, ((cert_tlstor_t*)u)->pem_dir);
-    strcat(fname, "/ca.key.passphrase");
+    char *fname = NULL; 
+    asprintf(&fname, "%s/ca.key.passphrase", ((cert_tlstor_t*)u)->pem_dir);
+
     int fp = open(fname, O_RDONLY);    
     if(fp == -1)
         syslog(LOG_ERR, "Failed to open ca.key.passphrase");
@@ -97,13 +94,10 @@ static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) {
 void *cert_generator(void *cert_tlstor) {
 
     char *buf = malloc(PIXELSERV_MAX_SERVER_NAME*4);
+    int fd = open(PIXEL_CERT_PIPE, O_RDONLY);
 
     for (;;) {
-        int cnt, fd = -1;
-
-        close(fd); //FIXME
-        fd = open(PIXEL_CERT_PIPE, O_RDONLY);
-
+        int cnt;
         if(fd == -1)
             syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
 
@@ -111,20 +105,22 @@ void *cert_generator(void *cert_tlstor) {
 #ifdef DEBUG
              printf("%s: pipe EOF\n", __FUNCTION__);
 #endif
+            close(fd);
+            fd = open(PIXEL_CERT_PIPE, O_RDONLY);
             continue;
         }
         buf[cnt] = '\0';
 #ifdef DEBUG
         printf("%s: %s\n", __FUNCTION__, buf);
 #endif
-
-#ifndef USE_PTHREAD
         int pid = fork();
         if(pid == 0)
-#endif
         {
             char *p_buf=NULL, *p_buf_sav=NULL;
             char *fname = malloc(PIXELSERV_MAX_PATH);
+            
+            EVP_PKEY *key = NULL;
+            EVP_MD_CTX *md_ctx = NULL;
             
             // -- skip cert if already exists on disk
             p_buf = strtok_r(buf, ":", &p_buf_sav);
@@ -162,9 +158,10 @@ void *cert_generator(void *cert_tlstor) {
             }
             fclose(fp);
 
-            EVP_PKEY *key = EVP_PKEY_new();
+            key = EVP_PKEY_new();
             EVP_PKEY_assign_RSA(key, rsa);
-            EVP_MD_CTX *md_ctx = EVP_MD_CTX_create();
+            md_ctx = EVP_MD_CTX_create();
+            
             while (p_buf != NULL) {
                 // we don't check disk for cert. Simply re-gen and let it overwrite if exists on disk.
                 if(EVP_DigestSignInit(md_ctx, NULL, EVP_sha256(), NULL, key) != 1)
@@ -174,19 +171,15 @@ void *cert_generator(void *cert_tlstor) {
                 p_buf = strtok_r(NULL, ":", &p_buf_sav);
             }
 free_all:
-            EVP_PKEY_free(key);
-            EVP_MD_CTX_destroy(md_ctx);
-            free(fname);
-#ifndef USE_PTHREAD
+            //EVP_PKEY_free(key);
+            //EVP_MD_CTX_destroy(md_ctx);
+            //free(fname);
             exit(0);
-#endif
         }
-#ifndef USE_PTHREAD
         if(pid > 0){
             int status;
             wait(&status);
         }
-#endif
     }
     //free(buf);
     return NULL;
