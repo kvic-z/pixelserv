@@ -260,8 +260,9 @@ int main (int argc, char* argv[]) // program start
   SET_LINE_NUMBER(__LINE__);
 
   SSL_library_init();
-//  SSL_load_error_strings();
   mkfifo(PIXEL_CERT_PIPE, 0600);
+  pw = getpwnam(user);
+  chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid);
   {
 #ifndef USE_PTHREAD
     if(fork() == 0){
