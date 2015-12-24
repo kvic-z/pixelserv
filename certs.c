@@ -37,7 +37,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, const char *issuer,
 #endif
     if((x509 = X509_new()) == NULL)
         goto free_all;
-    ASN1_INTEGER_set(X509_get_serialNumber(x509),1); // always 1 ok for our ad servers..
+    ASN1_INTEGER_set(X509_get_serialNumber(x509),(unsigned)time(NULL));
     X509_set_version(x509,2); // X509 v3
     X509_gmtime_adj(X509_get_notBefore(x509), 0);
     X509_gmtime_adj(X509_get_notAfter(x509), 315360000L); // cert valid for 10yrs
