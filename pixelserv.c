@@ -66,7 +66,7 @@ void signal_handler(int sig)
   return;
 }
 
-int access_log = 0;
+unsigned char access_log = 0;
 const char *tls_pem = DEFAULT_PEM_PATH;
 int tls_ports[MAX_TLS_PORTS] = {0};
 int num_tls_ports = 0;
@@ -499,6 +499,8 @@ int main (int argc, char* argv[]) // program start
           case SEND_BAD_PATH:  ++pth; break;
           case SEND_POST:      ++pst; break;
           case SEND_HEAD:      ++hed; break;
+          case ACTION_LOG_ON:  access_log = 1; break;
+          case ACTION_LOG_OFF: access_log = 0; break;
           default:
             syslog(LOG_ERR, "Socket handler child process reported unknown response value: %d", pipedata.status);
         }

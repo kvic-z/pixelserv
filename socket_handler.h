@@ -23,7 +23,9 @@ typedef enum {
   SEND_NO_URL,
   SEND_BAD_PATH,
   SEND_POST,
-  SEND_HEAD
+  SEND_HEAD,
+  ACTION_LOG_ON,
+  ACTION_LOG_OFF
 } response_enum;
 
 typedef enum {

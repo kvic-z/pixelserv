@@ -43,6 +43,8 @@ volatile sig_atomic_t slm = 0;
 volatile sig_atomic_t sle = 0;
 volatile sig_atomic_t slu = 0;
 
+extern unsigned char access_log;
+
 // private data
 static struct timespec startup_time = {0, 0};
 static clockid_t clock_source = CLOCK_MONOTONIC;
@@ -114,8 +116,8 @@ char* get_stats(const int sta_offset, const int stt_offset) {
     struct timespec current_time;
     long uptime;
 
-    const char* sta_fmt = "<table><tr><td>uts: Uptime</td><td>%s</td></tr><tr><td>req: Total # of requests</td><td>%d</td></tr><tr><td>avg: Avg size of reqs</td><td>%d bytes</td></tr><tr><td>rmx: Max size of reqs</td><td>%d bytes</td></tr><tr><td>tav: Avg process time</td><td>%d ms</td></tr><tr><td>tmx: Max process time</td><td>%d ms</td></tr><tr><td>err: # of error reqs</td><td>%d</td></tr><tr><td>tmo: # of client timeout</td><td>%d</td></tr><tr><td>cls: # of client shutdown</td><td>%d</td></tr><tr><td>nou: # of reqs w/o  URL</td><td>%d</td></tr><tr><td>pth: # of invalid URL</td><td>%d</td></tr><tr><td>nfe: # of missing file ext</td><td>%d</td></tr><tr><td>ufe: # of unknown file ext</td><td>%d</td></tr><tr><td>gif: # of GIF reqs</td><td>%d</td></tr><tr><td>bad: # of unknown HTTP methods</td><td>%d</td></tr><tr><td>txt: # of TXT reqs</td><td>%d</td></tr><tr><td>jpg: # of JPG reqs</td><td>%d</td></tr><tr><td>png: # of PNG reqs</td><td>%d</td></tr><tr><td>swf: # of SWF reqs</td><td>%d</td></tr><tr><td>ico: # of ICO reqs</td><td>%d</td></tr><tr><td>slh: # of HTTPS /w a good cert</td><td>%d</td></tr><tr><td>slm: # of HTTPS w/o a cert</td><td>%d</td></tr><tr><td>sle: # of HTTPS /w a bad cert</td><td>%d</td></tr><tr><td>slu: # of unrecognized HTTPS</td><td>%d</td></tr><tr><td>sta: # of HTML stats</td><td>%d</td></tr><tr><td>stt: # of text stats</td><td>%d</td></tr><tr><td>204: # of HTTP/204 (no content)</td><td>%d</td></tr><tr><td>rdr: # of redirects</td><td>%d</td></tr><tr><td>pst: # of POST method</td><td>%d</td></tr><tr><td>hed: # of HEAD method</td><td>%d</td></tr></table>";
-    const char* stt_fmt = "%d uts, %d req, %d avg, %d rmx, %d tav, %d tmx, %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif, %d bad, %d txt, %d jpg, %d png, %d swf, %d ico, %d slh, %d slm, %d sle, %d slu, %d sta, %d stt, %d 204, %d rdr, %d pst, %d hed";
+    const char* sta_fmt = "<table><tr><td>uts: Uptime</td><td>%s</td></tr><tr><td>req: Total # of requests</td><td>%d</td></tr><tr><td>avg: Avg size of reqs</td><td>%d bytes</td></tr><tr><td>rmx: Max size of reqs</td><td>%d bytes</td></tr><tr><td>tav: Avg process time</td><td>%d ms</td></tr><tr><td>tmx: Max process time</td><td>%d ms</td></tr><tr><td>err: # of error reqs</td><td>%d</td></tr><tr><td>tmo: # of client timeout</td><td>%d</td></tr><tr><td>cls: # of client shutdown</td><td>%d</td></tr><tr><td>nou: # of reqs w/o  URL</td><td>%d</td></tr><tr><td>pth: # of invalid URL</td><td>%d</td></tr><tr><td>nfe: # of missing file ext</td><td>%d</td></tr><tr><td>ufe: # of unknown file ext</td><td>%d</td></tr><tr><td>gif: # of GIF reqs</td><td>%d</td></tr><tr><td>bad: # of unknown HTTP methods</td><td>%d</td></tr><tr><td>txt: # of TXT reqs</td><td>%d</td></tr><tr><td>jpg: # of JPG reqs</td><td>%d</td></tr><tr><td>png: # of PNG reqs</td><td>%d</td></tr><tr><td>swf: # of SWF reqs</td><td>%d</td></tr><tr><td>ico: # of ICO reqs</td><td>%d</td></tr><tr><td>slh: # of HTTPS /w a good cert</td><td>%d</td></tr><tr><td>slm: # of HTTPS w/o a cert</td><td>%d</td></tr><tr><td>sle: # of HTTPS /w a bad cert</td><td>%d</td></tr><tr><td>slu: # of unrecognized HTTPS</td><td>%d</td></tr><tr><td>sta: # of HTML stats</td><td>%d</td></tr><tr><td>stt: # of text stats</td><td>%d</td></tr><tr><td>204: # of HTTP/204 (no content)</td><td>%d</td></tr><tr><td>rdr: # of redirects</td><td>%d</td></tr><tr><td>pst: # of POST method</td><td>%d</td></tr><tr><td>hed: # of HEAD method</td><td>%d</td></tr><tr><td>log: access log enabled (0=no 1=yes)</td><td>%d</td></tr></table>";
+    const char* stt_fmt = "%d uts, %d req, %d avg, %d rmx, %d tav, %d tmx, %d err, %d tmo, %d cls, %d nou, %d pth, %d nfe, %d ufe, %d gif, %d bad, %d txt, %d jpg, %d png, %d swf, %d ico, %d slh, %d slm, %d sle, %d slu, %d sta, %d stt, %d 204, %d rdr, %d pst, %d hed, %d log";
   
     get_time(&current_time);
     uptime = difftime(current_time.tv_sec, startup_time.tv_sec);
@@ -123,7 +125,7 @@ char* get_stats(const int sta_offset, const int stt_offset) {
     asprintf(&uptimeStr, "%d days %02d:%02d", (int)uptime/86400, (int)(uptime%86400)/3600, (int)((uptime%86400)%3600)/60);
 
     if (asprintf(&retbuf, (sta_offset) ? sta_fmt : stt_fmt,
-        (sta_offset) ? (long)uptimeStr : (long)uptime, count, avg, rmx, tav, tmx, err, tmo, cls, nou, pth, nfe, ufe, gif, bad, txt, jpg, png, swf, ico, slh, slm, sle, slu, sta + sta_offset, stt + stt_offset, noc, rdr, pst, hed
+        (sta_offset) ? (long)uptimeStr : (long)uptime, count, avg, rmx, tav, tmx, err, tmo, cls, nou, pth, nfe, ufe, gif, bad, txt, jpg, png, swf, ico, slh, slm, sle, slu, sta + sta_offset, stt + stt_offset, noc, rdr, pst, hed, access_log
         ) < 1)
         retbuf = " <asprintf error>";
 

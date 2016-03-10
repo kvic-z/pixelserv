@@ -391,7 +391,7 @@ void child_signal_handler(int sig)
 # define TIME_CHECK(x,y...)
 #endif //DEBUG
 
-extern int access_log;
+extern unsigned char access_log;
 extern const char *tls_pem;
 extern int tls_ports[];
 extern int num_tls_ports;
@@ -649,6 +649,12 @@ void socket_handler(int argc
           if (path == NULL) {
             pipedata.status = SEND_NO_URL;
             syslog(LOG_ERR, "client did not specify URL for GET request");
+          } else if (!strcmp(path, "/log=1")) {
+            pipedata.status = ACTION_LOG_ON;
+            access_log = 1;
+          } else if (!strcmp(path, "/log=0")) {
+            pipedata.status = ACTION_LOG_OFF;
+            access_log = 0;
           } else if (!strcmp(path, stats_url)) {
             pipedata.status = SEND_STATS;
             version_string = get_version(argc, argv);
