@@ -846,7 +846,7 @@ void socket_handler(int argc
         char *host = strtok_r(NULL, "\r\n", &bufptr);
         strtok(host, ":");
         host = strtok(NULL, "\r\n"); 
-        syslog(LOG_NOTICE, "%s:%s %s%s", client_ip, host, req, (tlsext_cb_arg.servername) ? " secure" : "");
+        syslog(LOG_NOTICE, "(%2d) %s:%s %s%s", pipedata.status, client_ip, host, req, (tlsext_cb_arg.servername) ? " secure" : "");
         
         free(buf_backup);
     }
