@@ -531,11 +531,12 @@ int main (int argc, char* argv[]) // program start
           }
         }
 
-        // update request time stats
-        // calculate moving average, adding 0.5 for rounding
-        tav += ((pipedata.run_time - tav) / ++tct) + 0.5;
-        // look for a new high score, adding 0.5 for rounding
-        if (pipedata.run_time + 0.5 > tmx) {
+        if (pipedata.status != FAIL_TIMEOUT) {
+          // update request time stats
+          // calculate moving average, adding 0.5 for rounding
+          tav += ((pipedata.run_time - tav) / ++tct) + 0.5;
+          // look for a new high score, adding 0.5 for rounding
+        if (pipedata.run_time + 0.5 > tmx)
           tmx = (pipedata.run_time + 0.5);
         }
       }
