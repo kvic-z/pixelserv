@@ -1,7 +1,5 @@
 ## pixelserv-tls
-_pixelserv-tls_ is a fork of pixelserv - the tiny webserver that responds to all requests with "nothing" and yet particularly useful for network connections with high latency and metered bandwidth. 
-
-_pixelserv-tls_ adds support for HTTPS connection, enables access log and comes with a better layout of stats in HTML. 
+_pixelserv-tls_ is a fork of pixelserv with added support for HTTPS - the tiny webserver that responds to all requests with "nothing" and yet particularly useful for whitelisting hosts for troubled websites, and for mining "big data" on adservers and trackers.
 
 Certificates for adserver domains are automatically generated at real-time upon first request. All requests to adserver are optionally written to syslogd. The stats in text format are preserved, good for command line parsing. The same stats in HTML format are revamped to be more legible.
 
