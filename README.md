@@ -3,11 +3,11 @@ _pixelserv-tls_ is a fork of pixelserv - the tiny webserver that responds to all
 
 _pixelserv-tls_ adds support for HTTPS connection, enables access log and comes with a better layout of stats in HTML. 
 
-Certificates for adserver domains are automatically generated at real-time upon first access. All requests to adserver are optionally written to syslogd. The stats in text format are preserved, good for command line parsing. The same stats in HTML format are revamped to be more legible.
+Certificates for adserver domains are automatically generated at real-time upon first request. All requests to adserver are optionally written to syslogd. The stats in text format are preserved, good for command line parsing. The same stats in HTML format are revamped to be more legible.
 
 ### Prepare your Root CA cert
 
-_pixelserv-tls_ is only capable of serving HTTPS requests when a root CA cert is configured. One way to generate a Root CA is to run Easy-RSA 3.0 from your PC. Follow this [EasyRSA Quickstart] guide. Only the first two steps are needed:
+_pixelserv-tls_ requires a Root CA cert to run. Use Easy-RSA 3.0 to generate this cert on PC or routers. Easy-RSA 3.0 requires `mktemp` and OpenSSL which are available in most Linux distributions and router firmwares with Entware-ng. Follow this [EasyRSA Quickstart] guide. Only the first two steps are needed:
 * `./easyrsa init-pki`
 * `./easyrsa build-ca nopass`
 
@@ -15,26 +15,50 @@ When prompted for a Common Name, type in "Pixelserv CA".
 
 When EasyRSA finishes, it places `ca.crt` and `ca.key` under `pki` and `pki/private` sub-dirs respectively. Upload these two files to `/opt/var/cache/pixelserv` on your router.
 
-The final step is to import `ca.crt` as a trusted Root CA into your client OS. Otherwise, we will see a broken pad-lock in browsers.
-OS X, Windows, iOS and Android are confirmed to work.
+### Import ca.crt into Clients
+
+Note that installation of `ca.cert` on client OS is not mandatory but recommended. Clients without `ca.crt` will interact smoothly with pixelserv-tls.
+
+#### MacOS
+
+In Terminal, type
+* `sudo security add-trusted-cert -d -r trustRoot -k /System/Library/Keychains/SystemRootCertificates.keychain ca.crt`
+
+Note: since OS X El Capitan, System Integrity Protection need to be disabled first. Reboot, then run the above command line. System Integrity Protection can be enabled afterward. Here is a [SIP tutorial] to disable/enable System Integrity Protection. `ca.crt` need to be re-added after every OS update unfortunately.
+
+#### iOS
+
+Multiple ways to get it done. The simplest is to email yourself `ca.crt`. Go to your iOS device. Click on the attachment and follow the instructions.
+
+Here is a [guide by IBM] that provides a bit more details.
+
+#### Windows
+
+Chrome/IE/Edge uses Root CA certs from Windows system-wide repository. Follow this [Windows guide] carefully to add ca.cert into the system-wide Root CAs.
+
+Firefox manages its own repository of Root CAs. Follow this [Firefox guide] only if you also run Firefox.
+
+#### Android
+
+This [Android guide] looks interesting. I don't have Android devices. Please provide feedback after you tried.
 
 ### Launch pixelserv-tls
 A few examples of launching _pixelserv-tls_:
-* `/jffs/bin/pixelserv 192.168.1.1 -u admin`
-* `/jffs/bin/pixelserv 192.168.1.1 -p 80 -p 8080 -k 443 -k 2443 -u admin`
+* `pixelserv-tls 192.168.1.1`
+* `pixelserv-tls 192.168.1.1 -p 80 -p 8080 -k 443 -k 2443 -u admin`
 
-The first example will run pixelserv as root where `admin` is the root account on ASUSWRT and its variants. Listen on port 80 for HTTP and 443 for HTTPS. The second example will additionally listen on 8080 for HTTP and 2443 for HTTPS.
-
-Also in the above examples, `pixelserv` in `/jffs/bin` is a symbolic link to the actual binary `pixelserv.arm.performance.static` on a different disk partition.
+The first example runs pixelserv as `nobody` with non-root privilege. Listens on port 80 for HTTP and 443 for HTTPS. The second example additionally listens on 8080 for HTTP and 2443 for HTTPS, and runs as `admin` - the root account in ASUSWRT.
 
 ### Binaries
 
-Binary is provided for Asuswrt/Merlin (ARM & MIPS) in Releases section. Possibly also work on other ARM/MIPS firmware. Another binary is provided for Entware-ARM. For each architecture, it includes both static and dynamic versions. I recommend always using static version unless you want to save disk space at the expense of run-time RAM usage.
+pixelserv-tls is now (circa April 2016) available on Entware-NG. Use `opkg install pixelserv-tls` to install on supported platforms including Asuswrt/Merlin.
+
+Going forward binaries for Asuswrt/Merlin in Releases section will be provided only on requests.
 
 ### New command line switches
 ```
-phaeo:/jffs$ bin/pixelserv --help
-Usage:bin/pixelserv
+$ pixelserv-tls --help
+Usage:pixelserv-tls
 	ip_addr/hostname (all if omitted)
 	-2 (disable HTTP 204 reply to generate_204 URLs)
 	-f (stay in foreground - don't daemonize)
@@ -92,6 +116,7 @@ Stats are viewable by default at http://pixelservip/servstats.txt (for raw text 
 |rdr|number of requests resulting in a redirect
 |pst|number of requests for HTTP POST method
 |hed|number of requests for HTTP HEAD method
+|log|status of access loggging
 
 ### Forum Threads
 * [pixelserv-tls]: Pixelserv with support for HTTPS born here.
@@ -99,6 +124,11 @@ Stats are viewable by default at http://pixelservip/servstats.txt (for raw text 
 * [pixelserv-ddwrt]: An even older thread of an early version of pixelserv.
  
 [EasyRSA Quickstart]: <https://github.com/OpenVPN/easy-rsa/blob/v3.0.0-rc1/README.quickstart.md>
+[Windows guide]: <https://support.comodo.com/index.php?/Default/Knowledgebase/Article/View/636/17/>
+[Firefox guide]: <https://wiki.wmtransfer.com/projects/webmoney/wiki/Installing_root_certificate_in_Mozilla_Firefox>
+[SIP tutorial]: <http://osxdaily.com/2015/10/05/disable-rootless-system-integrity-protection-mac-os-x/>
+[guide by IBM]: <https://www.ibm.com/support/knowledgecenter/#!/SSHSCD_7.0.0/com.ibm.worklight.installconfig.doc/admin/t_installing_root_CA_iOS.html>
+[Android guide]: <http://wiki.pcprobleemloos.nl/android/cacert>
 [pixelserv-tls]: <http://www.snbforums.com/threads/pixelserv-a-better-one-pixel-webserver-for-adblock.26114>
 [pixelserv]: <http://www.linksysinfo.org/index.php?threads/pixelserv-compiled-to-run-on-router-wrt54g.30509/page-3#post-229342>
 [pixelserv-ddwrt]: <http://www.dd-wrt.com/phpBB2/viewtopic.php?p=685201>
