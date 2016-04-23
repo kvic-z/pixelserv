@@ -266,6 +266,9 @@ int main (int argc, char* argv[]) // program start
   {
 #ifndef USE_PTHREAD
     if(fork() == 0){
+      sigset_t mask;
+      sigfillset(&mask);
+      sigprocmask(SIG_SETMASK, &mask, NULL);
       cert_generator(&(cert_tlstor_t){tls_pem});
       exit(0);
     }
@@ -536,8 +539,8 @@ int main (int argc, char* argv[]) // program start
           // calculate moving average, adding 0.5 for rounding
           tav += ((pipedata.run_time - tav) / ++tct) + 0.5;
           // look for a new high score, adding 0.5 for rounding
-        if (pipedata.run_time + 0.5 > tmx)
-          tmx = (pipedata.run_time + 0.5);
+          if (pipedata.run_time + 0.5 > tmx)
+            tmx = (pipedata.run_time + 0.5);
         }
       }
       --select_rv;
