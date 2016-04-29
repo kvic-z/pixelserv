@@ -267,7 +267,11 @@ int main (int argc, char* argv[]) // program start
 #ifndef USE_PTHREAD
     if(fork() == 0){
       sigset_t mask;
-      sigfillset(&mask);
+      sigemptyset(&mask);
+      sigaddset(&mask, SIGUSR1);
+#ifdef DEBUG
+      sigaddset(&mask, SIGUSR2);
+#endif
       sigprocmask(SIG_SETMASK, &mask, NULL);
       cert_generator(&(cert_tlstor_t){tls_pem});
       exit(0);

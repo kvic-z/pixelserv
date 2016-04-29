@@ -6,9 +6,9 @@ OPTS      := -DDROP_ROOT -DIF_MODE
 SRCS      := util.c socket_handler.c pixelserv.c certs.c
 
 ROOT      := .
-CFLAGS    := -I$(ROOT)/openssl/include
+CFLAGS    := -I$(ROOT)/openssl/include -DUSE_PTHREAD
 LDFLAGS    = -L$(ROOT)/openssl/$(ARCH) -L$(ROOT)/openssl/$(ARCH)
-SHAREDLIB := -lssl -lcrypto -ldl
+SHAREDLIB := -lssl -lcrypto -ldl -lpthread
 STATICLIB  = $(ROOT)/openssl/$(ARCH)/libssl.a $(ROOT)/openssl/$(ARCH)/libcrypto.a
 
 # debug flags
