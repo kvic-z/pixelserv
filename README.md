@@ -116,12 +116,15 @@ Stats are viewable by default at http://pixelservip/servstats.txt (for raw text 
 |hed||number of requests for HTTP HEAD method
 |log|Y|status of access loggging
 
-### Forum Threads
+### Forum Discussion for pixelserv-tls
 * [pixelserv-tls]: Pixelserv with support for HTTPS born here.
+ 
+### Other References
 * [pixelserv]: The thread on LinksysInfo.org where the parent of this fork is produced.
 * [pixelserv-ddwrt]: An even older thread of an early version of pixelserv.
- 
-[EasyRSA Quickstart]: <https://github.com/OpenVPN/easy-rsa/blob/v3.0.0-rc1/README.quickstart.md>
+* [Page load time]: Measure page load time in Google Chrome
+
+[Page load time]: <http://kazoo.ga/measure-page-load-time-in-google-chrome/>
 [Windows guide]: <https://support.comodo.com/index.php?/Default/Knowledgebase/Article/View/636/17/>
 [Firefox guide]: <https://wiki.wmtransfer.com/projects/webmoney/wiki/Installing_root_certificate_in_Mozilla_Firefox>
 [SIP tutorial]: <http://osxdaily.com/2015/10/05/disable-rootless-system-integrity-protection-mac-os-x/>
