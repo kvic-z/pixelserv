@@ -5,13 +5,13 @@ Certificates for adserver domains are automatically generated at real-time upon 
 
 ### Prepare your Root CA cert
 
-_pixelserv-tls_ requires a Root CA cert to run. Use Easy-RSA 3.0 to generate this cert on PC or routers. Easy-RSA 3.0 requires `mktemp` and OpenSSL which are available in most Linux distributions and router firmwares with Entware-ng. Follow this [EasyRSA Quickstart] guide. Only the first two steps are needed:
-* `./easyrsa init-pki`
-* `./easyrsa build-ca nopass`
+_pixelserv-tls_ requires a Root CA cert to run. Assume OpenSSL already installed in your systems. Execute the following statements in a command shell:
 
-When prompted for a Common Name, type in "Pixelserv CA".
+* `cd /opt/var/cache/pixelserv`
+* `openssl genrsa -out ca.key 1024`
+* `openssl req -key ca.key -new -x509 -days 3650 -sha256 -extensions v3_ca -out ca.crt -subj "/CN=Pixelserv CA"`
 
-When EasyRSA finishes, it places `ca.crt` and `ca.key` under `pki` and `pki/private` sub-dirs respectively. Upload these two files to `/opt/var/cache/pixelserv` on your router.
+These create a 1024-bit CA cert with Common Name "Pixelserv CA" in `/opt/var/cache/pixelserv`.
 
 ### Import ca.crt into Clients
 
