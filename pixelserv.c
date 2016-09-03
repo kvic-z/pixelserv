@@ -263,7 +263,10 @@ int main (int argc, char* argv[]) // program start
   mkfifo(PIXEL_CERT_PIPE, 0600);
   pw = getpwnam(user);
   chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid);
-  {
+  {    
+    cert_tlstor_t *cert_tlstor = malloc(sizeof(cert_tlstor_t));
+    cert_tlstor->pem_dir = tls_pem;
+ 
 #ifndef USE_PTHREAD
     if(fork() == 0){
       sigset_t mask;
@@ -273,12 +276,12 @@ int main (int argc, char* argv[]) // program start
       sigaddset(&mask, SIGUSR2);
 #endif
       sigprocmask(SIG_SETMASK, &mask, NULL);
-      cert_generator(&(cert_tlstor_t){tls_pem});
+      cert_generator((void*)cert_tlstor);
       exit(0);
     }
 #else
     pthread_t certgen_thread;
-    pthread_create(&certgen_thread, NULL, cert_generator, &(cert_tlstor_t){tls_pem});
+    pthread_create(&certgen_thread, NULL, cert_generator, (void*)cert_tlstor);
 #endif
   }
 
@@ -640,6 +643,7 @@ int main (int argc, char* argv[]) // program start
     SET_LINE_NUMBER(__LINE__);
   } // end of perpetual accept() loop
 //  Never get here while(1)
+//  free(cert_tlstor);
 //  pthread_cancel(cert_gen_thread);
 //  pthread_join(cert_gen_thread, NULL);
 //  return (EXIT_SUCCESS);

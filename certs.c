@@ -90,12 +90,34 @@ static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) {
     return --rv; // trim \n at the end
 } 
 
+void *cert_generator(void *ptr) {
 
-void *cert_generator(void *cert_tlstor) {
+#ifdef DEBUG
+    printf("%s: thread up and running\n", __FUNCTION__);
+#endif
+    cert_tlstor_t *cert_tlstor = (cert_tlstor_t *) ptr;
+    char *fname = malloc(PIXELSERV_MAX_PATH);
+    strcpy(fname, cert_tlstor->pem_dir);
+    strcat(fname, "/ca.crt");
+    FILE *fp = fopen(fname, "r");
+    X509 *x509 = X509_new();
+    if(fp == NULL || PEM_read_X509(fp, &x509, NULL, NULL) == NULL)
+       syslog(LOG_ERR, "Failed to open/read ca.crt");
+    fclose(fp);
+    free(fname);
+
+    char issuer[65]; // max 64 characters as per X509
+    if(X509_NAME_get_text_by_NID(X509_get_subject_name(x509),
+            NID_commonName, issuer, sizeof issuer) < 0)
+        syslog(LOG_ERR, "Failed to get issuer name from CA cert.");
+     X509_free(x509);
+#ifdef DEBUG
+    printf("Issuer CA: %s\n", issuer);
+#endif
 
     char *buf = malloc(PIXELSERV_MAX_SERVER_NAME*4);
     int fd = open(PIXEL_CERT_PIPE, O_RDONLY);
-
+    
     for (;;) {
         int cnt;
         if(fd == -1)
@@ -137,23 +159,11 @@ void *cert_generator(void *cert_tlstor) {
             if (p_buf == NULL)
                 goto free_all;
 
-            char issuer[65]; // max 64 characters as per X509 
-            strcpy(fname, ((cert_tlstor_t*)cert_tlstor)->pem_dir);
-            strcat(fname, "/ca.crt");
-            FILE *fp = fopen(fname, "r");
-            X509 *x509 = X509_new();
-            if(fp == NULL || PEM_read_X509(fp, &x509, NULL, NULL) == NULL)
-                syslog(LOG_ERR, "Failed to open/read ca.crt"); 
-            if(X509_NAME_get_text_by_NID(X509_get_issuer_name(x509), NID_commonName, issuer, sizeof issuer) < 0)
-                syslog(LOG_ERR, "Failed to get issuer name from ca.crt");
-            X509_free(x509);
-            fclose(fp);
-            
-            strcpy(fname, ((cert_tlstor_t*)cert_tlstor)->pem_dir);
+            strcpy(fname, cert_tlstor->pem_dir);
             strcat(fname, "/ca.key");
-            fp = fopen(fname, "r");
+            FILE *fp = fopen(fname, "r");
             RSA *rsa = NULL;
-            if(fp == NULL || PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, cert_tlstor) == NULL) {
+            if(fp == NULL || PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, (void*)cert_tlstor) == NULL) {
                 syslog(LOG_ERR, "Failed to open/read ca.key"); 
             }
             fclose(fp);
@@ -167,7 +177,7 @@ void *cert_generator(void *cert_tlstor) {
                 if(EVP_DigestSignInit(md_ctx, NULL, EVP_sha256(), NULL, key) != 1)
                     syslog(LOG_ERR, "Failed to init signing context");
                 else
-                    generate_cert(p_buf, ((cert_tlstor_t*)cert_tlstor)->pem_dir, issuer, md_ctx);
+                    generate_cert(p_buf, cert_tlstor->pem_dir, issuer, md_ctx);
                 p_buf = strtok_r(NULL, ":", &p_buf_sav);
             }
 free_all:

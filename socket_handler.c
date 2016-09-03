@@ -33,7 +33,7 @@
   "\r\n";
   // split here because we care about the length of what follows
   static const char httpstats3[] =
-  "<!DOCTYPE html><html><head><title>pixelserv statistics</title><style>body {font-family:Monaco;font-size:16px;}</style></head><body>";
+  "<!DOCTYPE html><html><head><title>pixelserv statistics</title></head><body>";
   // stats text goes between these two strings
   static const char httpstats4[] =
   "</body></html>\r\n";
@@ -454,6 +454,7 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
         rv = SSL_TLSEXT_ERR_ALERT_FATAL;
         goto free_all;
     }
+    SSL_CTX_load_verify_locations(sslctx, "ca.crt", pem_dir);
     tlsext_cb_arg->status = SSL_HIT;
     SSL_set_SSL_CTX(cSSL, sslctx);
 
