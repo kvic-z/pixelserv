@@ -70,6 +70,7 @@ unsigned char access_log = 0;
 const char *tls_pem = DEFAULT_PEM_PATH;
 int tls_ports[MAX_TLS_PORTS] = {0};
 int num_tls_ports = 0;
+unsigned char loadCertChain = 0;
   
 int main (int argc, char* argv[]) // program start
 {
@@ -263,7 +264,26 @@ int main (int argc, char* argv[]) // program start
   mkfifo(PIXEL_CERT_PIPE, 0600);
   pw = getpwnam(user);
   chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid);
-  {    
+  {
+    char *fname = malloc(PIXELSERV_MAX_PATH);
+    strcpy(fname, tls_pem);
+    strcat(fname, "/ca.crt");
+    FILE *fp = fopen(fname, "r");
+    X509 *cacert = X509_new();
+    if(fp == NULL || PEM_read_X509(fp, &cacert, NULL, NULL) == NULL)
+       syslog(LOG_ERR, "Failed to open/read ca.crt");
+    fclose(fp);
+    free(fname);
+    
+    EVP_PKEY * pubkey = X509_get_pubkey(cacert);
+    if (X509_verify(cacert, pubkey) <= 0)
+        loadCertChain = 1;
+    EVP_PKEY_free(pubkey);
+    X509_free(cacert);
+
+#ifdef DEBUG
+    printf("loadCertChain: %d\n", loadCertChain);
+#endif  
     cert_tlstor_t *cert_tlstor = malloc(sizeof(cert_tlstor_t));
     cert_tlstor->pem_dir = tls_pem;
  

@@ -395,6 +395,7 @@ extern unsigned char access_log;
 extern const char *tls_pem;
 extern int tls_ports[];
 extern int num_tls_ports;
+extern unsigned char loadCertChain;
 
 static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
 {
@@ -454,7 +455,12 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
         rv = SSL_TLSEXT_ERR_ALERT_FATAL;
         goto free_all;
     }
-    SSL_CTX_load_verify_locations(sslctx, "ca.crt", pem_dir);
+    if (loadCertChain > 0)
+    {
+        strcpy(full_pem_path, pem_dir);
+        strcat(full_pem_path, "/ca.crt");   
+        SSL_CTX_load_verify_locations(sslctx, full_pem_path, NULL);
+    }
     tlsext_cb_arg->status = SSL_HIT;
     SSL_set_SSL_CTX(cSSL, sslctx);
 
