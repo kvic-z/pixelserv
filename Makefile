@@ -88,12 +88,15 @@ dist:
 printver:
 	@echo "=== Building $(DISTNAME) version $(PVERSION) ==="
 
+x86: ARCH = i386
+x86: LDFLAGS += -lpthread
+x86: CFLAGS += -DUSE_PTHREAD
 x86: printver dist
 	@echo "=== Building x86 ==="
-	$(CC32) $(CFLAGS_D) $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.dynamic
-	$(CC32) $(CFLAGS_P) $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.dynamic
-	$(CC32) $(CFLAGS_D) -static $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.static
-	$(CC32) $(CFLAGS_P) -static $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.static
+	$(CC32) $(CFLAGS_D) $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.dynamic $(SHAREDLIB)
+	$(CC32) $(CFLAGS_P) $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.dynamic $(SHAREDLIB)
+	$(CC32) $(CFLAGS_D) -static $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.static $(STATICLIB) $(SHAREDLIB)
+	$(CC32) $(CFLAGS_P) -static $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.static $(STATICLIB) $(SHAREDLIB)
 	$(STRIP) dist/$(DISTNAME).$@.performance.*
 	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
