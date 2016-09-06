@@ -15,7 +15,7 @@
 #include "certs.h"
 #include "util.h"
 
-static void generate_cert(char* pem_fn, const char *pem_dir, const char *issuer, EVP_MD_CTX *p_ctx)
+static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, EVP_MD_CTX *p_ctx)
 {
     char *fname = NULL;
     EVP_PKEY *key = NULL;
@@ -41,9 +41,8 @@ static void generate_cert(char* pem_fn, const char *pem_dir, const char *issuer,
     X509_set_version(x509,2); // X509 v3
     X509_gmtime_adj(X509_get_notBefore(x509), 0);
     X509_gmtime_adj(X509_get_notAfter(x509), 315360000L); // cert valid for 10yrs
-    X509_NAME *name = X509_get_issuer_name(x509);
-    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char *)issuer, -1, -1, 0);
-    name = X509_get_subject_name(x509);
+    X509_set_issuer_name(x509, issuer);
+    X509_NAME *name = X509_get_subject_name(x509);
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char *)pem_fn, -1, -1, 0);
     X509_set_pubkey(x509, key);
     X509_sign_ctx(x509, p_ctx);
@@ -106,14 +105,8 @@ void *cert_generator(void *ptr) {
     fclose(fp);
     free(fname);
 
-    char issuer[65]; // max 64 characters as per X509
-    if(X509_NAME_get_text_by_NID(X509_get_subject_name(x509),
-            NID_commonName, issuer, sizeof issuer) < 0)
-        syslog(LOG_ERR, "Failed to get issuer name from CA cert.");
-     X509_free(x509);
-#ifdef DEBUG
-    printf("Issuer CA: %s\n", issuer);
-#endif
+    X509_NAME *issuer = X509_NAME_dup(X509_get_subject_name(x509));
+    X509_free(x509);
 
     char *buf = malloc(PIXELSERV_MAX_SERVER_NAME*4);
     int fd = open(PIXEL_CERT_PIPE, O_RDONLY);
@@ -191,6 +184,7 @@ free_all:
             wait(&status);
         }
     }
+    //X509_NAME_free(issuer);
     //free(buf);
     return NULL;
 }
