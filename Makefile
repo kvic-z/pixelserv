@@ -64,7 +64,6 @@ ARMentSTRIP  := $(ARMentPREFIX)$(STRIP)
 
 # targets - notes:
 # - for each platform, there should be 4 versions: dynamic performance, dynamic debug, static performance, static debug
-# - static is not built for x86* targets because it causes glibc-related complaints
 # - mips version could be K24 or K26 depending on environment
 # - tomatoware is not included in the 'all' target, because it's for compiling natively on a router
 
