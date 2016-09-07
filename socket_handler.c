@@ -395,7 +395,8 @@ extern unsigned char access_log;
 extern const char *tls_pem;
 extern int tls_ports[];
 extern int num_tls_ports;
-extern unsigned char loadCertChain;
+extern STACK_OF(X509_INFO) *cachain;
+
 
 static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
 {
@@ -455,11 +456,15 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
         rv = SSL_TLSEXT_ERR_ALERT_FATAL;
         goto free_all;
     }
-    if (loadCertChain > 0)
+
+    if (cachain)
     {
-        strcpy(full_pem_path, pem_dir);
-        strcat(full_pem_path, "/ca.crt");   
-        SSL_CTX_load_verify_locations(sslctx, full_pem_path, NULL);
+        X509_INFO *inf; int i;
+        for (i=sk_X509_INFO_num(cachain)-1; i >= 0; i--) 
+        {
+            if ((inf = sk_X509_INFO_value(cachain, i)) && inf->x509 && !SSL_CTX_add_extra_chain_cert(sslctx, inf->x509))
+                syslog(LOG_ERR, "Cannot add CA cert %d\n", i);
+        }
     }
     tlsext_cb_arg->status = SSL_HIT;
     SSL_set_SSL_CTX(cSSL, sslctx);

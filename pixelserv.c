@@ -70,7 +70,7 @@ unsigned char access_log = 0;
 const char *tls_pem = DEFAULT_PEM_PATH;
 int tls_ports[MAX_TLS_PORTS] = {0};
 int num_tls_ports = 0;
-unsigned char loadCertChain = 0;
+STACK_OF(X509_INFO) *cachain = NULL;
   
 int main (int argc, char* argv[]) // program start
 {
@@ -272,18 +272,34 @@ int main (int argc, char* argv[]) // program start
     X509 *cacert = X509_new();
     if(fp == NULL || PEM_read_X509(fp, &cacert, NULL, NULL) == NULL)
        syslog(LOG_ERR, "Failed to open/read ca.crt");
-    fclose(fp);
     free(fname);
     
     EVP_PKEY * pubkey = X509_get_pubkey(cacert);
     if (X509_verify(cacert, pubkey) <= 0)
-        loadCertChain = 1;
+    {
+        BIO *bioin; int fsz; char *cafile;
+
+        if (fseek(fp, 0L, SEEK_END) < 0)
+            syslog(LOG_ERR, "Failed to seek ca.crt");
+        fsz = ftell(fp);
+        cafile = malloc(fsz);
+        fseek(fp, 0L, SEEK_SET);
+        fread(cafile, 1, fsz, fp);
+
+        bioin = BIO_new_mem_buf(cafile, fsz);
+        if (!bioin)
+            syslog(LOG_ERR, "Failed to create new BIO mem buffer");
+
+        cachain = PEM_X509_INFO_read_bio(bioin, NULL, NULL, NULL);
+        if (!cachain)
+            syslog(LOG_ERR, "Failed to read CA chain from ca.crt");
+        BIO_free(bioin);
+        free(cafile);
+    }
+    fclose(fp);
     EVP_PKEY_free(pubkey);
     X509_free(cacert);
 
-#ifdef DEBUG
-    printf("loadCertChain: %d\n", loadCertChain);
-#endif  
     cert_tlstor_t *cert_tlstor = malloc(sizeof(cert_tlstor_t));
     cert_tlstor->pem_dir = tls_pem;
  
@@ -663,6 +679,7 @@ int main (int argc, char* argv[]) // program start
     SET_LINE_NUMBER(__LINE__);
   } // end of perpetual accept() loop
 //  Never get here while(1)
+//  sk_X509_pop_free(cachain, X509_free)
 //  free(cert_tlstor);
 //  pthread_cancel(cert_gen_thread);
 //  pthread_join(cert_gen_thread, NULL);
