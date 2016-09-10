@@ -71,6 +71,7 @@ const char *tls_pem = DEFAULT_PEM_PATH;
 int tls_ports[MAX_TLS_PORTS] = {0};
 int num_tls_ports = 0;
 STACK_OF(X509_INFO) *cachain = NULL;
+struct Global *g;
   
 int main (int argc, char* argv[]) // program start
 {
@@ -261,6 +262,9 @@ int main (int argc, char* argv[]) // program start
   SET_LINE_NUMBER(__LINE__);
 
   SSL_library_init();
+#ifdef USE_PTHREAD
+  ssl_init_locks();
+#endif
   mkfifo(PIXEL_CERT_PIPE, 0600);
   pw = getpwnam(user);
   chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid);
@@ -471,6 +475,21 @@ int main (int argc, char* argv[]) // program start
 
   SET_LINE_NUMBER(__LINE__);
 
+  struct Global _g = {
+        argc,
+        argv,
+        select_timeout,
+        pipefd[1],
+        stats_url,
+        stats_text_url,
+        do_204,
+        do_redirect,
+#ifdef DEBUG
+        warning_time,
+#endif
+  };
+  g = &_g;
+
   // main accept() loop
   while(1) {
 
@@ -624,16 +643,25 @@ int main (int argc, char* argv[]) // program start
 
     SET_LINE_NUMBER(__LINE__);
 
+    conn_tlstor_struct *conn_tlstor = malloc(sizeof(conn_tlstor_struct));
+    conn_tlstor->new_fd = new_fd;
+
+#ifdef USE_PTHREAD
+    pthread_t conn_thread;
+    pthread_attr_t conn_attr;
+    pthread_attr_init(&conn_attr);
+    pthread_attr_setdetachstate(&conn_attr, PTHREAD_CREATE_DETACHED);
+
+    if (pthread_create(&conn_thread, &conn_attr, conn_handler, (void*)conn_tlstor))
+        syslog(LOG_ERR, "Failed to create conn_handler thread");
+#else
     if (fork() == 0) {
-      // this is the child process
-      //
       // detach child from signal handler
       signal(SIGTERM, SIG_DFL); // default is kill?
       signal(SIGUSR1, SIG_DFL); // default is ignore?
 #ifdef DEBUG
       signal(SIGUSR2, SIG_DFL); // default is ignore?
 #endif
-
       // close unneeded file handles inherited from the parent process
       close(sockfd);
 
@@ -642,21 +670,7 @@ int main (int argc, char* argv[]) // program start
       //  inherit it
       close(pipefd[0]);
 
-      // call handler function
-      socket_handler( argc
-                ,argv
-                ,new_fd
-                ,select_timeout
-                ,pipefd[1]
-                ,stats_url
-                ,stats_text_url
-                ,argv[0]
-                ,do_204
-                ,do_redirect
-#ifdef DEBUG
-                ,warning_time
-#endif //DEBUG
-                );
+      conn_handler( (void*)conn_tlstor );
       exit(0);
     } // end of forked child process
 
@@ -665,6 +679,8 @@ int main (int argc, char* argv[]) // program start
     // this is guaranteed to be the parent process, as the child calls exit()
     //  above when it's done instead of proceeding to this point
     close(new_fd);  // parent doesn't need this
+    free(conn_tlstor);
+#endif // USE_PTHREAD
 
     SET_LINE_NUMBER(__LINE__);
 
@@ -681,6 +697,7 @@ int main (int argc, char* argv[]) // program start
 //  Never get here while(1)
 //  sk_X509_pop_free(cachain, X509_free)
 //  free(cert_tlstor);
+//  ssl_free_locks();
 //  pthread_cancel(cert_gen_thread);
 //  pthread_join(cert_gen_thread, NULL);
 //  return (EXIT_SUCCESS);

@@ -10,6 +10,8 @@ typedef struct {
     X509 *cacert;
 } cert_tlstor_t;
 
+void ssl_init_locks();
+void ssl_free_locks();
 void *cert_generator(void *ptr);
 
 #endif

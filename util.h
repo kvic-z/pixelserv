@@ -23,7 +23,7 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "V35.HZ12.Kh"
+#define VERSION "v35.HZ12.Ki-rc1"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -101,6 +101,22 @@ extern volatile sig_atomic_t slh;
 extern volatile sig_atomic_t slm;
 extern volatile sig_atomic_t sle;
 extern volatile sig_atomic_t slu;
+
+struct Global {
+    int argc;
+    char** argv;
+    const time_t select_timeout;
+    const int pipefd;
+    const char* const stats_url;
+    const char* const stats_text_url;
+    const int do_204;
+    const int do_redirect;
+#ifdef DEBUG
+    const int warning_time;
+#endif
+};
+
+#define GLOBAL(p,e) ((struct Global *)p)->e
 
 // util.c functions
 

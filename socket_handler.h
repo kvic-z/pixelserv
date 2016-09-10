@@ -47,21 +47,15 @@ typedef struct {
     const char *tls_pem;
     const char *servername;
     ssl_enum status;
+    void *sslctx;
 } tlsext_cb_arg_struct;
-  
-void socket_handler(int argc
-                   ,char* argv[]
-                   ,const int new_fd
-                   ,const time_t select_timeout
-                   ,const int pipefd
-                   ,const char* const stats_url
-                   ,const char* const stats_text_url
-                   ,const char* const program_name
-                   ,const int do_204
-                   ,const int do_redirect
-#ifdef DEBUG
-                   ,const int warning_time
-#endif //DEBUG
-                   );
+
+typedef struct {
+    int new_fd;
+} conn_tlstor_struct;
+
+#define CONN_TLSTOR(p, e) ((conn_tlstor_struct*)p)->e
+
+void* conn_handler(void *ptr);
 
 #endif // SOCKET_HANDLER_H

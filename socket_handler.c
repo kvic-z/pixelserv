@@ -396,13 +396,13 @@ extern const char *tls_pem;
 extern int tls_ports[];
 extern int num_tls_ports;
 extern STACK_OF(X509_INFO) *cachain;
-
+extern struct Global *g;
 
 static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
 {
-    SSL_CTX *sslctx;
+    SSL_CTX *sslctx = NULL;
     int rv = SSL_TLSEXT_ERR_OK;
-    tlsext_cb_arg_struct *tlsext_cb_arg = arg;
+    tlsext_cb_arg_struct *tlsext_cb_arg = (tlsext_cb_arg_struct *)arg;
     const char* pem_dir = tlsext_cb_arg->tls_pem;
     tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name);
     char *servername = malloc(PIXELSERV_MAX_SERVER_NAME);
@@ -462,13 +462,18 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
         X509_INFO *inf; int i;
         for (i=sk_X509_INFO_num(cachain)-1; i >= 0; i--) 
         {
-            if ((inf = sk_X509_INFO_value(cachain, i)) && inf->x509 && !SSL_CTX_add_extra_chain_cert(sslctx, inf->x509))
+            if ((inf = sk_X509_INFO_value(cachain, i)) && inf->x509 &&
+                   !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509))) //X509_ref_up requires >= v1.1
                 syslog(LOG_ERR, "Cannot add CA cert %d\n", i);
         }
     }
-    tlsext_cb_arg->status = SSL_HIT;
-    SSL_set_SSL_CTX(cSSL, sslctx);
 
+    SSL_set_SSL_CTX(cSSL, sslctx);
+    tlsext_cb_arg->status = SSL_HIT;
+    tlsext_cb_arg->sslctx = (void*)sslctx;
+#ifdef DEBUG
+    printf("%s: sslctx %d\n", __FUNCTION__, (unsigned int) sslctx);
+#endif
 free_all:
     free(full_pem_path);
     free(servername);
@@ -476,21 +481,21 @@ free_all:
     return rv;
 }
 
-
-void socket_handler(int argc
-                   ,char* argv[]
-                   ,const int new_fd
-                   ,const time_t select_timeout
-                   ,const int pipefd
-                   ,const char* const stats_url
-                   ,const char* const stats_text_url
-                   ,const char* const program_name
-                   ,const int do_204
-                   ,const int do_redirect
+void* conn_handler( void *ptr )
+{
+    int argc = GLOBAL(g, argc);
+    char **argv = GLOBAL(g, argv);
+    const int new_fd = CONN_TLSTOR(ptr, new_fd);
+    const time_t select_timeout = GLOBAL(g, select_timeout);
+    const int pipefd = GLOBAL(g, pipefd);
+    const char* const stats_url = GLOBAL(g, stats_url);
+    const char* const stats_text_url = GLOBAL(g, stats_text_url);
+    const int do_204 = GLOBAL(g, do_204);
+    const int do_redirect = GLOBAL(g, do_redirect);
 #ifdef DEBUG
-                   ,const int warning_time
-#endif //DEBUG
-                   ) {
+    const int warning_time = GLOBAL(g, warning_time);
+#endif
+
   // NOTES:
   // - from here on, all exit points should be counted or at least logged
   // - exit() should not be called from the child process
@@ -534,6 +539,9 @@ void socket_handler(int argc
   }
 
   SET_LINE_NUMBER(__LINE__);
+#ifdef USE_PTHREAD
+    printf("%s: tid = %d\n", __FUNCTION__, pthread_self());
+#endif
 #endif
 
   // note the time
@@ -576,18 +584,17 @@ void socket_handler(int argc
         printf("socket handler Connection from %s\n", client_ip);
 #endif
     }
-    
-    static SSL_CTX *sslctx = NULL;
+
+    SSL_CTX *sslctx = NULL;
     SSL *cSSL = NULL;
-    tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL, SSL_UNKNOWN };
-  
+    tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL, SSL_UNKNOWN, NULL };
+
     if(ssl){
-        if(sslctx == NULL) {
-            sslctx = SSL_CTX_new(TLSv1_2_server_method());
-            SSL_CTX_set_options(sslctx, /*SSL_OP_SINGLE_DH_USE*/ SSL_MODE_RELEASE_BUFFERS | SSL_OP_NO_COMPRESSION);
-            SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
-            SSL_CTX_set_tlsext_servername_arg(sslctx, &tlsext_cb_arg);
-        }
+        sslctx = SSL_CTX_new(TLSv1_2_server_method());
+        SSL_CTX_set_options(sslctx, /*SSL_OP_SINGLE_DH_USE*/ SSL_MODE_RELEASE_BUFFERS | SSL_OP_NO_COMPRESSION);
+        SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
+        SSL_CTX_set_tlsext_servername_arg(sslctx, &tlsext_cb_arg);
+
         cSSL = SSL_new(sslctx);
         SSL_set_fd(cSSL, new_fd );
         int ssl_err = SSL_accept(cSSL);
@@ -848,7 +855,7 @@ void socket_handler(int argc
         struct sockaddr_storage sin_addr;
         socklen_t sin_addr_len = sizeof(sin_addr);
         char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
-        
+
         getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
         if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
                 sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
@@ -859,15 +866,18 @@ void socket_handler(int argc
         strtok(host, ":");
         host = strtok(NULL, "\r\n"); 
         syslog(LOG_NOTICE, "(%2d) %s:%s %s%s", pipedata.status, client_ip, host, req, (tlsext_cb_arg.servername) ? " secure" : "");
-        
-        free(buf_backup);
     }
-    
+
     if(ssl){
-        SSL_shutdown(cSSL);
+        SSL_set_shutdown(cSSL, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+#ifdef DEBUG
+        printf("%s: sslctx %d\n", __FUNCTION__, (unsigned int) tlsext_cb_arg.sslctx);
+#endif
         SSL_free(cSSL);
+        SSL_CTX_free((SSL_CTX*)tlsext_cb_arg.sslctx);
+        SSL_CTX_free(sslctx);
     }
-    
+
   // signal the socket connection that we're done writing
   errno = 0;
   if (shutdown(new_fd, SHUT_WR) < 0) {
@@ -950,6 +960,7 @@ void socket_handler(int argc
   TIME_CHECK("pipe write()");
   SET_LINE_NUMBER(__LINE__);
 
+#ifndef USE_PTHREAD
   // child no longer needs write pipe, so close descriptor
   // this is probably redundant since we are about to exit() anyway
   if (close(pipefd) < 0) {
@@ -963,4 +974,10 @@ void socket_handler(int argc
     //  caught previously
     syslog(LOG_WARNING, "connection handler exiting with FAIL_GENERAL status");
   }
+#endif
+
+    free(buf_backup);
+    free(ptr);
+
+    return NULL;
 }
