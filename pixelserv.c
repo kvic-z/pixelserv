@@ -587,22 +587,35 @@ int main (int argc, char* argv[]) // program start
         if (pipedata.rx_total <= 0) {
           MYLOG(LOG_WARNING, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
         } else {
-          // calculate as a double and add rounding factor for implicit integer
-          //  truncation
-          avg += ((double)(pipedata.rx_total - avg) / ++act) + 0.5;
-          // look for a new high score
-          if (pipedata.rx_total > rmx) {
-            rmx = pipedata.rx_total;
-          }
+            // calculate average byte per request (avg) using
+            // EMA after the initial 500 samples (which uses SMA)
+            static float favg = 0.0;
+            if (act < 500)
+            {
+                favg *= act;
+                favg = (favg + pipedata.rx_total) / ++act;
+            } else
+                favg += 0.0001 * (pipedata.rx_total - favg);
+            avg = favg + 0.5;
+            // look for a new high score
+            if (pipedata.rx_total > rmx)
+                rmx = pipedata.rx_total;
         }
 
         if (pipedata.status != FAIL_TIMEOUT) {
-          // update request time stats
-          // calculate moving average, adding 0.5 for rounding
-          tav += ((pipedata.run_time - tav) / ++tct) + 0.5;
-          // look for a new high score, adding 0.5 for rounding
-          if (pipedata.run_time + 0.5 > tmx)
-            tmx = (pipedata.run_time + 0.5);
+            // calculate average process time (tav) using
+            // EMA after the initial 500 samples (which uses SMA)
+            static float ftav = 0.0;
+            if (tct < 500)
+            {
+                ftav *= tct;
+                ftav = (ftav + pipedata.run_time) / ++tct;
+            } else
+                ftav += 0.002 * (pipedata.run_time - ftav);
+            tav = ftav + 0.5;
+            // look for a new high score, adding 0.5 for rounding
+            if (pipedata.run_time + 0.5 > tmx)
+                tmx = (pipedata.run_time + 0.5);
         }
       }
       --select_rv;
