@@ -33,7 +33,7 @@
   "\r\n";
   // split here because we care about the length of what follows
   static const char httpstats3[] =
-  "<!DOCTYPE html><html><head><title>pixelserv statistics</title></head><body>";
+  "<!DOCTYPE html><html><head><title>pixelserv statistics</title><style>body {font-family:monospace;} table {min-width: 75%; border-collapse: collapse;} th { height:18px; } td {border: 1px solid #e0e0e0; background-color: #f9f9f9;} td:first-child {width: 7%;} td:nth-child(2) {width: 15%; background-color: #ebebeb; border: 1px solid #f9f9f9;}</style></head><body>";
   // stats text goes between these two strings
   static const char httpstats4[] =
   "</body></html>\r\n";
