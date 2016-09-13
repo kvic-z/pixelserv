@@ -1,0 +1,57 @@
+
+2016-9-3 v35.HZ12.Ki
+
+* Added support for Intermediate CA certs. This enables pixelserv to take a root
+  CA cert or any intermediate CA cert on a trusted hierarchy to be the CA cert
+  for automatic certificate generation. Original issue reported by Popov. Thanks.
+* Removal of arbitrary limitation on CA certificates' subject.
+* Moved to pthread for all multiprocessing. fork() is still available as compile
+  option. Faster performance on serving client requests and generating certificates.
+* New calculations for average length per request (avg) and average processing time
+  per request (tav). This is huge in a sense that the old methods basically break
+  down after serving the initial hundreds or maybe thousands of requests.
+* New layout and explanatory notes on HTML stats page.
+* 32-bit x86 build supported in 64-bit Linux environment. Verified and Makefile
+  contributed by Popov.
+
+2016-3-13 v35.HZ12.Kh
+
+* Added access log toggle through HTTP URL. This allows turning on/off access log
+  without restarting pixelserv-tls.
+* Added result code of a processed request to access log - for diagnosis purpose.
+
+2015-12-24 v35.HZ12.Kg
+
+* Fixed serial number in generated certificates. This increases pixelserv compatibility
+  with Firefox. (Issue reported by nick8565. Thanks)
+
+2015-11-10 v35.HZ12.Kf
+
+* Set correct file permission for /tmp/pixelcerts - the pipe for sending certificate
+  generation request between "server" and "cert generator". Pixelserv can run as root
+  or non-root after this change. 
+* Changed HTML servstats further to be human readable.
+* Fixed an issue where garbled HTML code logged in access log when pixelserv quits.
+
+2015-10-30 v35.HZ12.Ke
+
+* Added pthread support.
+* Changed HTML servstats to be human readable. Text servstats remain unchanged and
+  parser friendly.
+* Fixed memory leak in "cert generator".
+
+2015-10-12 v35.HZ12.Kd
+
+* Added automatic generation of certificates for https.
+* Added four new stats:
+     slh (cert exists and used)
+     slm (cert missing for the ad domain)
+     sle (error in existing certs)
+     slu (none of the above)
+
+2015-10-3 v35.HZ12.Kc
+
+* First release of pixelserv-tls 
+* Added support for HTTPS connections
+* Added access log.
+* Cleaned up warnings on AMD64
