@@ -595,7 +595,7 @@ int main (int argc, char* argv[]) // program start
                 favg *= act;
                 favg = (favg + pipedata.rx_total) / ++act;
             } else
-                favg += 0.0001 * (pipedata.rx_total - favg);
+                favg += 0.002 * (pipedata.rx_total - favg);
             avg = favg + 0.5;
             // look for a new high score
             if (pipedata.rx_total > rmx)
