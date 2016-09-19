@@ -97,7 +97,6 @@ x86: printver dist
 	$(CC32) $(CFLAGS_D) -static $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.static $(STATICLIB) $(SHAREDLIB)
 	$(CC32) $(CFLAGS_P) -static $(LDFLAGS_P) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.performance.static $(STATICLIB) $(SHAREDLIB)
 	$(STRIP) dist/$(DISTNAME).$@.performance.*
-	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
@@ -112,7 +111,6 @@ amd64: printver dist
 	$(CC64) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
 	        $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_P) $(SHAREDLIB)
 	$(STRIP) dist/$(DISTNAME).$@.performance.*
-#	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
@@ -126,7 +124,6 @@ mips: printver dist
 	$(MIPSPATH) $(MIPSCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
 	        $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_P) $(SHAREDLIB)
 	$(MIPSPATH) $(MIPSSTRIP) dist/$(DISTNAME).$@.performance.*
-#	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
@@ -140,7 +137,6 @@ arm: printver dist
 	$(ARMPATH) $(ARMCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
 	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_P)
 	$(ARMPATH) $(ARMSTRIP) dist/$(DISTNAME).$@.performance.*
-#	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
@@ -156,7 +152,6 @@ arm.ent: printver dist
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
 	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_P)
 	$(ARMentPATH) $(ARMentSTRIP) dist/$(DISTNAME).$@.performance.static
-#	$(UPX) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
