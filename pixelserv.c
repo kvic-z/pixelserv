@@ -332,11 +332,17 @@ int main (int argc, char* argv[]) // program start
     hints.ai_flags = AI_PASSIVE;  // use my IP
   }
 
-  // if no ports selected on command line, use the defaults
+  //no -p no -k
   if (!num_ports) {
     num_ports = 2;
     num_tls_ports = 1;
-  }
+  } else if (!num_tls_ports) {
+  //no -k
+    tls_ports[num_tls_ports++] = atoi(SECOND_PORT);
+    ports[num_ports++] = SECOND_PORT;  
+  } else if (num_ports == num_tls_ports)
+  //no -p
+    ports[num_ports++] = DEFAULT_PORT;    
 
   // clear the set
   FD_ZERO(&readfds);
