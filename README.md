@@ -17,6 +17,16 @@ These create a 1024-bit CA cert with Common Name "Pixelserv CA" in `/opt/var/cac
 
 Note that installation of `ca.cert` on client OS is not mandatory but recommended. Clients without `ca.crt` will interact smoothly with pixelserv-tls.
 
+#### iOS
+
+Multiple ways to get it done. The simplest is to email yourself `ca.crt`. Go to your iOS device. Click on the attachment and follow the instructions.
+
+Here is a [guide by IBM] that provides a bit more details.
+
+#### Android
+
+Email yourself the CA cert as attachment. Double click on the attachment and follow on-screen instructions to import the certificate. I found this way the CA cert will be imported in "User" category instead of "System" category. That's no problem as the CA cert is still properly recognized. If people insist on importing into "System" certificates, try this [Android guide].
+
 #### MacOS
 
 In Terminal, type
@@ -24,21 +34,11 @@ In Terminal, type
 
 Note: since OS X El Capitan, System Integrity Protection need to be disabled first. Reboot, then run the above command line. System Integrity Protection can be enabled afterward. Here is a [SIP tutorial] to disable/enable System Integrity Protection. `ca.crt` need to be re-added after every OS update unfortunately.
 
-#### iOS
-
-Multiple ways to get it done. The simplest is to email yourself `ca.crt`. Go to your iOS device. Click on the attachment and follow the instructions.
-
-Here is a [guide by IBM] that provides a bit more details.
-
 #### Windows
 
 Chrome/IE/Edge uses Root CA certs from Windows system-wide repository. Follow this [Windows guide] carefully to add ca.cert into the system-wide Root CAs.
 
 Firefox manages its own repository of Root CAs. Follow this [Firefox guide] only if you also run Firefox.
-
-#### Android
-
-This [Android guide] looks interesting. I don't have Android devices. Please provide feedback after you tried.
 
 ### Launch pixelserv-tls
 A few examples of launching _pixelserv-tls_:
@@ -82,39 +82,9 @@ Usage:pixelserv-tls
 
 Stats are viewable by default at http://pixelservip/servstats.txt (for raw text format) or http://pixelservip/servstats for html format), where pixelserv ip is the ip address that pixelserv is listening on.
 
-|Mnemonics|New|Explanation
-|---------|---|-----------
-|uts||uptime in seconds
-|req||number of connection requests
-|avg||average request size in bytes
-|rmx||maximum request size in bytes
-|tav||average request processing time in milliseconds
-|tmx||maximum request processing time in milliseconds
-|err||number of connections resulting in processing errors (syslog may have details)
-|tmo||number of connections that timed out while trying to read a request from the client
-|cls||number of connections that were closed by the client while reading or replying to the request
-|nou||number of requests that failed to include a URL
-|pth||number of requests for a path that could not be parsed
-|nfe||number of requests for a file with no extension
-|ufe||number of requests for an unrecognized/unhandled file extension
-|gif||number of requests for GIF images
-|bad||number of requests for unrecognized/unhandled HTTP methods
-|txt||number of requests for plaintext data or javascripts formats
-|jpg||number of requests for JPEG images
-|png||number of requests for PNG images
-|swf||number of requests for Adobe Shockwave Flash files
-|ico||number of requests for ICO files (usually favicons)
-|slh|Y|number of HTTPS requests with a good certifcate (cert exists and used) 
-|slm|Y|number of HTTPS requests without a certficate (cert missing for ad domain)
-|sle|Y|number of HTTPS requests with a bad cert (error in existing cert)
-|slu|Y|number of unrecognized HTTPS requests (none of slh/slm/sle)
-|sta||number of requests for HTML stats
-|stt||number of requests for plaintext stats
-|204||number of requests for /generate_204 URLs
-|rdr||number of requests resulting in a redirect
-|pst||number of requests for HTTP POST method
-|hed||number of requests for HTTP HEAD method
-|log|Y|status of access loggging
+<table><tbody>
+<tr><td><b>Mnemonics</b></td><td><b>Example</b></td><td><b>Explanation</b></td></tr><tr><th colspan="3"></th></tr>
+<tr><td>uts</td><td>2d 17:50</td><td>pixelserv uptime</td></tr><tr><td>log</td><td>1</td><td>logging access to syslog (0=disabled 1=enabled)</td></tr><tr><th colspan="3"></th></tr><tr><td>req</td><td>18122</td><td>total # of requests (HTTP, HTTPS, success, failure etc)</td></tr><tr><td>avg</td><td>514 bytes</td><td>average length of request URL</td></tr><tr><td>rmx</td><td>25965 bytes</td><td>maximum length of request URL</td></tr><tr><td>tav</td><td>12 ms</td><td>average processing time (per request)</td></tr><tr><td>tmx</td><td>17036 ms</td><td>maximum processing time (per request)</td></tr><tr><th colspan="3"></th></tr><tr><td>slh</td><td>8824</td><td># of accepted HTTPS requests</td></tr><tr><td>slm</td><td>5</td><td># of rejected HTTPS requests (missing certificate)</td></tr><tr><td>sle</td><td>0</td><td># of rejected HTTPS requests (certificate available but bad)</td></tr><tr><td>slu</td><td>14</td><td># of dropped HTTPS requests (unknown error)</td></tr><tr><th colspan="3"></th></tr><tr><td>nfe</td><td>3830</td><td># of GET requests for server-side scripting</td></tr><tr><td>gif</td><td>165</td><td># of GET requests for GIF</td></tr><tr><td>ico</td><td>0</td><td># of GET requests for ICO</td></tr><tr><td>txt</td><td>7895</td><td># of GET requests for Javascripts</td></tr><tr><td>jpg</td><td>9</td><td># of GET requests for JPG</td></tr><tr><td>png</td><td>6</td><td># of GET requests for PNG</td></tr><tr><td>swf</td><td>0</td><td># of GET requests for SWF</td></tr><tr><td>sta</td><td>7</td><td># of GET requests for HTML stats</td></tr><tr><td>stt</td><td>0</td><td># of GET requests for plain text stats</td></tr><tr><td>ufe</td><td>956</td><td># of GET requests /w unknown file extension</td></tr><tr><th colspan="3"></th></tr><tr><td>rdr</td><td>799</td><td># of GET requests resulted in REDIRECT response</td></tr><tr><td>nou</td><td>1</td><td># of GET requests /w empty URL</td></tr><tr><td>pth</td><td>0</td><td># of GET requests /w malformed URL</td></tr><tr><td>204</td><td>0</td><td># of GET requests (HTTP 204 response)</td></tr><tr><td>pst</td><td>588</td><td># of POST requests (HTTP 501 response)</td></tr><tr><td>hed</td><td>7</td><td># of HEAD requests (HTTP 501 response)</td></tr><tr><td>bad</td><td>1</td><td># of unknown HTTP requests (HTTP 501 response)</td></tr><tr><th colspan="3"></th></tr><tr><td>err</td><td>0</td><td># of dropped requests (failed to accept client connection)</td></tr><tr><td>tmo</td><td>1030</td><td># of dropped requests (client timeout before connection accepted)</td></tr><tr><td>cls</td><td>2828</td><td># of dropped requests (client disconnect before connection accepted)</td></tr></tbody></table>
 
 ### Forum Discussion for pixelserv-tls
 * [pixelserv-tls]: Pixelserv with support for HTTPS born here.
