@@ -8,6 +8,7 @@
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/crypto.h> 
+#include <openssl/x509v3.h> 
 
 #ifdef USE_PTHREAD
 #include <pthread.h>
@@ -23,7 +24,7 @@ static pthread_mutex_t *locks;
 
 static void ssl_lock_cb(int mode, int type, const char *file, int line)
 {
-#ifdef DEBUG
+#if 0
     printf("%s: mode = %d, type = %d\n", __FUNCTION__, mode, type);
 #endif
     if (mode & CRYPTO_LOCK)
@@ -35,7 +36,7 @@ static void ssl_lock_cb(int mode, int type, const char *file, int line)
 void ssl_thread_id(CRYPTO_THREADID *id)
 {
     unsigned int tid = (unsigned int) pthread_self();
-#ifdef DEBUG
+#if 0
     printf("%s: id = %d\n", __FUNCTION__, tid);
 #endif
     CRYPTO_THREADID_set_numeric(id, tid);
@@ -72,6 +73,9 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     char *fname = NULL;
     EVP_PKEY *key = NULL;
     X509 *x509 = NULL;
+    X509_EXTENSION *ext = NULL;
+    X509V3_CTX ext_ctx;
+    char *san_str = NULL;
 
     if(pem_fn[0] == '_') pem_fn[0] = '*';
 
@@ -96,11 +100,18 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     X509_set_issuer_name(x509, issuer);
     X509_NAME *name = X509_get_subject_name(x509);
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char *)pem_fn, -1, -1, 0);
+    X509V3_set_ctx_nodb(&ext_ctx);
+    asprintf(&san_str, "DNS:%s", pem_fn);
+    if ((ext = X509V3_EXT_conf_nid(NULL, &ext_ctx, NID_subject_alt_name, san_str)) == NULL)
+        goto free_all;
+    X509_add_ext(x509, ext, -1);
+
     X509_set_pubkey(x509, key);
     X509_sign_ctx(x509, p_ctx);
 #ifdef DEBUG
     printf("%s: x509 cert created\n", __FUNCTION__);
 #endif
+
     // -- save cert
     if(pem_fn[0] == '*') pem_fn[0] = '_';
     asprintf(&fname, "%s/%s", pem_dir, pem_fn);
@@ -116,8 +127,10 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
 
 free_all:
     EVP_PKEY_free(key);
+    X509_EXTENSION_free(ext);
     X509_free(x509);
     free(fname);
+    free(san_str);
 }
 
 
