@@ -448,6 +448,7 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
     }
 
     sslctx = SSL_CTX_new(TLSv1_2_server_method());
+    SSL_CTX_set_ecdh_auto(sslctx, 1);
     SSL_CTX_set_options(sslctx, SSL_OP_SINGLE_DH_USE);
     if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0 ||
         SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0) {
