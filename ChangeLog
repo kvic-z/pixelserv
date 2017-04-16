@@ -1,4 +1,21 @@
 
+2017-4-21 v35.HZ12.Kj
+
+* Added support for using ECDHE ciphers to exchange keys if browsers request so. 
+  Google Chrome starts to mark less secure ciphers such as RSA as obsolete. 
+  Less secure ciphers will be depreciated in TLS v1.3.
+
+* Added X509v3 Subject Alternative Name (SAN) extension to generated certificates.
+  Google Chrome starting with v58 mark certificates without SAN as invalid, enforcing
+  RFC 2818 specified in 2000!
+ 
+to use more secure ECDHE ciphers for key exchange
+
+2017-1-26 v35.HZ12.Ki-p1
+
+* Fixed default behavior for missing -p and/or -k command line options.
+  With the change, -p or -k can be separately and optionally specified.
+
 2016-9-3 v35.HZ12.Ki
 
 * Added support for Intermediate CA certs. This enables pixelserv to take a root
