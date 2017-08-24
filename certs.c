@@ -199,20 +199,21 @@ void *cert_generator(void *ptr) {
         EVP_PKEY *key = NULL;
         EVP_MD_CTX *md_ctx = NULL;
 
-        // -- skip cert if already exists on disk
-        p_buf = strtok_r(buf, ":", &p_buf_sav);
-        while (p_buf != NULL) {
-            strcpy(fname, ((cert_tlstor_t*)cert_tlstor)->pem_dir);
-            strcat(fname, "/");
-            strcat(fname, p_buf);
-            struct stat st;
-            if(stat(fname, &st) == 0) // already exists
-                p_buf = strtok_r(NULL, ":", &p_buf_sav);
-            else
-                break;
-        }
-        if (p_buf == NULL)
-            goto free_all;
+//         -- skip cert if already exists on disk
+//         p_buf = strtok_r(buf, ":", &p_buf_sav);
+//         while (p_buf != NULL) {
+//             strcpy(fname, ((cert_tlstor_t*)cert_tlstor)->pem_dir);
+//             strcat(fname, "/");
+//             strcat(fname, p_buf);
+//             struct stat st;
+//             if(stat(fname, &st) == 0) // already exists
+//             {
+//                 p_buf = strtok_r(NULL, ":", &p_buf_sav);
+//             }else
+//                 break;
+//         }
+//         if (p_buf == NULL)
+//             goto free_all;
 
         strcpy(fname, cert_tlstor->pem_dir);
         strcat(fname, "/ca.key");
@@ -227,12 +228,19 @@ void *cert_generator(void *ptr) {
         EVP_PKEY_assign_RSA(key, rsa);
         md_ctx = EVP_MD_CTX_create();
 
+        p_buf = strtok_r(buf, ":", &p_buf_sav);
         while (p_buf != NULL) {
-            // we don't check disk for cert. Simply re-gen and let it overwrite if exists on disk.
-            if(EVP_DigestSignInit(md_ctx, NULL, EVP_sha256(), NULL, key) != 1)
-                syslog(LOG_ERR, "Failed to init signing context");
-            else
-                generate_cert(p_buf, cert_tlstor->pem_dir, issuer, md_ctx);
+            strcpy(fname, ((cert_tlstor_t*)cert_tlstor)->pem_dir);
+            strcat(fname, "/");
+            strcat(fname, p_buf);
+            struct stat st;
+            if(stat(fname, &st) != 0) {// doesn't exists
+                // we don't check disk for cert. Simply re-gen and let it overwrite if exists on disk.
+                if(EVP_DigestSignInit(md_ctx, NULL, EVP_sha256(), NULL, key) != 1)
+                    syslog(LOG_ERR, "Failed to init signing context");
+                else
+                    generate_cert(p_buf, cert_tlstor->pem_dir, issuer, md_ctx);
+            }
             p_buf = strtok_r(NULL, ":", &p_buf_sav);
         }
 
