@@ -72,7 +72,11 @@ int tls_ports[MAX_TLS_PORTS] = {0};
 int num_tls_ports = 0;
 STACK_OF(X509_INFO) *cachain = NULL;
 struct Global *g;
-  
+cert_tlstor_t cert_tlstor;
+#ifdef USE_PTHREAD
+pthread_t certgen_thread;
+#endif
+
 int main (int argc, char* argv[]) // program start
 {
   int sockfd = 0;  // listen on sock_fd
@@ -304,9 +308,7 @@ int main (int argc, char* argv[]) // program start
     EVP_PKEY_free(pubkey);
     X509_free(cacert);
 
-    cert_tlstor_t *cert_tlstor = malloc(sizeof(cert_tlstor_t));
-    cert_tlstor->pem_dir = tls_pem;
- 
+    cert_tlstor.pem_dir = tls_pem;
 #ifndef USE_PTHREAD
     if(fork() == 0){
       sigset_t mask;
@@ -316,12 +318,11 @@ int main (int argc, char* argv[]) // program start
       sigaddset(&mask, SIGUSR2);
 #endif
       sigprocmask(SIG_SETMASK, &mask, NULL);
-      cert_generator((void*)cert_tlstor);
+      cert_generator((void*)&cert_tlstor);
       exit(0);
     }
 #else
-    pthread_t certgen_thread;
-    pthread_create(&certgen_thread, NULL, cert_generator, (void*)cert_tlstor);
+    pthread_create(&certgen_thread, NULL, cert_generator, (void*)&cert_tlstor);
 #endif
   }
 
@@ -713,11 +714,12 @@ int main (int argc, char* argv[]) // program start
 
     SET_LINE_NUMBER(__LINE__);
   } // end of perpetual accept() loop
-//  Never get here while(1)
-//  sk_X509_pop_free(cachain, X509_free)
-//  free(cert_tlstor);
-//  ssl_free_locks();
-//  pthread_cancel(cert_gen_thread);
-//  pthread_join(cert_gen_thread, NULL);
-//  return (EXIT_SUCCESS);
+
+#ifdef USE_PTHREAD
+  pthread_cancel(certgen_thread);
+  pthread_join(certgen_thread, NULL);
+#endif
+  sk_X509_pop_free(cachain, X509_free);
+  ssl_free_locks();
+  return (EXIT_SUCCESS);
 }
