@@ -7,8 +7,11 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <fcntl.h>
+#ifdef USE_PTHREAD
+    #include <pthread.h>
+#endif
 #include "certs.h"
-
+ 
 // private data for socket_handler() use
 
   // HTTP 204 No Content for Google generate_204 URLs
@@ -93,6 +96,7 @@
 
   static const char httpnulltext[] =
   "HTTP/1.1 200 OK\r\n"
+  "Strict-Transport-Security: max-age=10886400\r\n" //hsts support trial
   "Content-type: text/html\r\n"
   "Content-length: 0\r\n"
   "Connection: close\r\n"
@@ -219,13 +223,6 @@ static const char httpnull_ico[] =
   "\x00\x00\x00\x00" // Colour table
   "\x00\x00\x00\x00" // XOR B G R
   "\x80\xF8\x9C\x41"; // AND ?
-
-static const char SSL_no[] =
-  "\x15"     // Alert (21)
-  "\x03\x00" // Version 3.0
-  "\x00\x02" // length 2
-  "\x02"     // fatal
-  "\x31";    // 0 close notify, 0x28 Handshake failure 40, 0x31 TLS access denied 49
 
 // private functions for socket_handler() use
 #ifdef HEX_DUMP
@@ -404,9 +401,11 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
     int rv = SSL_TLSEXT_ERR_OK;
     tlsext_cb_arg_struct *tlsext_cb_arg = (tlsext_cb_arg_struct *)arg;
     const char* pem_dir = tlsext_cb_arg->tls_pem;
-    tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name);
+    char *full_pem_path = NULL;
     char *servername = malloc(PIXELSERV_MAX_SERVER_NAME);
-    strcpy(servername, SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name));
+    if ((tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name)) == NULL)
+        goto free_all;
+    strcpy(servername, tlsext_cb_arg->servername);
 #ifdef DEBUG
     printf("https request for hostname: %s\n", servername);
 #endif
@@ -425,7 +424,7 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
 #ifdef DEBUG
     printf("pem file name: %s\n", pem_file);
 #endif
-    char *full_pem_path = malloc(PIXELSERV_MAX_PATH);
+    full_pem_path = malloc(PIXELSERV_MAX_PATH);
     strcpy(full_pem_path, pem_dir);
     strcat(full_pem_path, "/");
     strcat(full_pem_path, pem_file);
@@ -440,7 +439,7 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
         if(fd == -1)
             syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
         else {
-            write(fd, strcat(pem_file,":"), strlen(pem_file)+1);
+            write(fd, strcat(pem_file,":"), strlen(pem_file));
             close(fd);
         }
         rv = SSL_TLSEXT_ERR_ALERT_FATAL;
@@ -473,7 +472,7 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
     tlsext_cb_arg->status = SSL_HIT;
     tlsext_cb_arg->sslctx = (void*)sslctx;
 #ifdef DEBUG
-    printf("%s: sslctx %d\n", __FUNCTION__, (unsigned int) sslctx);
+    printf("%s: sslctx %p\n", __FUNCTION__, (void*) sslctx);
 #endif
 free_all:
     free(full_pem_path);
@@ -541,7 +540,7 @@ void* conn_handler( void *ptr )
 
   SET_LINE_NUMBER(__LINE__);
 #ifdef USE_PTHREAD
-    printf("%s: tid = %d\n", __FUNCTION__, pthread_self());
+    printf("%s: tid = %d\n", __FUNCTION__, (int)pthread_self());
 #endif
 #endif
 
@@ -847,11 +846,7 @@ void* conn_handler( void *ptr )
     free(aspbuf);
     aspbuf = NULL;
     response = httpnullpixel;
-  }
-  // *** NOTE: pipedata.status should not be altered after this point ***
-
-  TIME_CHECK("response send()");
-
+    
     if (access_log) {
         struct sockaddr_storage sin_addr;
         socklen_t sin_addr_len = sizeof(sin_addr);
@@ -867,12 +862,16 @@ void* conn_handler( void *ptr )
         strtok(host, ":");
         host = strtok(NULL, "\r\n"); 
         syslog(LOG_NOTICE, "(%2d) %s:%s %s%s", pipedata.status, client_ip, host, req, (tlsext_cb_arg.servername) ? " secure" : "");
-    }
+    }    
+  }
+  // *** NOTE: pipedata.status should not be altered after this point ***
+
+  TIME_CHECK("response send()");
 
     if(ssl){
         SSL_set_shutdown(cSSL, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
 #ifdef DEBUG
-        printf("%s: sslctx %d\n", __FUNCTION__, (unsigned int) tlsext_cb_arg.sslctx);
+        printf("%s: sslctx %p\n", __FUNCTION__, (void*) tlsext_cb_arg.sslctx);
 #endif
         SSL_free(cSSL);
         SSL_CTX_free((SSL_CTX*)tlsext_cb_arg.sslctx);
