@@ -173,15 +173,17 @@ void *cert_generator(void *ptr) {
     X509_NAME *issuer = X509_NAME_dup(X509_get_subject_name(x509));
     X509_free(x509);
 
-    char *buf = malloc(PIXELSERV_MAX_SERVER_NAME*4);
+    char *buf = malloc(PIXELSERV_MAX_SERVER_NAME*4+1);
+    buf[PIXELSERV_MAX_SERVER_NAME*4+1] = '\0';
+    char *half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4 + 1;
     int fd = open(PIXEL_CERT_PIPE, O_RDONLY);
     
     for (;;) {
         int cnt;
         if(fd == -1)
             syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
-
-        if((cnt = read(fd, buf, PIXELSERV_MAX_SERVER_NAME*4)) == 0) {
+        strcpy(buf, half_token);
+        if((cnt = read(fd, buf+strlen(half_token), PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token))) == 0) {
 #ifdef DEBUG
              printf("%s: pipe EOF\n", __FUNCTION__);
 #endif
@@ -190,30 +192,21 @@ void *cert_generator(void *ptr) {
             continue;
         }
         buf[cnt] = '\0';
+        if (cnt < PIXELSERV_MAX_SERVER_NAME*4)
+            half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4 + 1;
+        else {
+            int i;
+            for (i=1; buf[cnt-i]!=':' && i < strlen(buf); i++);
+            half_token = &buf[cnt-i+1];
+            buf[cnt-i] = '\0';
+        }
 #ifdef DEBUG
         printf("%s: %s\n", __FUNCTION__, buf);
 #endif
 
-        char *p_buf=NULL, *p_buf_sav=NULL;
         fname = malloc(PIXELSERV_MAX_PATH);
         EVP_PKEY *key = NULL;
         EVP_MD_CTX *md_ctx = NULL;
-
-//         -- skip cert if already exists on disk
-//         p_buf = strtok_r(buf, ":", &p_buf_sav);
-//         while (p_buf != NULL) {
-//             strcpy(fname, ((cert_tlstor_t*)cert_tlstor)->pem_dir);
-//             strcat(fname, "/");
-//             strcat(fname, p_buf);
-//             struct stat st;
-//             if(stat(fname, &st) == 0) // already exists
-//             {
-//                 p_buf = strtok_r(NULL, ":", &p_buf_sav);
-//             }else
-//                 break;
-//         }
-//         if (p_buf == NULL)
-//             goto free_all;
 
         strcpy(fname, cert_tlstor->pem_dir);
         strcat(fname, "/ca.key");
@@ -228,6 +221,7 @@ void *cert_generator(void *ptr) {
         EVP_PKEY_assign_RSA(key, rsa);
         md_ctx = EVP_MD_CTX_create();
 
+        char *p_buf, *p_buf_sav = NULL;
         p_buf = strtok_r(buf, ":", &p_buf_sav);
         while (p_buf != NULL) {
             strcpy(fname, ((cert_tlstor_t*)cert_tlstor)->pem_dir);
@@ -249,7 +243,7 @@ free_all:
         EVP_MD_CTX_destroy(md_ctx);
         free(fname);
     }
-    //X509_NAME_free(issuer);
-    //free(buf);
+    X509_NAME_free(issuer);
+    free(buf);
     return NULL;
 }
