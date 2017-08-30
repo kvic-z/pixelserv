@@ -96,7 +96,7 @@
 
   static const char httpnulltext[] =
   "HTTP/1.1 200 OK\r\n"
-  "Strict-Transport-Security: max-age=10886400\r\n" //hsts support trial
+  "Strict-Transport-Security: max-age=10886400; includeSubDomains\r\n" //experimental support for HSTS
   "Content-type: text/html\r\n"
   "Content-length: 0\r\n"
   "Connection: close\r\n"
