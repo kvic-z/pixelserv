@@ -612,8 +612,11 @@ void* conn_handler( void *ptr )
         pipedata.ssl = tlsext_cb_arg.status;
         if(ssl_err > 0) {
           rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
-        }
-        TESTPRINT("SSL handshake request received\n");
+          if (rv == 0) // client disconnects without sending any data
+            pipedata.ssl = SSL_HIT_CLS;
+          TESTPRINT("SSL handshake successful: %d, %d, %d\n", tlsext_cb_arg.status, SSL_get_error(cSSL, rv), rv);
+        } else
+          TESTPRINT("SSL handshake failed: %d\n", SSL_get_error(cSSL, ssl_err));
     } else {
         // read some data from the socket to buf
         rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);

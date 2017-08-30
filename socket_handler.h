@@ -34,6 +34,7 @@ typedef enum {
   SSL_ERR,
   SSL_MISS,
   SSL_HIT,
+  SSL_HIT_CLS,
   SSL_UNKNOWN
 } ssl_enum;
 

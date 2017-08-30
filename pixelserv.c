@@ -582,6 +582,7 @@ int main (int argc, char* argv[]) // program start
           case SSL_HIT:        ++slh; break;
           case SSL_MISS:       ++slm; break;
           case SSL_ERR:        ++sle; break;
+          case SSL_HIT_CLS:    ++slc; break;
           case SSL_NOT_TLS:    break;
           default:
             ++slu;
