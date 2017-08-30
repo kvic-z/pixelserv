@@ -224,6 +224,15 @@ static const char httpnull_ico[] =
   "\x00\x00\x00\x00" // XOR B G R
   "\x80\xF8\x9C\x41"; // AND ?
 
+static const char httpoptions[] =
+  "HTTP/1.1 200 OK\r\n"
+  "Content-type: text/html\r\n"
+  "Content-length: 11\r\n"
+  "Allow: GET,OPTIONS\r\n"
+  "Connection: close\r\n"
+  "\r\n"
+  "GET,OPTIONS";
+
 // private functions for socket_handler() use
 #ifdef HEX_DUMP
 // from http://sws.dett.de/mini/hexdump-c/
@@ -642,8 +651,8 @@ void* conn_handler( void *ptr )
       syslog(LOG_ERR, "client did not specify method");
     } else {
       TESTPRINT("method: '%s'\n", method);
-      if (strcmp(method, "GET")) {  //methods are case-sensitive
-          // something other than GET - send 501 response
+      if (strcmp(method, "GET") && strcmp(method, "OPTIONS")) {  //methods are case-sensitive
+          // something other than GET and OPTIONS - send 501 response
           if (!strcmp(method, "POST")) {
             // POST
             pipedata.status = SEND_POST;
@@ -658,6 +667,10 @@ void* conn_handler( void *ptr )
           TESTPRINT("Sending 501 response\n");
           response = http501;
           rsize = sizeof http501 - 1;
+      } else if (!strcmp(method, "OPTIONS")) {
+          pipedata.status = SEND_OPTIONS;
+          response = httpoptions;
+          rsize = sizeof httpoptions - 1;
       } else {
           // GET
           // ----------------------------------------------

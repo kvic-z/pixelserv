@@ -24,6 +24,7 @@ typedef enum {
   SEND_BAD_PATH,
   SEND_POST,
   SEND_HEAD,
+  SEND_OPTIONS,
   ACTION_LOG_ON,
   ACTION_LOG_OFF
 } response_enum;

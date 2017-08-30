@@ -571,6 +571,7 @@ int main (int argc, char* argv[]) // program start
           case SEND_BAD_PATH:  ++pth; break;
           case SEND_POST:      ++pst; break;
           case SEND_HEAD:      ++hed; break;
+          case SEND_OPTIONS:   ++opt; break;
           case ACTION_LOG_ON:  access_log = 1; break;
           case ACTION_LOG_OFF: access_log = 0; break;
           default:
