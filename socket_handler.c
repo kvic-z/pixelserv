@@ -848,7 +848,7 @@ void* conn_handler( void *ptr )
       if (errno == EPIPE || errno == ECONNRESET) {
         // client closed socket sometime after initial check
         MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
-        pipedata.status = FAIL_CLOSED;
+        pipedata.status = FAIL_REPLY;
       } else {
         // some other error
         syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
@@ -903,7 +903,8 @@ void* conn_handler( void *ptr )
       syslog(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
     }
   } else if (pipedata.status != FAIL_TIMEOUT &&
-             pipedata.status != FAIL_CLOSED) { // only check for additional data if we didn't detect a timeout or close initially
+             pipedata.status != FAIL_CLOSED && 
+             pipedata.status != FAIL_REPLY) { // only check for additional data if we didn't detect a timeout or close initially
     TIME_CHECK("socket write shutdown()");
     SET_LINE_NUMBER(__LINE__);
 

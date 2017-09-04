@@ -7,6 +7,7 @@ typedef enum {
   FAIL_GENERAL,
   FAIL_TIMEOUT,
   FAIL_CLOSED,
+  FAIL_REPLY,
   SEND_GIF,
   SEND_TXT,
   SEND_JPG,

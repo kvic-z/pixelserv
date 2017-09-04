@@ -554,6 +554,7 @@ int main (int argc, char* argv[]) // program start
           case FAIL_GENERAL:   ++err; break;
           case FAIL_TIMEOUT:   ++tmo; break;
           case FAIL_CLOSED:    ++cls; break;
+          case FAIL_REPLY:     ++cly; break;
           case SEND_GIF:       ++gif; break;
           case SEND_TXT:       ++txt; break;
           case SEND_JPG:       ++jpg; break;

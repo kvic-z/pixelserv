@@ -23,7 +23,7 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v35.HZ12.Kk-test3"
+#define VERSION "v35.HZ12.Kk-test4"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -97,6 +97,7 @@ extern volatile sig_atomic_t rdr;
 extern volatile sig_atomic_t pst;
 extern volatile sig_atomic_t hed;
 extern volatile sig_atomic_t opt;
+extern volatile sig_atomic_t cly;
 
 extern volatile sig_atomic_t slh;
 extern volatile sig_atomic_t slm;
