@@ -23,21 +23,20 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v35.HZ12.Kk"
+#define VERSION "v35.HZ12.Kl-test1"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
-#define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
-
+#define CHAR_BUF_SIZE 8191      // surprising how big requests can be with cookies and lengthy yahoo url!
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
 #define DEFAULT_TIMEOUT 10      // default timeout for select() calls, in seconds
-
+#define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 30)
+                                // default keep-alive duration for HTTP/1.1 connections, in seconds
+                                // it's the time a connection will stay active
+                                // until another request comes and refreshes the timer
 #define SECOND_PORT "443"
 #define MAX_PORTS 10
 #define MAX_TLS_PORTS 9         // PLEASE ENSURE MAX_TLS_PORTS < MAX_PORTS
-#define DEFAULT_PEM_PATH "/opt/var/cache/pixelserv"
-#define PIXELSERV_MAX_PATH 1024
-#define PIXELSERV_MAX_SERVER_NAME 255
 
 #ifdef DROP_ROOT
 # define DEFAULT_USER "nobody"  // nobody used by dnsmasq
@@ -104,11 +103,17 @@ extern volatile sig_atomic_t slm;
 extern volatile sig_atomic_t sle;
 extern volatile sig_atomic_t slc;
 extern volatile sig_atomic_t slu;
+extern volatile sig_atomic_t kcc;
+extern volatile sig_atomic_t kmx;
+extern volatile sig_atomic_t kct;
+extern float kvg;
+extern volatile sig_atomic_t krq;
 
 struct Global {
     int argc;
     char** argv;
     const time_t select_timeout;
+    const time_t http_keepalive;
     const int pipefd;
     const char* const stats_url;
     const char* const stats_text_url;

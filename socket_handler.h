@@ -27,7 +27,8 @@ typedef enum {
   SEND_HEAD,
   SEND_OPTIONS,
   ACTION_LOG_ON,
-  ACTION_LOG_OFF
+  ACTION_LOG_OFF,
+  ACTION_DEC_KCC
 } response_enum;
 
 typedef enum {
@@ -41,7 +42,10 @@ typedef enum {
 
 typedef struct {
     response_enum status;
-    int rx_total;
+    union {
+        int rx_total;
+        int krq;
+    };
     double run_time;
     ssl_enum ssl;
 } response_struct;

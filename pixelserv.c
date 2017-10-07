@@ -21,6 +21,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/resource.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include "certs.h"
@@ -28,6 +29,7 @@
 #ifdef USE_PTHREAD
 #include <pthread.h>
 #endif
+#include <linux/version.h>
 
 void signal_handler(int sig)
 {
@@ -66,7 +68,7 @@ void signal_handler(int sig)
   return;
 }
 
-unsigned char access_log = 0;
+unsigned char loglvl = 0;
 const char *tls_pem = DEFAULT_PEM_PATH;
 int tls_ports[MAX_TLS_PORTS] = {0};
 int num_tls_ports = 0;
@@ -86,13 +88,14 @@ int main (int argc, char* argv[]) // program start
   int yes = 1;
   char* version_string;
   time_t select_timeout = DEFAULT_TIMEOUT;
+  time_t http_keepalive = DEFAULT_KEEPALIVE;
   int rv = 0;
   char* ip_addr = DEFAULT_IP;
   int use_ip = 0;
   struct addrinfo hints, *servinfo;
   int error = 0;
   int pipefd[2];  // IPC pipe ends (0 = read, 1 = write)
-  response_struct pipedata = { FAIL_GENERAL, 0, 0.0, 0 };
+  response_struct pipedata = { FAIL_GENERAL, { 0 }, 0.0, 0 };
   char* ports[MAX_PORTS];
   ports[0] = DEFAULT_PORT;
   ports[1] = SECOND_PORT;
@@ -135,7 +138,7 @@ int main (int argc, char* argv[]) // program start
 #ifndef TEST
         case 'f': do_foreground = 1;                          continue;
 #endif // !TEST
-        case 'l': access_log = 1; continue;
+        case 'l': loglvl = 1; continue;
         case 'r':
           // deprecated - ignore
 //          do_redirect = 1;
@@ -157,6 +160,13 @@ int main (int argc, char* argv[]) // program start
             errno = 0;
             select_timeout = strtol(argv[i], NULL, 10);
             if (errno || select_timeout <= 0) {
+              error = 1;
+            }
+          continue;
+          case 'O':
+            errno = 0;
+            http_keepalive = strtol(argv[i], NULL, 10);
+            if (errno || http_keepalive <= 0) {
               error = 1;
             }
           continue;
@@ -206,7 +216,7 @@ int main (int argc, char* argv[]) // program start
   SET_LINE_NUMBER(__LINE__);
 
   if (error) {
-    printf("Usage:%s" "\n"
+    printf("%s %s" "\n"
            "\t" "ip_addr/hostname (all if omitted)" "\n"
            "\t" "-2 (disable HTTP 204 reply to generate_204 URLs)" "\n"
 #ifndef TEST
@@ -220,6 +230,7 @@ int main (int argc, char* argv[]) // program start
            "\t" "-n i/f (all interfaces if omitted)" "\n"
 #endif // IF_MODE
            "\t" "-o select_timeout (%d seconds)" "\n"
+           "\t" "-O keep-alive duration for HTTP/1.1 connections (%d seconds)" "\n"
            "\t" "-p http_port ("
            DEFAULT_PORT
            " if omitted)" "\n"
@@ -240,7 +251,7 @@ int main (int argc, char* argv[]) // program start
            "\t" "-z path_to_https_certs ("
            DEFAULT_PEM_PATH
            " if omitted)" "\n"
-           , argv[0], DEFAULT_TIMEOUT);
+           , argv[0], VERSION, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE);
     exit(EXIT_FAILURE);
   }
 
@@ -279,30 +290,30 @@ int main (int argc, char* argv[]) // program start
     FILE *fp = fopen(fname, "r");
     X509 *cacert = X509_new();
     if(fp == NULL || PEM_read_X509(fp, &cacert, NULL, NULL) == NULL)
-       syslog(LOG_ERR, "Failed to open/read ca.crt");
+     syslog(LOG_ERR, "Failed to open/read ca.crt");
     free(fname);
     
     EVP_PKEY * pubkey = X509_get_pubkey(cacert);
     if (X509_verify(cacert, pubkey) <= 0)
     {
-        BIO *bioin; int fsz; char *cafile;
+      BIO *bioin; int fsz; char *cafile;
 
-        if (fseek(fp, 0L, SEEK_END) < 0)
-            syslog(LOG_ERR, "Failed to seek ca.crt");
-        fsz = ftell(fp);
-        cafile = malloc(fsz);
-        fseek(fp, 0L, SEEK_SET);
-        fread(cafile, 1, fsz, fp);
+      if (fseek(fp, 0L, SEEK_END) < 0)
+        syslog(LOG_ERR, "Failed to seek ca.crt");
+      fsz = ftell(fp);
+      cafile = malloc(fsz);
+      fseek(fp, 0L, SEEK_SET);
+      fread(cafile, 1, fsz, fp);
 
-        bioin = BIO_new_mem_buf(cafile, fsz);
-        if (!bioin)
-            syslog(LOG_ERR, "Failed to create new BIO mem buffer");
+      bioin = BIO_new_mem_buf(cafile, fsz);
+      if (!bioin)
+        syslog(LOG_ERR, "Failed to create new BIO mem buffer");
 
-        cachain = PEM_X509_INFO_read_bio(bioin, NULL, NULL, NULL);
-        if (!cachain)
-            syslog(LOG_ERR, "Failed to read CA chain from ca.crt");
-        BIO_free(bioin);
-        free(cafile);
+      cachain = PEM_X509_INFO_read_bio(bioin, NULL, NULL, NULL);
+      if (!cachain)
+        syslog(LOG_ERR, "Failed to read CA chain from ca.crt");
+      BIO_free(bioin);
+      free(cafile);
     }
     fclose(fp);
     EVP_PKEY_free(pubkey);
@@ -365,6 +376,9 @@ int main (int argc, char* argv[]) // program start
 #ifdef IF_MODE
       || (use_if && (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, ifname, strlen(ifname))))  // only use selected i/f
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)
+      || (setsockopt(sockfd, SOL_TCP, TCP_FASTOPEN, &yes, sizeof(int)))
+#endif
       || (bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen))
       || (listen(sockfd, BACKLOG))
       || (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK))  // set non-blocking mode
@@ -399,6 +413,7 @@ int main (int argc, char* argv[]) // program start
   // set up signal handling
   {
     struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
 
@@ -486,6 +501,7 @@ int main (int argc, char* argv[]) // program start
         argc,
         argv,
         select_timeout,
+        http_keepalive,
         pipefd[1],
         stats_url,
         stats_text_url,
@@ -573,8 +589,9 @@ int main (int argc, char* argv[]) // program start
           case SEND_POST:      ++pst; break;
           case SEND_HEAD:      ++hed; break;
           case SEND_OPTIONS:   ++opt; break;
-          case ACTION_LOG_ON:  access_log = 1; break;
-          case ACTION_LOG_OFF: access_log = 0; break;
+          case ACTION_LOG_ON:  loglvl = 1; break;
+          case ACTION_LOG_OFF: loglvl = 0; break;
+          case ACTION_DEC_KCC: --kcc; break;
           default:
             syslog(LOG_ERR, "Socket handler child process reported unknown response value: %d", pipedata.status);
         }
@@ -591,41 +608,50 @@ int main (int argc, char* argv[]) // program start
             MYLOG(LOG_ERR, "Socket handler child process reported unknown ssl state: %d", pipedata.ssl);
 #endif
         }
+        count++;
         SET_LINE_NUMBER(__LINE__);
 
-        // count only positive receive sizes
-        if (pipedata.rx_total <= 0) {
-          MYLOG(LOG_WARNING, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
-        } else {
+        if (pipedata.status < ACTION_LOG_ON) {
+          // count only positive receive sizes
+          if (pipedata.rx_total <= 0) {
+            MYLOG(LOG_WARNING, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
+          } else {
             // calculate average byte per request (avg) using
             // EMA after the initial 500 samples (which uses SMA)
             static float favg = 0.0;
-            if (act < 500)
-            {
-                favg *= act;
-                favg = (favg + pipedata.rx_total) / ++act;
+            if (act < 500) {
+              favg *= act;
+              favg = (favg + pipedata.rx_total) / ++act;
             } else
-                favg += 0.002 * (pipedata.rx_total - favg);
+              favg += 0.002 * (pipedata.rx_total - favg);
             avg = favg + 0.5;
             // look for a new high score
             if (pipedata.rx_total > rmx)
-                rmx = pipedata.rx_total;
-        }
+              rmx = pipedata.rx_total;
+          }
 
-        if (pipedata.status != FAIL_TIMEOUT) {
+          if (pipedata.status != FAIL_TIMEOUT) {
             // calculate average process time (tav) using
             // EMA after the initial 500 samples (which uses SMA)
             static float ftav = 0.0;
-            if (tct < 500)
-            {
-                ftav *= tct;
-                ftav = (ftav + pipedata.run_time) / ++tct;
+            if (tct < 500) {
+              ftav *= tct;
+              ftav = (ftav + pipedata.run_time) / ++tct;
             } else
-                ftav += 0.002 * (pipedata.run_time - ftav);
+              ftav += 0.002 * (pipedata.run_time - ftav);
             tav = ftav + 0.5;
             // look for a new high score, adding 0.5 for rounding
             if (pipedata.run_time + 0.5 > tmx)
-                tmx = (pipedata.run_time + 0.5);
+              tmx = (pipedata.run_time + 0.5);
+          }
+        } else if (pipedata.status == ACTION_DEC_KCC) {
+          if (kct < 500) {
+            kvg *= kct;
+            kvg = (kvg + pipedata.krq) / ++kct;
+          } else
+            kvg += 0.002 * (pipedata.krq - kvg);
+          if (pipedata.krq > krq)
+             krq = pipedata.krq;
         }
       }
       --select_rv;
@@ -661,9 +687,6 @@ int main (int argc, char* argv[]) // program start
       }
       continue;
     }
-
-    count++;
-
     SET_LINE_NUMBER(__LINE__);
 
     conn_tlstor_struct *conn_tlstor = malloc(sizeof(conn_tlstor_struct));
@@ -676,7 +699,7 @@ int main (int argc, char* argv[]) // program start
     pthread_attr_setdetachstate(&conn_attr, PTHREAD_CREATE_DETACHED);
 
     if (pthread_create(&conn_thread, &conn_attr, conn_handler, (void*)conn_tlstor))
-        syslog(LOG_ERR, "Failed to create conn_handler thread");
+      syslog(LOG_ERR, "Failed to create conn_handler thread");
 #else
     if (fork() == 0) {
       // detach child from signal handler
@@ -704,6 +727,9 @@ int main (int argc, char* argv[]) // program start
     close(new_fd);  // parent doesn't need this
     free(conn_tlstor);
 #endif // USE_PTHREAD
+
+    if (++kcc > kmx)
+      kmx = kcc;
 
     SET_LINE_NUMBER(__LINE__);
 

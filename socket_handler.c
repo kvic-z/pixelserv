@@ -32,7 +32,7 @@
   // total content length goes between these two strings
   static const char httpstats2[] =
   "\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n";
   // split here because we care about the length of what follows
   static const char httpstats3[] =
@@ -52,7 +52,7 @@
   // total content length goes between these two strings
   static const char txtstats2[] =
   "\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n";
   // split here because we care about the length of what follows
   static const char txtstats3[] =
@@ -63,13 +63,13 @@
   "Location: %s\r\n"
   "Content-type: text/plain\r\n"
   "Content-length: 0\r\n"
-  "Connection: close\r\n\r\n";
+  "Connection: keep-alive\r\n\r\n";
 
   static const char httpnullpixel[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/gif\r\n"
   "Content-length: 42\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n"
   "GIF89a" // header
   "\1\0\1\0"  // little endian width, height
@@ -99,19 +99,19 @@
   "Strict-Transport-Security: max-age=10886400; includeSubDomains\r\n" //experimental support for HSTS
   "Content-type: text/html\r\n"
   "Content-length: 0\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n";
 
   static const char http501[] =
   "HTTP/1.1 501 Method Not Implemented\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n";
 
   static const char httpnull_png[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/png\r\n"
   "Content-length: 67\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n"
   "\x89"
   "PNG"
@@ -183,7 +183,7 @@ static const char httpnull_swf[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: application/x-shockwave-flash\r\n"
   "Content-length: 25\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n"
   "FWS"
   "\x05"  // File version
@@ -201,7 +201,7 @@ static const char httpnull_ico[] =
   "Content-type: image/x-icon\r\n"
   "Cache-Control: max-age=2592000\r\n"
   "Content-length: 70\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n"
   "\x00\x00" // reserved 0
   "\x01\x00" // ico
@@ -229,7 +229,7 @@ static const char httpoptions[] =
   "Content-type: text/html\r\n"
   "Content-length: 11\r\n"
   "Allow: GET,OPTIONS\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n"
   "GET,OPTIONS";
 
@@ -397,7 +397,7 @@ void child_signal_handler(int sig)
 # define TIME_CHECK(x,y...)
 #endif //DEBUG
 
-extern unsigned char access_log;
+extern unsigned char loglvl;
 extern const char *tls_pem;
 extern int tls_ports[];
 extern int num_tls_ports;
@@ -406,114 +406,112 @@ extern struct Global *g;
 
 static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
 {
-    SSL_CTX *sslctx = NULL;
-    int rv = SSL_TLSEXT_ERR_OK;
-    tlsext_cb_arg_struct *tlsext_cb_arg = (tlsext_cb_arg_struct *)arg;
-    const char* pem_dir = tlsext_cb_arg->tls_pem;
-    char *full_pem_path = NULL;
-    char *servername = malloc(PIXELSERV_MAX_SERVER_NAME);
-    if ((tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name)) == NULL)
-        goto free_all;
-    strcpy(servername, tlsext_cb_arg->servername);
+  SSL_CTX *sslctx = NULL;
+  int rv = SSL_TLSEXT_ERR_OK;
+  tlsext_cb_arg_struct *tlsext_cb_arg = (tlsext_cb_arg_struct *)arg;
+  const char* pem_dir = tlsext_cb_arg->tls_pem;
+  char *full_pem_path = NULL;
+  char *servername = malloc(PIXELSERV_MAX_SERVER_NAME);
+  if ((tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name)) == NULL)
+    goto free_all;
+  strcpy(servername, tlsext_cb_arg->servername);
 #ifdef DEBUG
-    printf("https request for hostname: %s\n", servername);
+  printf("https request for hostname: %s\n", servername);
 #endif
-    int dot_count=0;
-    char *pem_file = strchr(servername, '.');
-    
-    while(pem_file != NULL){
-        dot_count++;
-        pem_file = strchr(pem_file+1, '.');
-    }
-    if (dot_count > 1){
-        pem_file = strchr(servername, '.');
-        *(--pem_file) = '_';
-    } else
-        pem_file = servername;    
-#ifdef DEBUG
-    printf("pem file name: %s\n", pem_file);
-#endif
-    full_pem_path = malloc(PIXELSERV_MAX_PATH);
-    strcpy(full_pem_path, pem_dir);
-    strcat(full_pem_path, "/");
-    strcat(full_pem_path, pem_file);
-#ifdef DEBUG
-    printf("full_pem_path: %s\n",full_pem_path);
-#endif
-    struct stat st;
-    if(stat(full_pem_path, &st) != 0){
-        syslog(LOG_NOTICE, "%s %s missing", tlsext_cb_arg->servername, pem_file);        
-        tlsext_cb_arg->status = SSL_MISS;
-        int fd = open(PIXEL_CERT_PIPE, O_WRONLY);
-        if(fd == -1)
-            syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
-        else {
-            write(fd, strcat(pem_file,":"), strlen(pem_file));
-            close(fd);
-        }
-        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
-        goto free_all;
-    }
+  int dot_count=0;
+  char *pem_file = strchr(servername, '.');
 
-    sslctx = SSL_CTX_new(TLSv1_2_server_method());
-    SSL_CTX_set_ecdh_auto(sslctx, 1);
-    SSL_CTX_set_options(sslctx, SSL_OP_SINGLE_DH_USE);
-    if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0 ||
-        SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0) {
-        syslog(LOG_NOTICE, "Cannot use %s\n",full_pem_path);
-        tlsext_cb_arg->status = SSL_ERR;
-        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
-        goto free_all;
+  while(pem_file != NULL){
+    dot_count++;
+    pem_file = strchr(pem_file+1, '.');
+  }
+  if (dot_count > 1){
+    pem_file = strchr(servername, '.');
+    *(--pem_file) = '_';
+  } else
+    pem_file = servername;
+#ifdef DEBUG
+  printf("pem file name: %s\n", pem_file);
+#endif
+  full_pem_path = malloc(PIXELSERV_MAX_PATH);
+  strcpy(full_pem_path, pem_dir);
+  strcat(full_pem_path, "/");
+  strcat(full_pem_path, pem_file);
+#ifdef DEBUG
+  printf("full_pem_path: %s\n",full_pem_path);
+#endif
+  struct stat st;
+  if(stat(full_pem_path, &st) != 0){
+    syslog(LOG_NOTICE, "%s %s missing", tlsext_cb_arg->servername, pem_file);
+    tlsext_cb_arg->status = SSL_MISS;
+    int fd = open(PIXEL_CERT_PIPE, O_WRONLY);
+    if(fd == -1)
+      syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
+    else {
+      strcat(pem_file,":");
+      write(fd, pem_file, strlen(pem_file));
+      close(fd);
     }
+    rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+    goto free_all;
+  }
 
-    if (cachain)
+  sslctx = SSL_CTX_new(TLSv1_2_server_method());
+  SSL_CTX_set_ecdh_auto(sslctx, 1);
+  SSL_CTX_set_options(sslctx, SSL_OP_SINGLE_DH_USE);
+  if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0 ||
+    SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0) {
+    syslog(LOG_NOTICE, "Cannot use %s\n",full_pem_path);
+    tlsext_cb_arg->status = SSL_ERR;
+    rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+    goto free_all;
+  }
+
+  if (cachain) {
+    X509_INFO *inf; int i;
+    for (i=sk_X509_INFO_num(cachain)-1; i >= 0; i--)
     {
-        X509_INFO *inf; int i;
-        for (i=sk_X509_INFO_num(cachain)-1; i >= 0; i--) 
-        {
-            if ((inf = sk_X509_INFO_value(cachain, i)) && inf->x509 &&
-                   !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509))) //X509_ref_up requires >= v1.1
-                syslog(LOG_ERR, "Cannot add CA cert %d\n", i);
-        }
+      if ((inf = sk_X509_INFO_value(cachain, i)) && inf->x509 &&
+             !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509))) //X509_ref_up requires >= v1.1
+        syslog(LOG_ERR, "Cannot add CA cert %d\n", i);
     }
+  }
 
-    SSL_set_SSL_CTX(cSSL, sslctx);
-    tlsext_cb_arg->status = SSL_HIT;
-    tlsext_cb_arg->sslctx = (void*)sslctx;
+  SSL_set_SSL_CTX(cSSL, sslctx);
+  tlsext_cb_arg->status = SSL_HIT;
+  tlsext_cb_arg->sslctx = (void*)sslctx;
 #ifdef DEBUG
-    printf("%s: sslctx %p\n", __FUNCTION__, (void*) sslctx);
+  printf("%s: sslctx %p\n", __FUNCTION__, (void*) sslctx);
 #endif
 free_all:
-    free(full_pem_path);
-    free(servername);
+  free(full_pem_path);
+  free(servername);
 
-    return rv;
+  return rv;
 }
 
 void* conn_handler( void *ptr )
 {
-    int argc = GLOBAL(g, argc);
-    char **argv = GLOBAL(g, argv);
-    const int new_fd = CONN_TLSTOR(ptr, new_fd);
-    const time_t select_timeout = GLOBAL(g, select_timeout);
-    const int pipefd = GLOBAL(g, pipefd);
-    const char* const stats_url = GLOBAL(g, stats_url);
-    const char* const stats_text_url = GLOBAL(g, stats_text_url);
-    const int do_204 = GLOBAL(g, do_204);
-    const int do_redirect = GLOBAL(g, do_redirect);
+  int argc = GLOBAL(g, argc);
+  char **argv = GLOBAL(g, argv);
+  const int new_fd = CONN_TLSTOR(ptr, new_fd);
+  const int pipefd = GLOBAL(g, pipefd);
+  const char* const stats_url = GLOBAL(g, stats_url);
+  const char* const stats_text_url = GLOBAL(g, stats_text_url);
+  const int do_204 = GLOBAL(g, do_204);
+  const int do_redirect = GLOBAL(g, do_redirect);
 #ifdef DEBUG
-    const int warning_time = GLOBAL(g, warning_time);
+  const int warning_time = GLOBAL(g, warning_time);
 #endif
 
   // NOTES:
   // - from here on, all exit points should be counted or at least logged
   // - exit() should not be called from the child process
-  response_struct pipedata = {FAIL_GENERAL, 0, 0.0, SSL_NOT_TLS};
-  struct timeval timeout = {select_timeout, 0};
+  response_struct pipedata = {0};
+  struct timeval timeout = {GLOBAL(g, select_timeout), 0};
   int rv = 0;
   char buf[CHAR_BUF_SIZE + 1];
   char *bufptr = NULL;
-  char* buf_backup = NULL;
   char *url = NULL;
   char* aspbuf = NULL;
   const char* response = httpnulltext;
@@ -522,6 +520,11 @@ void* conn_handler( void *ptr )
   char* stat_string = NULL;
   struct timespec start_time = {0, 0};
   int ssl = 0;
+  int num_req = 0; // number of requests processed by this thread
+  char *req_url = malloc(1024); // initial size only
+  int req_len = 1023; // size of req_url less one
+  #define HOST_LEN_MAX 80
+  char host[HOST_LEN_MAX];
 
 #ifdef DEBUG
   double time_msec = 0.0;
@@ -532,6 +535,7 @@ void* conn_handler( void *ptr )
   // set up signal handling
   {
     struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
     sa.sa_handler = child_signal_handler;
     sigemptyset(&sa.sa_mask);
 
@@ -567,116 +571,164 @@ void* conn_handler( void *ptr )
 
   SET_LINE_NUMBER(__LINE__);
   
-    // determine https port or not
-    {
-        struct sockaddr_storage sin_addr;
-        socklen_t sin_addr_len = sizeof(sin_addr);
-        char port[NI_MAXSERV] = {'\0'};
-    
-        getsockname(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
-        if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, NULL, 0, port, \
-                    sizeof port, NI_NUMERICSERV) != 0)
-            perror("getnameinfo");
-    
-        int i;
-        for(i=0; i<num_tls_ports; i++)
-            if(atoi(port) == tls_ports[i]) ssl = 1;
+  // determine https port or not
+  {
+    struct sockaddr_storage sin_addr;
+    socklen_t sin_addr_len = sizeof(sin_addr);
+    char port[NI_MAXSERV] = {'\0'};
+
+    getsockname(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
+    if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, NULL, 0, port, \
+                sizeof port, NI_NUMERICSERV) != 0)
+      perror("getnameinfo");
+
+    int i;
+    for(i=0; i<num_tls_ports; i++)
+      if(atoi(port) == tls_ports[i]) ssl = 1;
 #ifdef DEBUG    
-        printf("socket handler port number %s\n", port);
+    printf("socket handler port number %s\n", port);
 
-        char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
-        getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
-        if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
-                sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
-            perror("getnameinfo");    
+    char client_ip[INET6_ADDRSTRLEN]= {'\0'};
+    getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
+    if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
+            sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
+      perror("getnameinfo");
 
-        printf("socket handler Connection from %s\n", client_ip);
+    printf("socket handler Connection from %s\n", client_ip);
 #endif
-    }
+  }
 
-    SSL_CTX *sslctx = NULL;
-    SSL *cSSL = NULL;
-    tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL, SSL_UNKNOWN, NULL };
+  SSL_CTX *sslctx = NULL;
+  SSL *cSSL = NULL;
+  tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL, SSL_UNKNOWN, NULL };
 
-    if(ssl){
-        sslctx = SSL_CTX_new(TLSv1_2_server_method());
-        SSL_CTX_set_options(sslctx, /*SSL_OP_SINGLE_DH_USE*/ SSL_MODE_RELEASE_BUFFERS | SSL_OP_NO_COMPRESSION);
-        SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
-        SSL_CTX_set_tlsext_servername_arg(sslctx, &tlsext_cb_arg);
+  if(ssl){
+    sslctx = SSL_CTX_new(TLSv1_2_server_method());
+    SSL_CTX_set_options(sslctx, /*SSL_OP_SINGLE_DH_USE*/ SSL_MODE_RELEASE_BUFFERS | SSL_OP_NO_COMPRESSION);
+    SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
+    SSL_CTX_set_tlsext_servername_arg(sslctx, &tlsext_cb_arg);
 
-        cSSL = SSL_new(sslctx);
-        SSL_set_fd(cSSL, new_fd );
-        int ssl_err = SSL_accept(cSSL);
+    cSSL = SSL_new(sslctx);
+    SSL_set_fd(cSSL, new_fd );
+    int ssl_err = SSL_accept(cSSL);
 
-        TIME_CHECK("SSL setup");
-        pipedata.ssl = tlsext_cb_arg.status;
-        if(ssl_err > 0) {
-          rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
-          if (rv == 0) // client disconnects without sending any data
-            pipedata.ssl = SSL_HIT_CLS;
-          TESTPRINT("SSL handshake successful: %d, %d, %d\n", tlsext_cb_arg.status, SSL_get_error(cSSL, rv), rv);
-        } else
-          TESTPRINT("SSL handshake failed: %d\n", SSL_get_error(cSSL, ssl_err));
-    } else {
-        // read some data from the socket to buf
-        rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
-    }
+    TIME_CHECK("SSL setup");
+    pipedata.ssl = tlsext_cb_arg.status;
+    if(ssl_err > 0) {
+      rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
+      if (rv == 0) // client disconnects without sending any data
+        pipedata.ssl = SSL_HIT_CLS;
+      TESTPRINT("SSL handshake successful: %d, %d, %d\n", tlsext_cb_arg.status, SSL_get_error(cSSL, rv), rv);
+    } else
+      TESTPRINT("SSL handshake failed: %d\n", SSL_get_error(cSSL, ssl_err));
+  } else {
+    // read some data from the socket to buf
+    rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+  }
 
-  if (rv < 0) {               // some kind of error
-    if (errno == ECONNRESET) {
-      MYLOG(LOG_WARNING, "recv() reported connection error: %m");
+
+  // enter event loop
+  while(1) {
+    if (rv < 0) {               // some kind of error
+      if (errno == ECONNRESET) {
+        MYLOG(LOG_WARNING, "recv() reported connection error: %m");
+        pipedata.status = FAIL_CLOSED;
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        MYLOG(LOG_WARNING, "recv() reported timeout error: %m");
+        pipedata.status = FAIL_TIMEOUT;
+      } else {
+        syslog(LOG_ERR, "recv() reported error: %m");
+        pipedata.status = FAIL_GENERAL;
+      }
+    } else if (rv == 0) {       // EOF
+      MYLOG(LOG_ERR, "client closed connection without sending any data");
       pipedata.status = FAIL_CLOSED;
-    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      MYLOG(LOG_WARNING, "recv() reported timeout error: %m");
-      pipedata.status = FAIL_TIMEOUT;
-    } else {
-      syslog(LOG_ERR, "recv() reported error: %m");
-      pipedata.status = FAIL_GENERAL;
-    }
-  } else if (rv == 0) {       // EOF
-    MYLOG(LOG_ERR, "client closed connection without sending any data");
-    pipedata.status = FAIL_CLOSED;
-  } else {                    // got some data
-    TIME_CHECK("initial recv()");
-    buf[rv] = '\0';
-    TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
+    } else {                    // got some data
+      TIME_CHECK("initial recv()");
+      buf[rv] = '\0';
+      TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
 
-    pipedata.rx_total = rv;
+      pipedata.rx_total = rv;
 #ifdef HEX_DUMP
-    hex_dump(buf, rv);
+      hex_dump(buf, rv);
 #endif
-    buf_backup = malloc(sizeof(buf));
-    memcpy(buf_backup, buf, sizeof(buf));
-    
-    char *req = strtok_r(buf, "\r\n", &bufptr);
-    char *method = strtok(req, " ");
-    if (method == NULL) {
-      syslog(LOG_ERR, "client did not specify method");
-    } else {
-      TESTPRINT("method: '%s'\n", method);
-      if (strcmp(method, "GET") && strcmp(method, "OPTIONS")) {  //methods are case-sensitive
-          // something other than GET and OPTIONS - send 501 response
-          if (!strcmp(method, "POST")) {
-            // POST
-            pipedata.status = SEND_POST;
-          } else if (!strcmp(method, "HEAD")) {
-            // HEAD (TODO: send header of what the actual response type would be?)
-            pipedata.status = SEND_HEAD;
-          } else {
-            // something else, possibly even non-HTTP
-            syslog(LOG_WARNING, "Sending HTTP 501 response for unknown HTTP method or non-SSL, non-HTTP request: %s", method);
-            pipedata.status = SEND_BAD;
+
+      char *body = strstr(buf, "\r\n\r\n");
+      char *req = strtok_r(buf, "\r\n", &bufptr);
+      if (loglvl) {
+        req_url[0] = '\0';
+        host[0] = '\0';
+        if (req) {
+          if (strlen(req) > req_len) {
+            req_len = strlen(req);
+            req_url = realloc(req_url, req_len + 1);
           }
-          TESTPRINT("Sending 501 response\n");
-          response = http501;
-          rsize = sizeof http501 - 1;
-      } else if (!strcmp(method, "OPTIONS")) {
+          strcpy(req_url, req);
+
+          // hack to remember the start of Host header
+          if (strlen(req) < CHAR_BUF_SIZE) {
+            char *tmpHost = strstr(buf + strlen(req) + 2, "Host:"); // e.g. "Host: abc.com"
+            TESTPRINT("tmpHost: '%s'\n", tmpHost);
+
+            tmpHost[strlen("Host:")] = ' ';
+            tmpHost = strtok(++tmpHost, "\r\n");
+
+            if (strlen(tmpHost) < HOST_LEN_MAX)
+               strcpy(host, tmpHost);
+            else
+               strcpy(host, tmpHost + (strlen(tmpHost) - HOST_LEN_MAX) + 1);
+            *(tmpHost + strlen(tmpHost)) = '\r';
+          }
+        }
+      }
+      char *method = strtok(req, " ");
+
+      if (method == NULL) {
+        syslog(LOG_ERR, "client did not specify method");
+      } else {
+        TESTPRINT("method: '%s'\n", method);
+        if (!strcmp(method, "OPTIONS")) {
           pipedata.status = SEND_OPTIONS;
           response = httpoptions;
           rsize = sizeof httpoptions - 1;
-      } else {
-          // GET
-          // ----------------------------------------------
+        } else if (!strcmp(method, "POST")) {
+            pipedata.status = SEND_POST;
+            char *h;
+            int length = 0;
+            for(h = strtok_r(NULL, "\r\n", &bufptr); h; h = strtok_r(NULL, "\r\n", &bufptr)) {
+              TESTPRINT("header = %s\n", h);
+              char *k = strtok(h, ":");
+              if (strstr(k, "Content-Length")) {
+                length = atoi(strtok(NULL,"\r\n"));
+                break;
+              }
+            }
+            syslog(LOG_WARNING, "POST Content-Length: %d", length);
+
+            // when the body returns together with the headers, h now will point to the body
+            h = strtok(body + 4, "\r\n");
+            for (; h != NULL; h = strtok(NULL, "\r\n")) {
+              TESTPRINT("body = %s\n", h);
+              length -= strlen(h);
+            }
+
+            syslog(LOG_WARNING, "POST expect length: %d\n", length);
+
+            // sink data as we're told
+            for (; length > 0; length -= rv) {
+              errno = 0;
+              if(ssl)
+                rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
+              else
+                rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+              syslog(LOG_WARNING, "POST recv length: %d; errno: %d", rv, errno);
+              if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)))
+                break;
+              pipedata.rx_total += rv;
+            }
+            response = http204;
+            rsize = sizeof http204 - 1;
+        } else if (!strcmp(method, "GET")) {
           // send default from here, no matter what happens
           pipedata.status = DEFAULT_REPLY;
           // trim up to non path chars
@@ -686,10 +738,10 @@ void* conn_handler( void *ptr )
             syslog(LOG_ERR, "client did not specify URL for GET request");
           } else if (!strcmp(path, "/log=1")) {
             pipedata.status = ACTION_LOG_ON;
-            access_log = 1;
+            loglvl = 1;
           } else if (!strcmp(path, "/log=0")) {
             pipedata.status = ACTION_LOG_OFF;
-            access_log = 0;
+            loglvl = 0;
           } else if (!strcmp(path, stats_url)) {
             pipedata.status = SEND_STATS;
             version_string = get_version(argc, argv);
@@ -727,7 +779,6 @@ void* conn_handler( void *ptr )
             rsize = sizeof http204 - 1;
           } else {
             // pick out encoded urls (usually advert redirects)
-//                  if (do_redirect && strstr(path, "=http") && strchr(path, '%')) {
             if (do_redirect && strcasestr(path, "=http")) {
               char *decoded = malloc(strlen(path)+1);
               urldecode(decoded, path);
@@ -821,49 +872,72 @@ void* conn_handler( void *ptr )
                 }
               }
             }
+            // Crazy websites send very long URL. Let's treat them gracefully by draining the full URL.
+            if (body == NULL) do {
+              if(ssl)
+                rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
+              else
+                rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+              if (rv > 0) pipedata.rx_total += rv;
+            } while (rv > 0);
           }
+          // end of GET
+        } else {
+          if (!strcmp(method, "HEAD")) {
+            // HEAD (TODO: send header of what the actual response type would be?)
+            pipedata.status = SEND_HEAD;
+          } else {
+            // something else, possibly even non-HTTP
+            syslog(LOG_WARNING, "Sending HTTP 501 response for unknown HTTP method: %s", method);
+            pipedata.status = SEND_BAD;
+          }
+          TESTPRINT("Sending 501 response\n");
+          response = http501;
+          rsize = sizeof http501 - 1;
         }
-    }
-  }
-
-  if (pipedata.status != FAIL_TIMEOUT) {
-    TIME_CHECK("response selection");
-  }
-
-  // done processing socket connection; now handle selected result action
-  if (pipedata.status == FAIL_GENERAL) {
-    // log general error status in case it wasn't caught above
-    syslog(LOG_WARNING, "browser request processing completed with FAIL_GENERAL status");
-  } else if (pipedata.status != FAIL_TIMEOUT && pipedata.status != FAIL_CLOSED) {
-    SET_LINE_NUMBER(__LINE__);
-
-    // only attempt to send response if we've chosen a valid response type
-    if (ssl)
-      rv = SSL_write(cSSL, response, rsize);
-    else
-      // this is currently a blocking call, so zero should not be returned
-      rv = send(new_fd, response, rsize, MSG_NOSIGNAL);
-    
-    if (rv < 0) { // check for error message, but don't bother checking that all bytes sent
-      if (errno == EPIPE || errno == ECONNRESET) {
-        // client closed socket sometime after initial check
-        MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
-        pipedata.status = FAIL_REPLY;
-      } else {
-        // some other error
-        syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
-        pipedata.status = FAIL_GENERAL;
       }
-    } else if (rv != rsize) {
-      syslog(LOG_WARNING, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
     }
+
+    num_req++;
+
+    if (pipedata.status != FAIL_TIMEOUT) {
+      TIME_CHECK("response selection");
+    }
+
+    // done processing socket connection; now handle selected result action
+    if (pipedata.status == FAIL_GENERAL) {
+      // log general error status in case it wasn't caught above
+      syslog(LOG_WARNING, "browser request processing completed with FAIL_GENERAL status");
+    } else if (pipedata.status != FAIL_TIMEOUT && pipedata.status != FAIL_CLOSED) {
+      SET_LINE_NUMBER(__LINE__);
+
+      // only attempt to send response if we've chosen a valid response type
+      if (ssl)
+        rv = SSL_write(cSSL, response, rsize);
+      else
+        // this is currently a blocking call, so zero should not be returned
+        rv = send(new_fd, response, rsize, MSG_NOSIGNAL);
+
+      if (rv < 0) { // check for error message, but don't bother checking that all bytes sent
+        if (errno == EPIPE || errno == ECONNRESET) {
+          // client closed socket sometime after initial check
+          MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
+          pipedata.status = FAIL_REPLY;
+        } else {
+          // some other error
+          syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
+          pipedata.status = FAIL_GENERAL;
+        }
+      } else if (rv != rsize) {
+        syslog(LOG_WARNING, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
+      }
+
+      // free memory allocated by asprintf() (if any)
+      free(aspbuf);
+      aspbuf = NULL;
+      response = httpnullpixel;
     
-    // free memory allocated by asprintf() (if any)
-    free(aspbuf);
-    aspbuf = NULL;
-    response = httpnullpixel;
-    
-    if (access_log) {
+      if (loglvl) {
         struct sockaddr_storage sin_addr;
         socklen_t sin_addr_len = sizeof(sin_addr);
         char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
@@ -871,78 +945,82 @@ void* conn_handler( void *ptr )
         getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
         if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
                 sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
-            perror("getnameinfo");    
+          perror("getnameinfo");
 
-        char *req = strtok_r(buf_backup, "\r\n", &bufptr);
-        char *host = strtok_r(NULL, "\r\n", &bufptr);
-        strtok(host, ":");
-        host = strtok(NULL, "\r\n"); 
-        syslog(LOG_NOTICE, "(%2d) %s:%s %s%s", pipedata.status, client_ip, host, req, (tlsext_cb_arg.servername) ? " secure" : "");
-    }    
-  }
-  // *** NOTE: pipedata.status should not be altered after this point ***
-
-  TIME_CHECK("response send()");
-
-    if(ssl){
-        SSL_set_shutdown(cSSL, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
-#ifdef DEBUG
-        printf("%s: sslctx %p\n", __FUNCTION__, (void*) tlsext_cb_arg.sslctx);
-#endif
-        SSL_free(cSSL);
-        SSL_CTX_free((SSL_CTX*)tlsext_cb_arg.sslctx);
-        SSL_CTX_free(sslctx);
+        syslog(LOG_NOTICE, "(%2d) %s %s %s%s", pipedata.status, client_ip, host, req_url, (tlsext_cb_arg.servername) ? " secure" : "");
+      }
     }
+    // *** NOTE: pipedata.status should not be altered after this point ***
 
-  // signal the socket connection that we're done writing
-  errno = 0;
-  if (shutdown(new_fd, SHUT_WR) < 0) {
-    if (errno == ENOTCONN) {
-      MYLOG(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
-    } else {
-      syslog(LOG_WARNING, "shutdown(new_fd, SHUT_WR) reported error: %m");
-    }
-  } else if (pipedata.status != FAIL_TIMEOUT &&
-             pipedata.status != FAIL_CLOSED && 
-             pipedata.status != FAIL_REPLY) { // only check for additional data if we didn't detect a timeout or close initially
-    TIME_CHECK("socket write shutdown()");
+    TIME_CHECK("response send()");
+
+    // store time delta in milliseconds
+    pipedata.run_time = elapsed_time_msec(start_time);
+
     SET_LINE_NUMBER(__LINE__);
 
-    // socket may still be open for read, so read any data that is still waiting
-    errno = 0;
-    do {
-      rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
-      if (rv > 0) {
-        pipedata.rx_total += rv;
-      }
-    } while (rv > 0); // rv=0 means peer performed orderly shutdown
+    // write pipedata to pipe
+    // note that the parent must not perform a blocking pipe read without checking
+    //  for available data, or else it may deadlock when we don't write anything
+    rv = write(pipefd, &pipedata, sizeof(pipedata));
     if (rv < 0) {
-      if (errno == ECONNRESET) {
-        MYLOG(LOG_WARNING, "Final recv() reported connection error: %m");
-      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        MYLOG(LOG_WARNING, "Final recv() reported timeout error: %m");
+      syslog(LOG_WARNING, "write() to pipe reported error: %m");
+    } else if (rv == 0) {
+      syslog(LOG_WARNING, "write() reports no data written to pipe but no error");
+    } else if (rv != sizeof(pipedata)) {
+      syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %u", rv, (unsigned int)sizeof(pipedata));
+    }
+
+    TIME_CHECK("pipe write()");
+    SET_LINE_NUMBER(__LINE__);
+
+    int wait_cnt = GLOBAL(g, http_keepalive) / GLOBAL(g, select_timeout);
+    if (wait_cnt < 1) wait_cnt = 1;
+
+    while (wait_cnt >=1) {
+      errno = 0;
+      if(ssl){
+        rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
+        if (rv == 0) // client disconnects without sending any data
+          pipedata.ssl = SSL_HIT_CLS;
+        TESTPRINT("SSL handshake successful: %d, %d, %d\n", tlsext_cb_arg.status, SSL_get_error(cSSL, rv), rv);
       } else {
-        syslog(LOG_WARNING, "Final recv() reported error: %m");
+        // read some data from the socket to buf
+        rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
       }
-    }
 
-    TIME_CHECK("final recv() loop");
+      if (rv > 0) break;
+      if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) { 
+        //TESTPRINT("Exit recv loop fd:%d rv:%d errno:%d wait_cnt:%d\n", new_fd, rv, errno, wait_cnt);
+        syslog(LOG_WARNING, "Exit recv loop fd:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n", new_fd, rv, errno, wait_cnt, num_req);
+        goto done_with_this_thread;
+      }
+      --wait_cnt;
+    } // while(wait_cnt >=1 )
+
+    get_time(&start_time);
+  } // while(1)
+
+done_with_this_thread:
+
+  // signal the socket connection that we're done read-write
+  if(ssl){
+    SSL_set_shutdown(cSSL, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+#ifdef DEBUG
+    printf("%s: sslctx %p\n", __FUNCTION__, (void*) tlsext_cb_arg.sslctx);
+#endif
+    SSL_free(cSSL);
+    SSL_CTX_free((SSL_CTX*)tlsext_cb_arg.sslctx);
+    SSL_CTX_free(sslctx);
   }
-
-  SET_LINE_NUMBER(__LINE__);
-
-  // signal that we're done reading
   errno = 0;
-  if (shutdown(new_fd, SHUT_RD) < 0) {
+  if (shutdown(new_fd, SHUT_RDWR) < 0) {
     if (errno == ENOTCONN) {
-      MYLOG(LOG_WARNING, "shutdown(new_fd, SHUT_RD) reported error: %m");
+      MYLOG(LOG_WARNING, "shutdown(new_fd, SHUT_RDWR) reported error: %m");
     } else {
-      syslog(LOG_WARNING, "shutdown(new_fd, SHUT_RD) reported error: %m");
+      syslog(LOG_WARNING, "shutdown(new_fd, SHUT_RDWR) reported error: %m");
     }
   }
-
-  TIME_CHECK("socket read shutdown()")
-  SET_LINE_NUMBER(__LINE__);
 
   // close the connection
   errno = 0;
@@ -956,26 +1034,12 @@ void* conn_handler( void *ptr )
 
   TIME_CHECK("socket close()");
   
-
-  // store time delta in milliseconds
-  pipedata.run_time = elapsed_time_msec(start_time);
-
-  SET_LINE_NUMBER(__LINE__);
-
-  // write pipedata to pipe
-  // note that the parent must not perform a blocking pipe read without checking
-  //  for available data, or else it may deadlock when we don't write anything
+  // decrement number of service threads/processes by one before we exit
+  // don't check for write errors
+  memset(&pipedata, 0, sizeof(pipedata));
+  pipedata.status = ACTION_DEC_KCC;
+  pipedata.krq = num_req;
   rv = write(pipefd, &pipedata, sizeof(pipedata));
-  if (rv < 0) {
-    syslog(LOG_WARNING, "write() to pipe reported error: %m");
-  } else if (rv == 0) {
-    syslog(LOG_WARNING, "write() reports no data written to pipe but no error");
-  } else if (rv != sizeof(pipedata)) {
-    syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %u", rv, (unsigned int)sizeof(pipedata));
-  }
-
-  TIME_CHECK("pipe write()");
-  SET_LINE_NUMBER(__LINE__);
 
 #ifndef USE_PTHREAD
   // child no longer needs write pipe, so close descriptor
@@ -993,8 +1057,7 @@ void* conn_handler( void *ptr )
   }
 #endif
 
-    free(buf_backup);
-    free(ptr);
-
-    return NULL;
+  free(req_url);
+  free(ptr);
+  return NULL;
 }
