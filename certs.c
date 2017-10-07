@@ -1,10 +1,12 @@
 #define _GNU_SOURCE
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/crypto.h> 
@@ -16,7 +18,6 @@
 #endif
 
 #include "certs.h"
-#include "util.h"
 
 #ifdef USE_PTHREAD
 
@@ -173,17 +174,20 @@ void *cert_generator(void *ptr) {
     X509_NAME *issuer = X509_NAME_dup(X509_get_subject_name(x509));
     X509_free(x509);
 
-    char *buf = malloc(PIXELSERV_MAX_SERVER_NAME*4+1);
-    buf[PIXELSERV_MAX_SERVER_NAME*4+1] = '\0';
-    char *half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4 + 1;
+    char *buf = malloc(PIXELSERV_MAX_SERVER_NAME * 4 + 1);
+    buf[PIXELSERV_MAX_SERVER_NAME * 4] = '\0';
+    char *half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4;
     int fd = open(PIXEL_CERT_PIPE, O_RDONLY);
-    
+
     for (;;) {
         int cnt;
         if(fd == -1)
             syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
         strcpy(buf, half_token);
-        if((cnt = read(fd, buf+strlen(half_token), PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token))) == 0) {
+#ifdef DEBUG
+        printf("%s 1: %s\n", __FUNCTION__, buf);
+#endif
+        if((cnt = read(fd, buf + strlen(half_token), PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token))) == 0) {
 #ifdef DEBUG
              printf("%s: pipe EOF\n", __FUNCTION__);
 #endif
@@ -191,17 +195,17 @@ void *cert_generator(void *ptr) {
             fd = open(PIXEL_CERT_PIPE, O_RDONLY);
             continue;
         }
-        buf[cnt] = '\0';
-        if (cnt < PIXELSERV_MAX_SERVER_NAME*4)
-            half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4 + 1;
-        else {
+        if (cnt < PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token)) {
+            buf[cnt + strlen(half_token)] = '\0';
+            half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4;
+        } else {
             int i;
-            for (i=1; buf[cnt-i]!=':' && i < strlen(buf); i++);
-            half_token = &buf[cnt-i+1];
-            buf[cnt-i] = '\0';
+            for (i=1; buf[PIXELSERV_MAX_SERVER_NAME * 4 - i]!=':' && i < strlen(buf); i++);
+            half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4 - i + 1;
+            buf[PIXELSERV_MAX_SERVER_NAME * 4 - i + 1] = '\0';
         }
 #ifdef DEBUG
-        printf("%s: %s\n", __FUNCTION__, buf);
+        printf("%s 2: %s\n", __FUNCTION__, buf);
 #endif
 
         fname = malloc(PIXELSERV_MAX_PATH);
@@ -238,7 +242,7 @@ void *cert_generator(void *ptr) {
             p_buf = strtok_r(NULL, ":", &p_buf_sav);
         }
 
-free_all:
+//free_all:
         EVP_PKEY_free(key);
         EVP_MD_CTX_destroy(md_ctx);
         free(fname);
