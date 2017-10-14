@@ -1,16 +1,17 @@
-#include "util.h"
-#include "socket_handler.h"
+#include "util.h" // _GNU_SOURCE
 
-#include <ctype.h> // isprint(), isdigit(), tolower()
-
+#include <ctype.h>
+#include <fcntl.h>
+#ifdef USE_PTHREAD
+  #include <pthread.h>
+#endif
 #include <sys/stat.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include <fcntl.h>
-#ifdef USE_PTHREAD
-    #include <pthread.h>
-#endif
+
+#include "socket_handler.h"
 #include "certs.h"
+#include "logger.h"
  
 // private data for socket_handler() use
 
@@ -19,9 +20,6 @@
   "HTTP/1.1 204 No Content\r\n"
   "Content-Length: 0\r\n"
   "Content-Type: text/html; charset=UTF-8\r\n"
-//"Date: Sun, 21 Sep 2014 17:42:25 GMT\r\n"
-//"Server: GFE/2.0\r\n"
-//"X-Firefox-Spdy: 3.1\r\n"
   "\r\n";
 
   // HTML stats response pieces
@@ -179,7 +177,7 @@
   "\x37" // image
   "\xff\xd9";  // EOI, End Of image
 
-static const char httpnull_swf[] =
+  static const char httpnull_swf[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: application/x-shockwave-flash\r\n"
   "Content-length: 25\r\n"
@@ -196,7 +194,7 @@ static const char httpnull_swf[] =
   "\x40\x00"  // tag type 1 = show frame
   "\x00\x00";  // tag type 0 - end file
 
-static const char httpnull_ico[] =
+  static const char httpnull_ico[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: image/x-icon\r\n"
   "Cache-Control: max-age=2592000\r\n"
@@ -224,7 +222,7 @@ static const char httpnull_ico[] =
   "\x00\x00\x00\x00" // XOR B G R
   "\x80\xF8\x9C\x41"; // AND ?
 
-static const char httpoptions[] =
+  static const char httpoptions[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-type: text/html\r\n"
   "Content-length: 11\r\n"
@@ -341,7 +339,7 @@ double elapsed_time_msec(const struct timespec start_time) {
 
   if (!start_time.tv_sec &&
       !start_time.tv_nsec) {
-    MYLOG(LOG_WARNING, "check_time(): returning because start_time not set");
+    log_msg(LGG_DEBUG, "check_time(): returning because start_time not set");
     return -1.0;
   }
 
@@ -363,7 +361,7 @@ void child_signal_handler(int sig)
 {
   if (sig != SIGTERM
    && sig != SIGUSR2) {
-    syslog(LOG_WARNING, "Child process ignoring unsupported signal number: %d", sig);
+    log_msg(LGG_DEBUG, "Thread or child process ignoring unsupported signal number: %d", sig);
     return;
   }
 
@@ -372,11 +370,11 @@ void child_signal_handler(int sig)
     signal(SIGTERM, SIG_IGN);
   }
 
-  syslog(LOG_INFO, "Child process caught signal %d near line number %lu of file %s", sig, LINE_NUMBER, __FILE__);
+  log_msg(LGG_DEBUG, "Thread or child process caught signal %d near line number %lu of file %s", sig, LINE_NUMBER, __FILE__);
 
   if (sig == SIGTERM) {
     // exit program on SIGTERM
-    syslog(LOG_NOTICE, "Child process exit on SIGTERM");
+    log_msg(LGG_DEBUG, "Thread or child process exit on SIGTERM");
     exit(EXIT_SUCCESS);
   }
 
@@ -388,7 +386,7 @@ void child_signal_handler(int sig)
     do_warning = 0;\
     time_msec = elapsed_time_msec(start_time);\
     if (time_msec > warning_time) {\
-      syslog(LOG_WARNING, "Elapsed time %f msec exceeded warning_time=%d msec following operation: %s", time_msec, warning_time, x);\
+      log_msg(LGG_DEBUG, "Elapsed time %f msec exceeded warning_time=%d msec following operation: %s", time_msec, warning_time, x);\
     }\
   }\
 }
@@ -397,7 +395,6 @@ void child_signal_handler(int sig)
 # define TIME_CHECK(x,y...)
 #endif //DEBUG
 
-extern unsigned char loglvl;
 extern const char *tls_pem;
 extern int tls_ports[];
 extern int num_tls_ports;
@@ -442,11 +439,11 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
 #endif
   struct stat st;
   if(stat(full_pem_path, &st) != 0){
-    syslog(LOG_NOTICE, "%s %s missing", tlsext_cb_arg->servername, pem_file);
+    log_msg(LGG_WARNING, "%s %s missing", tlsext_cb_arg->servername, pem_file);
     tlsext_cb_arg->status = SSL_MISS;
     int fd = open(PIXEL_CERT_PIPE, O_WRONLY);
     if(fd == -1)
-      syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
+      log_msg(LGG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
     else {
       strcat(pem_file,":");
       write(fd, pem_file, strlen(pem_file));
@@ -461,7 +458,7 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
   SSL_CTX_set_options(sslctx, SSL_OP_SINGLE_DH_USE);
   if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0 ||
     SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0) {
-    syslog(LOG_NOTICE, "Cannot use %s\n",full_pem_path);
+    log_msg(LGG_ERR, "Cannot use %s\n",full_pem_path);
     tlsext_cb_arg->status = SSL_ERR;
     rv = SSL_TLSEXT_ERR_ALERT_FATAL;
     goto free_all;
@@ -473,7 +470,7 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
     {
       if ((inf = sk_X509_INFO_value(cachain, i)) && inf->x509 &&
              !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509))) //X509_ref_up requires >= v1.1
-        syslog(LOG_ERR, "Cannot add CA cert %d\n", i);
+        log_msg(LGG_ERR, "Cannot add CA cert %d\n", i);
     }
   }
 
@@ -541,13 +538,13 @@ void* conn_handler( void *ptr )
 
     // set signal handler for termination
     if (sigaction(SIGTERM, &sa, NULL)) {
-      syslog(LOG_WARNING, "sigaction(SIGTERM) reported error: %m");
+      log_msg(LGG_DEBUG, "sigaction(SIGTERM) reported error: %m");
     }
 
     // set signal handler for info
     sa.sa_flags = SA_RESTART; // prevent EINTR from interrupted library calls
     if (sigaction(SIGUSR2, &sa, NULL)) {
-      syslog(LOG_WARNING, "sigaction(SIGUSR2) reported error: %m");
+      log_msg(LGG_DEBUG, "sigaction(SIGUSR2) reported error: %m");
     }
   }
 
@@ -563,7 +560,7 @@ void* conn_handler( void *ptr )
   // the socket is connected, but we need to perform a check for incoming data
   // since we're using blocking checks, we first want to set a timeout
   if (setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval)) < 0) {
-    syslog(LOG_WARNING, "setsockopt(timeout) reported error: %m");
+    log_msg(LGG_DEBUG, "setsockopt(timeout) reported error: %m");
   }
 
   // select() is used because we want to give up after a specified timeout
@@ -629,33 +626,29 @@ void* conn_handler( void *ptr )
 
   // enter event loop
   while(1) {
-    if (rv < 0) {               // some kind of error
-      if (errno == ECONNRESET) {
-        MYLOG(LOG_WARNING, "recv() reported connection error: %m");
+    if (rv <= 0) {
+      if (errno == ECONNRESET || rv == 0) {
+        log_msg(LGG_DEBUG, "recv() reported connection error: %m");
         pipedata.status = FAIL_CLOSED;
       } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        MYLOG(LOG_WARNING, "recv() reported timeout error: %m");
+        log_msg(LGG_DEBUG, "recv() reported timeout error: %m");
         pipedata.status = FAIL_TIMEOUT;
       } else {
-        syslog(LOG_ERR, "recv() reported error: %m");
+        log_msg(LGG_DEBUG, "recv() reported error: %m");
         pipedata.status = FAIL_GENERAL;
       }
-    } else if (rv == 0) {       // EOF
-      MYLOG(LOG_ERR, "client closed connection without sending any data");
-      pipedata.status = FAIL_CLOSED;
     } else {                    // got some data
       TIME_CHECK("initial recv()");
       buf[rv] = '\0';
       TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
-
       pipedata.rx_total = rv;
+
 #ifdef HEX_DUMP
       hex_dump(buf, rv);
 #endif
-
       char *body = strstr(buf, "\r\n\r\n");
       char *req = strtok_r(buf, "\r\n", &bufptr);
-      if (loglvl) {
+      if (log_get_verb() >= LGG_INFO) {
         req_url[0] = '\0';
         host[0] = '\0';
         if (req) {
@@ -670,7 +663,8 @@ void* conn_handler( void *ptr )
             char *tmpHost = strstr(buf + strlen(req) + 2, "Host:"); // e.g. "Host: abc.com"
             TESTPRINT("tmpHost: '%s'\n", tmpHost);
 
-            tmpHost[strlen("Host:")] = ' ';
+            tmpHost += strlen("Host:");
+            *tmpHost = ' ';
             tmpHost = strtok(++tmpHost, "\r\n");
 
             if (strlen(tmpHost) < HOST_LEN_MAX)
@@ -684,7 +678,7 @@ void* conn_handler( void *ptr )
       char *method = strtok(req, " ");
 
       if (method == NULL) {
-        syslog(LOG_ERR, "client did not specify method");
+        log_msg(LGG_WARNING, "client did not specify method");
       } else {
         TESTPRINT("method: '%s'\n", method);
         if (!strcmp(method, "OPTIONS")) {
@@ -703,7 +697,7 @@ void* conn_handler( void *ptr )
                 break;
               }
             }
-            syslog(LOG_WARNING, "POST Content-Length: %d", length);
+            log_msg(LGG_DEBUG, "POST Content-Length: %d", length);
 
             // when the body returns together with the headers, h now will point to the body
             h = strtok(body + 4, "\r\n");
@@ -712,7 +706,7 @@ void* conn_handler( void *ptr )
               length -= strlen(h);
             }
 
-            syslog(LOG_WARNING, "POST expect length: %d\n", length);
+            log_msg(LGG_DEBUG, "POST expect length: %d\n", length);
 
             // sink data as we're told
             for (; length > 0; length -= rv) {
@@ -721,8 +715,8 @@ void* conn_handler( void *ptr )
                 rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
               else
                 rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
-              syslog(LOG_WARNING, "POST recv length: %d; errno: %d", rv, errno);
-              if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)))
+              log_msg(LGG_DEBUG, "POST recv length: %d; errno: %d", rv, errno);
+              if (rv <= 0)
                 break;
               pipedata.rx_total += rv;
             }
@@ -735,13 +729,15 @@ void* conn_handler( void *ptr )
           char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
           if (path == NULL) {
             pipedata.status = SEND_NO_URL;
-            syslog(LOG_ERR, "client did not specify URL for GET request");
-          } else if (!strcmp(path, "/log=1")) {
-            pipedata.status = ACTION_LOG_ON;
-            loglvl = 1;
-          } else if (!strcmp(path, "/log=0")) {
-            pipedata.status = ACTION_LOG_OFF;
-            loglvl = 0;
+            log_msg(LGG_WARNING, "client did not specify URL for GET request");
+          } else if (!strncmp(path, "/log=", strlen("/log="))) {
+            int v = atoi(path + strlen("/log="));
+            if (v > LGG_DEBUG || v < 0)
+              pipedata.status = SEND_BAD;
+            else {
+              pipedata.status = ACTION_LOG_VERB;
+              pipedata.verb = v;
+            }
           } else if (!strcmp(path, stats_url)) {
             pipedata.status = SEND_STATS;
             version_string = get_version(argc, argv);
@@ -825,13 +821,13 @@ void* conn_handler( void *ptr )
               char *file = strrchr(strtok(path, "?#;="), '/');
               if (file == NULL) {
                 pipedata.status = SEND_BAD_PATH;
-                syslog(LOG_ERR, "invalid file path %s", path);
+                log_msg(LGG_WARNING, "URL contains invalid file path %s", path);
               } else {
                 TESTPRINT("file: '%s'\n", file);
                 char *ext = strrchr(file, '.');
                 if (ext == NULL) {
                   pipedata.status = SEND_NO_EXT;
-                  MYLOG(LOG_ERR, "no file extension %s from path %s", file, path);
+                  log_msg(LGG_WARNING, "no file extension %s from path %s", file, path);
                 } else {
                   TESTPRINT("ext: '%s'\n", ext);
                   if (!strcasecmp(ext, ".gif")) {
@@ -867,7 +863,7 @@ void* conn_handler( void *ptr )
                   } else {
                     TESTPRINT("Sending ufe response\n");
                     pipedata.status = SEND_UNK_EXT;
-                    MYLOG(LOG_ERR, "unrecognized file extension %s from path %s", ext, path);
+                    log_msg(LOG_WARNING, "unrecognized file extension %s from path %s", ext, path);
                   }
                 }
               }
@@ -888,7 +884,7 @@ void* conn_handler( void *ptr )
             pipedata.status = SEND_HEAD;
           } else {
             // something else, possibly even non-HTTP
-            syslog(LOG_WARNING, "Sending HTTP 501 response for unknown HTTP method: %s", method);
+            log_msg(LGG_WARNING, "Sending HTTP 501 response for unknown HTTP method: %s", method);
             pipedata.status = SEND_BAD;
           }
           TESTPRINT("Sending 501 response\n");
@@ -900,14 +896,14 @@ void* conn_handler( void *ptr )
 
     num_req++;
 
-    if (pipedata.status != FAIL_TIMEOUT) {
+#ifdef DEBUG
+    if (pipedata.status != FAIL_TIMEOUT)
       TIME_CHECK("response selection");
-    }
+#endif
 
     // done processing socket connection; now handle selected result action
     if (pipedata.status == FAIL_GENERAL) {
-      // log general error status in case it wasn't caught above
-      syslog(LOG_WARNING, "browser request processing completed with FAIL_GENERAL status");
+      log_msg(LGG_WARNING, "Client request processing completed with FAIL_GENERAL status");
     } else if (pipedata.status != FAIL_TIMEOUT && pipedata.status != FAIL_CLOSED) {
       SET_LINE_NUMBER(__LINE__);
 
@@ -921,36 +917,38 @@ void* conn_handler( void *ptr )
       if (rv < 0) { // check for error message, but don't bother checking that all bytes sent
         if (errno == EPIPE || errno == ECONNRESET) {
           // client closed socket sometime after initial check
-          MYLOG(LOG_WARNING, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
+          log_msg(LGG_DEBUG, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
           pipedata.status = FAIL_REPLY;
         } else {
           // some other error
-          syslog(LOG_ERR, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
+          log_msg(LGG_ERR, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
           pipedata.status = FAIL_GENERAL;
         }
       } else if (rv != rsize) {
-        syslog(LOG_WARNING, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
+        log_msg(LGG_ERR, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
       }
 
-      // free memory allocated by asprintf() (if any)
-      free(aspbuf);
+      free(aspbuf);  // free memory allocated by asprintf() if any
       aspbuf = NULL;
       response = httpnullpixel;
     
-      if (loglvl) {
+      if (log_get_verb() >= LGG_INFO) {
         struct sockaddr_storage sin_addr;
         socklen_t sin_addr_len = sizeof(sin_addr);
         char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
 
         getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
-        if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
-                sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
+        if(getnameinfo((struct sockaddr *)&sin_addr,
+                        sin_addr_len, client_ip, sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0) 
+        {
           perror("getnameinfo");
-
-        syslog(LOG_NOTICE, "(%2d) %s %s %s%s", pipedata.status, client_ip, host, req_url, (tlsext_cb_arg.servername) ? " secure" : "");
+        }
+        log_msg(LGG_INFO, "(%2d) %s %s %s%s", pipedata.status, client_ip, \
+                          host, req_url, (tlsext_cb_arg.servername) ? " secure" : "");
       }
     }
-    // *** NOTE: pipedata.status should not be altered after this point ***
+
+    /*** NOTE: pipedata.status should not be altered after this point ***/
 
     TIME_CHECK("response send()");
 
@@ -961,14 +959,14 @@ void* conn_handler( void *ptr )
 
     // write pipedata to pipe
     // note that the parent must not perform a blocking pipe read without checking
-    //  for available data, or else it may deadlock when we don't write anything
+    // for available data, or else it may deadlock when we don't write anything
     rv = write(pipefd, &pipedata, sizeof(pipedata));
     if (rv < 0) {
-      syslog(LOG_WARNING, "write() to pipe reported error: %m");
+      log_msg(LGG_ERR, "write() to pipe reported error: %m");
     } else if (rv == 0) {
-      syslog(LOG_WARNING, "write() reports no data written to pipe but no error");
+      log_msg(LGG_ERR, "write() to pipe reported no data written and no error");
     } else if (rv != sizeof(pipedata)) {
-      syslog(LOG_WARNING, "write() reports writing only %d bytes of expected %u", rv, (unsigned int)sizeof(pipedata));
+      log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u", rv, (unsigned int)sizeof(pipedata));
     }
 
     TIME_CHECK("pipe write()");
@@ -991,8 +989,7 @@ void* conn_handler( void *ptr )
 
       if (rv > 0) break;
       if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) { 
-        //TESTPRINT("Exit recv loop fd:%d rv:%d errno:%d wait_cnt:%d\n", new_fd, rv, errno, wait_cnt);
-        syslog(LOG_WARNING, "Exit recv loop fd:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n", new_fd, rv, errno, wait_cnt, num_req);
+        log_msg(LGG_DEBUG, "Exit recv loop fd:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n", new_fd, rv, errno, wait_cnt, num_req);
         goto done_with_this_thread;
       }
       --wait_cnt;
@@ -1013,24 +1010,11 @@ done_with_this_thread:
     SSL_CTX_free((SSL_CTX*)tlsext_cb_arg.sslctx);
     SSL_CTX_free(sslctx);
   }
-  errno = 0;
-  if (shutdown(new_fd, SHUT_RDWR) < 0) {
-    if (errno == ENOTCONN) {
-      MYLOG(LOG_WARNING, "shutdown(new_fd, SHUT_RDWR) reported error: %m");
-    } else {
-      syslog(LOG_WARNING, "shutdown(new_fd, SHUT_RDWR) reported error: %m");
-    }
-  }
-
-  // close the connection
-  errno = 0;
-  if (close(new_fd) < 0) {
-    if (errno == ENOTCONN) {
-      MYLOG(LOG_WARNING, "close(new_fd) reported error: %m");
-    } else {
-      syslog(LOG_WARNING, "close(new_fd) reported error: %m");
-    }
-  }
+  
+  if (shutdown(new_fd, SHUT_RDWR) < 0)
+    log_msg(LGG_DEBUG, "shutdown() socket in thread or child process reported error: %m");
+  if (close(new_fd) < 0)
+    log_msg(LGG_DEBUG, "close() socket in thread or child process reported error: %m");
 
   TIME_CHECK("socket close()");
   
@@ -1044,17 +1028,13 @@ done_with_this_thread:
 #ifndef USE_PTHREAD
   // child no longer needs write pipe, so close descriptor
   // this is probably redundant since we are about to exit() anyway
-  if (close(pipefd) < 0) {
-    syslog(LOG_WARNING, "close(pipefd) reported error: %m");
-  }
+  if (close(pipefd) < 0)
+    log_msg(LGG_DEBUG, "close() pipe in child process reported error: %m");
 
   TIME_CHECK("pipe close()");
 
-  if (pipedata.status == FAIL_GENERAL) {
-    // complain (possibly again) about general failure status, in case it wasn't
-    //  caught previously
-    syslog(LOG_WARNING, "connection handler exiting with FAIL_GENERAL status");
-  }
+  if (pipedata.status == FAIL_GENERAL)
+    log_msg(LGG_ERR, "conn_handler exiting child process with FAIL_GENERAL status");
 #endif
 
   free(req_url);

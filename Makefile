@@ -1,9 +1,9 @@
 # basic setup
 
-DISTNAME  := pixelserv
+DISTNAME  := pixelserv-tls
 CC        := gcc
 OPTS      := -DDROP_ROOT -DIF_MODE
-SRCS      := util.c socket_handler.c pixelserv.c certs.c
+SRCS      := util.c socket_handler.c pixelserv.c certs.c logger.c
 
 ROOT      := .
 CFLAGS    := -I$(ROOT)/openssl/include -DUSE_PTHREAD
@@ -28,7 +28,7 @@ UPX       := upx -9
 
 # packaging macros
 PFILES     = LICENSE README.md dist/$(DISTNAME).$(ARCH).performance.*
-PVERSION  := $(shell grep VERSION util.h | awk '{print $$NF}' | sed 's|\"||g')
+PVERSION  := $(shell grep VERSION util.h | awk -F '.' '{print $$NF}' | sed 's|\"||g')
 PCMD      := zip
 
 # x86 environment
@@ -55,7 +55,7 @@ ARMSTRIP  := $(ARMPREFIX)$(STRIP)
 # ARM(Entware) environment
 ARMentTOOLS  := ../arm-unknown-linux-gnueabi/bin
 ARMentPATH   := PATH=$(ARMentTOOLS):$(PATH)
-ARMentPREFIX := arm-unknown-linux-gnueabi-
+ARMentPREFIX := arm-openwrt-linux-gnueabi-
 ARMentCC     := $(ARMentPREFIX)$(CC)
 ARMentSTRIP  := $(ARMentPREFIX)$(STRIP)
 
@@ -110,7 +110,7 @@ amd64: printver dist
 	$(CC64) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_D) $(SHAREDLIB)
 	$(CC64) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
 	        $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_P) $(SHAREDLIB)
-	$(STRIP) dist/$(DISTNAME).$@.performance.*
+#	$(STRIP) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
@@ -140,18 +140,20 @@ arm: printver dist
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
-arm.ent: LDFLAGS += -Wl,-rpath=/opt/lib,--dynamic-linker=/opt/lib/ld-linux.so.3 -lpthread -L../arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot
-arm.ent: CFLAGS += -DUSE_PTHREAD -isystem../arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot/include
+#arm.ent: LDFLAGS += -Wl,-rpath=/opt/lib,--dynamic-linker=/opt/lib/ld-linux.so.3 -lpthread -L../arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot
+#arm.ent: CFLAGS += -DUSE_PTHREAD -isystem../arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot/include
+arm.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-linux.so.3 -lpthread -L/home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/lib
+arm.ent: CFLAGS += -DUSE_PTHREAD -isystem/home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/include
 arm.ent: ARCH = arm.ent
 arm.ent: printver dist
 	@echo "=== Building ARM (Entware) ==="
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB) 
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
-	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static \
-	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_D) 
-	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
-	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_P)
-	$(ARMentPATH) $(ARMentSTRIP) dist/$(DISTNAME).$@.performance.static
+#	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static \
+#	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_D) 
+#	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
+#	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_P)
+#	$(ARMentPATH) $(ARMentSTRIP) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 

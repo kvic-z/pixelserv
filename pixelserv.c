@@ -25,6 +25,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include "certs.h"
+#include "logger.h"
 
 #ifdef USE_PTHREAD
 #include <pthread.h>
@@ -39,12 +40,12 @@ void signal_handler(int sig)
    && sig != SIGUSR2
 #endif
   ) {
-    syslog(LOG_WARNING, "Ignoring unsupported signal number: %d", sig);
+    log_msg(LGG_WARNING, "Ignoring unsupported signal number: %d", sig);
     return;
   }
 #ifdef DEBUG
   if (sig == SIGUSR2) {
-    syslog(LOG_INFO, "Main process caught signal %d near line number %lu of file %s", sig, LINE_NUMBER, __FILE__);
+    log_msg(LGG_INFO, "Main process caught signal %d near line number %lu of file %s", sig, LINE_NUMBER, __FILE__);
   } else {
 #endif
     if (sig == SIGTERM) {
@@ -54,12 +55,12 @@ void signal_handler(int sig)
 
     // log stats
     char* stats_string = get_stats(0, 0);
-    syslog(LOG_INFO, "%s", stats_string);
+    log_msg(LGG_CRIT, "%s", stats_string);
     free(stats_string);
 
     if (sig == SIGTERM) {
       // exit program on SIGTERM
-      syslog(LOG_NOTICE, "exit on SIGTERM");
+      log_msg(LOG_NOTICE, "exit on SIGTERM");
       exit(EXIT_SUCCESS);
     }
 #ifdef DEBUG
@@ -68,7 +69,6 @@ void signal_handler(int sig)
   return;
 }
 
-unsigned char loglvl = 0;
 const char *tls_pem = DEFAULT_PEM_PATH;
 int tls_ports[MAX_TLS_PORTS] = {0};
 int num_tls_ports = 0;
@@ -138,11 +138,7 @@ int main (int argc, char* argv[]) // program start
 #ifndef TEST
         case 'f': do_foreground = 1;                          continue;
 #endif // !TEST
-        case 'l': loglvl = 1; continue;
-        case 'r':
-          // deprecated - ignore
-//          do_redirect = 1;
-        continue;
+        case 'r': /* deprecated - ignoring */                 continue;
         case 'R': do_redirect = 0;                            continue;
         // no default here because we want to move on to the next section
       }
@@ -150,6 +146,13 @@ int main (int argc, char* argv[]) // program start
       if ((i + 1) < argc) {
         // switch on parameter letter and process subsequent argument
         switch (argv[i++][1]) {
+          case 'l':
+            if ((logger_level)atoi(argv[i]) > LGG_DEBUG
+                || (logger_level)atoi(argv[i]) < 0)
+              error = 1;
+            else
+              log_set_verb((logger_level)atoi(argv[i]));
+            continue;
 #ifdef IF_MODE
           case 'n':
             ifname = argv[i];
@@ -225,7 +228,7 @@ int main (int argc, char* argv[]) // program start
            "\t" "-k https_port ("
            SECOND_PORT
            " if omitted)" "\n"
-           "\t" "-l (log access to syslog)" "\n"
+           "\t" "-l level (0:critical 1:error<default> 2:warning 3:notice 4:info 5:debug)" "\n"
 #ifdef IF_MODE
            "\t" "-n i/f (all interfaces if omitted)" "\n"
 #endif // IF_MODE
@@ -259,16 +262,16 @@ int main (int argc, char* argv[]) // program start
 
 #ifndef TEST
   if (!do_foreground && daemon(0, 0)) {
-    syslog(LOG_ERR, "failed to daemonize, exit: %m");
+    log_msg(LGG_ERR, "failed to daemonize, exit: %m");
     exit(EXIT_FAILURE);
   }
 #endif
   SET_LINE_NUMBER(__LINE__);
 
-  openlog("pixelserv", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
+  openlog("pixelserv-tls", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
   version_string = get_version(argc, argv);
   if (version_string) {
-    syslog(LOG_INFO, "%s", version_string);
+    log_msg(LGG_CRIT, "%s", version_string);
     free(version_string);
   } else {
     exit(EXIT_FAILURE);
@@ -290,7 +293,7 @@ int main (int argc, char* argv[]) // program start
     FILE *fp = fopen(fname, "r");
     X509 *cacert = X509_new();
     if(fp == NULL || PEM_read_X509(fp, &cacert, NULL, NULL) == NULL)
-     syslog(LOG_ERR, "Failed to open/read ca.crt");
+     log_msg(LGG_ERR, "Failed to open/read ca.crt");
     free(fname);
     
     EVP_PKEY * pubkey = X509_get_pubkey(cacert);
@@ -299,7 +302,7 @@ int main (int argc, char* argv[]) // program start
       BIO *bioin; int fsz; char *cafile;
 
       if (fseek(fp, 0L, SEEK_END) < 0)
-        syslog(LOG_ERR, "Failed to seek ca.crt");
+        log_msg(LGG_ERR, "Failed to seek ca.crt");
       fsz = ftell(fp);
       cafile = malloc(fsz);
       fseek(fp, 0L, SEEK_SET);
@@ -307,11 +310,11 @@ int main (int argc, char* argv[]) // program start
 
       bioin = BIO_new_mem_buf(cafile, fsz);
       if (!bioin)
-        syslog(LOG_ERR, "Failed to create new BIO mem buffer");
+        log_msg(LGG_ERR, "Failed to create new BIO mem buffer");
 
       cachain = PEM_X509_INFO_read_bio(bioin, NULL, NULL, NULL);
       if (!cachain)
-        syslog(LOG_ERR, "Failed to read CA chain from ca.crt");
+        log_msg(LGG_ERR, "Failed to read CA chain from ca.crt");
       BIO_free(bioin);
       free(cafile);
     }
@@ -366,7 +369,7 @@ int main (int argc, char* argv[]) // program start
 
     rv = getaddrinfo(use_ip ? ip_addr : NULL, port, &hints, &servinfo);
     if (rv) {
-      syslog( LOG_ERR, "getaddrinfo: %s", gai_strerror(rv) );
+      log_msg(LGG_ERR, "getaddrinfo: %s", gai_strerror(rv) );
       exit(EXIT_FAILURE);
     }
 
@@ -384,9 +387,9 @@ int main (int argc, char* argv[]) // program start
       || (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK))  // set non-blocking mode
        ) {
 #ifdef IF_MODE
-      syslog(LOG_ERR, "Abort: %m - %s:%s:%s", ifname, ip_addr, port);
+      log_msg(LGG_ERR, "Abort: %m - %s:%s:%s", ifname, ip_addr, port);
 #else
-      syslog(LOG_ERR, "Abort: %m - %s:%s", ip_addr, port);
+      log_msg(LOG_ERR, "Abort: %m - %s:%s", ip_addr, port);
 #endif
       exit(EXIT_FAILURE);
     }
@@ -402,9 +405,9 @@ int main (int argc, char* argv[]) // program start
 
     freeaddrinfo(servinfo); // all done with this structure
 #ifdef IF_MODE
-    syslog(LOG_NOTICE, "Listening on %s:%s:%s", ifname, ip_addr, port);
+    log_msg(LGG_CRIT, "Listening on %s:%s:%s", ifname, ip_addr, port);
 #else
-    syslog(LOG_NOTICE, "Listening on %s:%s", ip_addr, port);
+    log_msg(LGG_CRIT, "Listening on %s:%s", ip_addr, port);
 #endif
   }
 
@@ -419,7 +422,7 @@ int main (int argc, char* argv[]) // program start
 
     // set signal handler for termination
     if (sigaction(SIGTERM, &sa, NULL)) {
-      syslog(LOG_ERR, "SIGTERM %m");
+      log_msg(LOG_ERR, "SIGTERM %m");
       exit(EXIT_FAILURE);
     }
 
@@ -427,20 +430,20 @@ int main (int argc, char* argv[]) // program start
     // in K26 this should cause children to be automatically reaped on exit
     // in K24 it will accomplish nothing, so we still need to use waitpid()
     if (signal(SIGCHLD, SIG_IGN) == SIG_ERR) {
-      syslog(LOG_WARNING, "SIGCHLD %m");
+      log_msg(LGG_WARNING, "SIGCHLD %m");
     }
 
     // set signal handler for info
     sa.sa_flags = SA_RESTART; // prevent EINTR from interrupted library calls
     if (sigaction(SIGUSR1, &sa, NULL)) {
-      syslog(LOG_ERR, "SIGUSR1 %m");
+      log_msg(LOG_ERR, "SIGUSR1 %m");
       exit(EXIT_FAILURE);
     }
 #ifdef DEBUG
     // set signal handler for debug
     sa.sa_flags = SA_RESTART; // prevent EINTR from interrupted library calls
     if (sigaction(SIGUSR2, &sa, NULL)) {
-      syslog(LOG_ERR, "SIGUSR2 %m");
+      log_msg(LOG_ERR, "SIGUSR2 %m");
       exit(EXIT_FAILURE);
     }
 #endif
@@ -450,10 +453,10 @@ int main (int argc, char* argv[]) // program start
 
 #ifdef DROP_ROOT // no longer fatal error if doesn't work
   if ( (pw = getpwnam(user)) == NULL ) {
-    syslog(LOG_WARNING, "Unknown user \"%s\"", user);
+    log_msg(LGG_WARNING, "Unknown user \"%s\"", user);
   }
   else if ( setuid(pw->pw_uid) ) {
-    syslog(LOG_WARNING, "setuid %d: %m", pw->pw_uid);
+    log_msg(LGG_WARNING, "setuid %d: %m", pw->pw_uid);
   }
 #endif
 
@@ -467,20 +470,17 @@ int main (int argc, char* argv[]) // program start
 
   // open pipe for children to use for writing data back to main
   if (pipe(pipefd) == -1) {
-    syslog(LOG_ERR, "pipe() error: %m");
+    log_msg(LOG_ERR, "pipe() error: %m");
     exit(EXIT_FAILURE);
   }
   // set non-blocking read mode
   // note that writes are left as blocking because otherwise weird things happen
   if (fcntl(pipefd[0], F_SETFL, fcntl(pipefd[0], F_GETFL) | O_NONBLOCK) == -1) {
-    syslog(LOG_ERR, "fcntl() error setting O_NONBLOCK on read end of pipe: %m");
+    log_msg(LOG_ERR, "fcntl() error setting O_NONBLOCK on read end of pipe: %m");
     exit(EXIT_FAILURE);
   }
 
   SET_LINE_NUMBER(__LINE__);
-
-  // FYI, this shows 4096 on mips K26
-  // MYLOG(LOG_INFO, "opened pipe with buffer size %d bytes", PIPE_BUF);
 
   // also have select() monitor the read end of the stats pipe
   FD_SET(pipefd[0], &readfds);
@@ -528,11 +528,11 @@ int main (int argc, char* argv[]) // program start
       //       interrupted with errno EINTR
       select_rv = TEMP_FAILURE_RETRY(select(nfds, &selectfds, NULL, NULL, NULL));
       if (select_rv < 0) {
-        syslog(LOG_ERR, "main select() error: %m");
+        log_msg(LOG_ERR, "main select() error: %m");
         exit(EXIT_FAILURE);
       } else if (select_rv == 0) {
         // this should be pathological, as we don't specify a timeout
-        syslog(LOG_WARNING, "main select() returned zero (timeout?)");
+        log_msg(LGG_WARNING, "main select() returned zero (timeout?)");
         continue;
       }
     }
@@ -559,11 +559,11 @@ int main (int argc, char* argv[]) // program start
       // perform a single read from pipe
       rv = read(pipefd[0], &pipedata, sizeof(pipedata));
       if (rv < 0) {
-        syslog(LOG_WARNING, "error reading from pipe: %m");
+        log_msg(LGG_WARNING, "error reading from pipe: %m");
       } else if (rv == 0) {
-        syslog(LOG_WARNING, "pipe read() returned zero");
+        log_msg(LGG_WARNING, "pipe read() returned zero");
       } else if (rv != sizeof(pipedata)) {
-        syslog(LOG_WARNING, "pipe read() got %d bytes, but %u bytes were expected - discarding", rv, (unsigned int)sizeof(pipedata));
+        log_msg(LGG_WARNING, "pipe read() got %d bytes, but %u bytes were expected - discarding", rv, (unsigned int)sizeof(pipedata));
       } else {
         // process response type
         switch (pipedata.status) {
@@ -589,11 +589,10 @@ int main (int argc, char* argv[]) // program start
           case SEND_POST:      ++pst; break;
           case SEND_HEAD:      ++hed; break;
           case SEND_OPTIONS:   ++opt; break;
-          case ACTION_LOG_ON:  loglvl = 1; break;
-          case ACTION_LOG_OFF: loglvl = 0; break;
+          case ACTION_LOG_VERB:  log_set_verb(pipedata.verb); break;
           case ACTION_DEC_KCC: --kcc; break;
           default:
-            syslog(LOG_ERR, "Socket handler child process reported unknown response value: %d", pipedata.status);
+            log_msg(LOG_ERR, "conn_handler reported unknown response value: %d", pipedata.status);
         }
         
         switch (pipedata.ssl) {
@@ -604,17 +603,16 @@ int main (int argc, char* argv[]) // program start
           case SSL_NOT_TLS:    break;
           default:
             ++slu;
-#ifdef DEBUG
-            MYLOG(LOG_ERR, "Socket handler child process reported unknown ssl state: %d", pipedata.ssl);
-#endif
+            log_msg(LGG_ERR, "conn_handler reported unknown ssl state: %d", pipedata.ssl);
+
         }
         count++;
         SET_LINE_NUMBER(__LINE__);
 
-        if (pipedata.status < ACTION_LOG_ON) {
+        if (pipedata.status < ACTION_LOG_VERB) {
           // count only positive receive sizes
           if (pipedata.rx_total <= 0) {
-            MYLOG(LOG_WARNING, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
+            log_msg(LOG_DEBUG, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
           } else {
             // calculate average byte per request (avg) using
             // EMA after the initial 500 samples (which uses SMA)
@@ -667,7 +665,7 @@ int main (int argc, char* argv[]) // program start
     // on the other hand, this should be a pathological case unless something is
     //  added to FD_SET that is not checked before this point
     if (!sockfd) {
-      syslog(LOG_WARNING, "select() returned a value of %d but no file descriptors of interest are ready for read", select_rv);
+      log_msg(LGG_WARNING, "select() returned a value of %d but no file descriptors of interest are ready for read", select_rv);
       // force select_rv to zero so that select() will be called on the next
       //  loop iteration
       select_rv = 0;
@@ -679,11 +677,11 @@ int main (int argc, char* argv[]) // program start
       if (errno == EAGAIN
        || errno == EWOULDBLOCK) {
         // client closed connection before we got a chance to accept it
-        MYLOG(LOG_INFO, "accept: %m");
+        log_msg(LGG_DEBUG, "accept: %m");
         count++;
         cls++;
       } else {
-        syslog(LOG_WARNING, "accept: %m");
+        log_msg(LGG_WARNING, "accept: %m");
       }
       continue;
     }
@@ -699,7 +697,7 @@ int main (int argc, char* argv[]) // program start
     pthread_attr_setdetachstate(&conn_attr, PTHREAD_CREATE_DETACHED);
 
     if (pthread_create(&conn_thread, &conn_attr, conn_handler, (void*)conn_tlstor))
-      syslog(LOG_ERR, "Failed to create conn_handler thread");
+      log_msg(LGG_ERR, "Failed to create conn_handler thread");
 #else
     if (fork() == 0) {
       // detach child from signal handler
@@ -737,7 +735,7 @@ int main (int argc, char* argv[]) // program start
     // irony note: I wrote this while watching The Walking Dead :p
     for (errno = 0; waitpid(-1, 0, WNOHANG) > 0 || (errno && errno != ECHILD); errno = 0) {
       if (errno && errno != ECHILD) {
-        syslog(LOG_WARNING, "waitpid() reported error: %m");
+        log_msg(LGG_ERR, "waitpid() reported error: %m");
       }
     }
 

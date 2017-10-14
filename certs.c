@@ -3,7 +3,6 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
-#include <syslog.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -18,6 +17,7 @@
 #endif
 
 #include "certs.h"
+#include "logger.h"
 
 #ifdef USE_PTHREAD
 
@@ -118,13 +118,13 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     asprintf(&fname, "%s/%s", pem_dir, pem_fn);
     FILE *fp = fopen(fname, "wb");
     if(fp == NULL) {
-        syslog(LOG_ERR, "Failed to open file %s", fname);
+        log_msg(LGG_ERR, "Failed to open file %s", fname);
         goto free_all;
     }
     PEM_write_X509(fp, x509);
     PEM_write_PrivateKey(fp, key, NULL, NULL, 0, NULL, NULL);
     fclose(fp);
-    syslog(LOG_NOTICE, "cert %s generated and saved", pem_fn);
+    log_msg(LGG_NOTICE, "cert %s generated and saved", pem_fn);
 
 free_all:
     EVP_PKEY_free(key);
@@ -142,7 +142,7 @@ static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) {
 
     int fp = open(fname, O_RDONLY);    
     if(fp == -1)
-        syslog(LOG_ERR, "Failed to open ca.key.passphrase");
+        log_msg(LGG_ERR, "Failed to open ca.key.passphrase");
     else {
         rv = read(fp, buf, size);
         close(fp);
@@ -167,7 +167,7 @@ void *cert_generator(void *ptr) {
     FILE *fp = fopen(fname, "r");
     X509 *x509 = X509_new();
     if(fp == NULL || PEM_read_X509(fp, &x509, NULL, NULL) == NULL)
-       syslog(LOG_ERR, "Failed to open/read ca.crt");
+       log_msg(LGG_ERR, "Failed to open/read ca.crt");
     fclose(fp);
     free(fname);
 
@@ -182,7 +182,7 @@ void *cert_generator(void *ptr) {
     for (;;) {
         int cnt;
         if(fd == -1)
-            syslog(LOG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
+            log_msg(LGG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
         strcpy(buf, half_token);
 #ifdef DEBUG
         printf("%s 1: %s\n", __FUNCTION__, buf);
@@ -217,7 +217,7 @@ void *cert_generator(void *ptr) {
         FILE *fp = fopen(fname, "r");
         RSA *rsa = NULL;
         if(fp == NULL || PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, (void*)cert_tlstor) == NULL) {
-            syslog(LOG_ERR, "Failed to open/read ca.key");
+            log_msg(LGG_ERR, "Failed to open/read ca.key");
         }
         fclose(fp);
 
@@ -235,14 +235,13 @@ void *cert_generator(void *ptr) {
             if(stat(fname, &st) != 0) {// doesn't exists
                 // we don't check disk for cert. Simply re-gen and let it overwrite if exists on disk.
                 if(EVP_DigestSignInit(md_ctx, NULL, EVP_sha256(), NULL, key) != 1)
-                    syslog(LOG_ERR, "Failed to init signing context");
+                    log_msg(LGG_ERR, "Failed to init signing context");
                 else
                     generate_cert(p_buf, cert_tlstor->pem_dir, issuer, md_ctx);
             }
             p_buf = strtok_r(NULL, ":", &p_buf_sav);
         }
 
-//free_all:
         EVP_PKEY_free(key);
         EVP_MD_CTX_destroy(md_ctx);
         free(fname);

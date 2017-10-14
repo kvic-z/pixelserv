@@ -3,6 +3,8 @@
 
 #define DEFAULT_REPLY SEND_TXT
 
+#include "logger.h"
+
 typedef enum {
   FAIL_GENERAL,
   FAIL_TIMEOUT,
@@ -26,8 +28,7 @@ typedef enum {
   SEND_POST,
   SEND_HEAD,
   SEND_OPTIONS,
-  ACTION_LOG_ON,
-  ACTION_LOG_OFF,
+  ACTION_LOG_VERB,
   ACTION_DEC_KCC
 } response_enum;
 
@@ -45,6 +46,7 @@ typedef struct {
     union {
         int rx_total;
         int krq;
+        logger_level verb;
     };
     double run_time;
     ssl_enum ssl;

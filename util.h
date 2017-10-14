@@ -8,22 +8,18 @@
 // system includes used by more than one source file
 #include <errno.h>              // EPIPE, errno, EINTR
 #include <netdb.h>              // addrinfo(), AI_PASSIVE, gai_strerror(), freeaddrinfo()
-//#include <net/if.h>           // IFNAMSIZ
-//#include <netinet/in.h>       // doesn't seem to be needed
 #include <netinet/tcp.h>        // SOL_TCP, TCP_NODELAY
 #include <signal.h>             // sig_atomic_t
 #include <stdio.h>              // printf() and variants
 #include <stdlib.h>             // exit(), EXIT_FAILURE
 #include <string.h>             // lots of stuff!
 #include <syslog.h>             // syslog(), openlog()
-//#include <sys/socket.h>       // doesn't seem to be needed
-//#include <sys/types.h>        // doesn't seem to be needed
 #include <unistd.h>             // close(), setuid(), TEMP_FAILURE_RETRY, fork()
 #include <time.h>               // struct timespec, clock_gettime(), difftime()
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v35.HZ12.Kl-test1"
+#define VERSION "v35.HZ12.Kl-test2"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 8191      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -46,16 +42,9 @@
 # define DEFAULT_STATS_TEXT_URL "/servstats.txt"
 
 #ifdef TEST
-# define VERBOSE 1
 # define TESTPRINT printf
 #else
 # define TESTPRINT(x,y...)
-#endif
-
-#ifdef VERBOSE
-# define MYLOG syslog
-#else  // rely on optimiser to remove redundant code
-# define MYLOG(x,y...)
 #endif
 
 #ifdef DEBUG
