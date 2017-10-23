@@ -592,7 +592,7 @@ int main (int argc, char* argv[]) // program start
           case ACTION_LOG_VERB:  log_set_verb(pipedata.verb); break;
           case ACTION_DEC_KCC: --kcc; break;
           default:
-            log_msg(LOG_ERR, "conn_handler reported unknown response value: %d", pipedata.status);
+            log_msg(LOG_DEBUG, "conn_handler reported unknown response value: %d", pipedata.status);
         }
         
         switch (pipedata.ssl) {
@@ -603,8 +603,7 @@ int main (int argc, char* argv[]) // program start
           case SSL_NOT_TLS:    break;
           default:
             ++slu;
-            log_msg(LGG_ERR, "conn_handler reported unknown ssl state: %d", pipedata.ssl);
-
+            log_msg(LGG_DEBUG, "conn_handler reported unknown ssl state: %d", pipedata.ssl);
         }
         count++;
         SET_LINE_NUMBER(__LINE__);
@@ -615,13 +614,9 @@ int main (int argc, char* argv[]) // program start
             log_msg(LOG_DEBUG, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
           } else {
             // calculate average byte per request (avg) using
-            // EMA after the initial 500 samples (which uses SMA)
-            static float favg = 0.0;
-            if (act < 500) {
-              favg *= act;
-              favg = (favg + pipedata.rx_total) / ++act;
-            } else
-              favg += 0.002 * (pipedata.rx_total - favg);
+            static float favg = 0.0; 
+            static int favg_cnt = 0;
+            favg = ema(favg, pipedata.rx_total, &favg_cnt);
             avg = favg + 0.5;
             // look for a new high score
             if (pipedata.rx_total > rmx)
@@ -630,24 +625,17 @@ int main (int argc, char* argv[]) // program start
 
           if (pipedata.status != FAIL_TIMEOUT) {
             // calculate average process time (tav) using
-            // EMA after the initial 500 samples (which uses SMA)
             static float ftav = 0.0;
-            if (tct < 500) {
-              ftav *= tct;
-              ftav = (ftav + pipedata.run_time) / ++tct;
-            } else
-              ftav += 0.002 * (pipedata.run_time - ftav);
+            static int ftav_cnt = 0;
+            ftav = ema(ftav, pipedata.run_time, &ftav_cnt);
             tav = ftav + 0.5;
             // look for a new high score, adding 0.5 for rounding
             if (pipedata.run_time + 0.5 > tmx)
               tmx = (pipedata.run_time + 0.5);
           }
         } else if (pipedata.status == ACTION_DEC_KCC) {
-          if (kct < 500) {
-            kvg *= kct;
-            kvg = (kvg + pipedata.krq) / ++kct;
-          } else
-            kvg += 0.002 * (pipedata.krq - kvg);
+          static int kvg_cnt = 0;
+          kvg = ema(kvg, pipedata.krq, &kvg_cnt);
           if (pipedata.krq > krq)
              krq = pipedata.krq;
         }
@@ -695,9 +683,9 @@ int main (int argc, char* argv[]) // program start
     pthread_attr_t conn_attr;
     pthread_attr_init(&conn_attr);
     pthread_attr_setdetachstate(&conn_attr, PTHREAD_CREATE_DETACHED);
-
-    if (pthread_create(&conn_thread, &conn_attr, conn_handler, (void*)conn_tlstor))
-      log_msg(LGG_ERR, "Failed to create conn_handler thread");
+    int err;
+    if ((err=pthread_create(&conn_thread, &conn_attr, conn_handler, (void*)conn_tlstor)))
+      log_msg(LGG_ERR, "Failed to create conn_handler thread. err: %d", err);
 #else
     if (fork() == 0) {
       // detach child from signal handler
