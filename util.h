@@ -19,7 +19,7 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v35.HZ12.Kl-test2"
+#define VERSION "v35.HZ12.Kl-test3"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define CHAR_BUF_SIZE 8191      // surprising how big requests can be with cookies and lengthy yahoo url!
@@ -59,9 +59,9 @@ static unsigned long LINE_NUMBER = __LINE__;
 // cross-thread count variables
 extern volatile sig_atomic_t count; // req
 extern volatile sig_atomic_t avg; // cumulative moving average request size
-extern volatile sig_atomic_t act; // avg count (updated at time of average calculation)
+extern volatile sig_atomic_t _act; // avg count (updated at time of average calculation)
 extern volatile sig_atomic_t rmx; // maximum encountered request size
-extern volatile sig_atomic_t tct; // time count
+extern volatile sig_atomic_t _tct; // time count
 extern volatile sig_atomic_t tav; // cumulative moving average time in msec
 extern volatile sig_atomic_t tmx; // max time in msec
 extern volatile sig_atomic_t err;
@@ -135,5 +135,7 @@ char* get_version(int argc, char* argv[]);
 //   response.
 // - Similarly, stt_offset is for an in-progress status.txt response.
 char* get_stats(const int sta_offset, const int stt_offset);
+
+float ema(float curr, int new, int *cnt);
 
 #endif // UTIL_H
