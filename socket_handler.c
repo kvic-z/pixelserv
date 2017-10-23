@@ -626,6 +626,9 @@ void* conn_handler( void *ptr )
 
   // enter event loop
   while(1) {
+    response = httpnulltext;
+    rsize = sizeof httpnulltext - 1;
+
     if (rv <= 0) {
       if (errno == ECONNRESET || rv == 0) {
         log_msg(LGG_DEBUG, "recv() reported connection error: %m");
@@ -658,15 +661,12 @@ void* conn_handler( void *ptr )
           }
           strcpy(req_url, req);
 
-          // hack to remember the start of Host header
-          if (strlen(req) < CHAR_BUF_SIZE) {
-            char *tmpHost = strstr(buf + strlen(req) + 2, "Host:"); // e.g. "Host: abc.com"
-            TESTPRINT("tmpHost: '%s'\n", tmpHost);
-
-            tmpHost += strlen("Host:");
-            *tmpHost = ' ';
-            tmpHost = strtok(++tmpHost, "\r\n");
-
+          // locate and copy Host
+          char *tmpHost = strstr(buf, "Host: "); // e.g. "Host: abc.com"
+          if (tmpHost) {
+            tmpHost += strlen("Host: ");
+            tmpHost = strtok(tmpHost, "\r\n");
+            log_msg(LGG_DEBUG, "host log:%s socket:%d\n", tmpHost, new_fd);
             if (strlen(tmpHost) < HOST_LEN_MAX)
                strcpy(host, tmpHost);
             else
@@ -678,7 +678,7 @@ void* conn_handler( void *ptr )
       char *method = strtok(req, " ");
 
       if (method == NULL) {
-        log_msg(LGG_WARNING, "client did not specify method");
+        log_msg(LGG_DEBUG, "client did not specify method");
       } else {
         TESTPRINT("method: '%s'\n", method);
         if (!strcmp(method, "OPTIONS")) {
@@ -687,38 +687,39 @@ void* conn_handler( void *ptr )
           rsize = sizeof httpoptions - 1;
         } else if (!strcmp(method, "POST")) {
             pipedata.status = SEND_POST;
-            char *h;
-            int length = 0;
-            for(h = strtok_r(NULL, "\r\n", &bufptr); h; h = strtok_r(NULL, "\r\n", &bufptr)) {
-              TESTPRINT("header = %s\n", h);
-              char *k = strtok(h, ":");
-              if (strstr(k, "Content-Length")) {
-                length = atoi(strtok(NULL,"\r\n"));
-                break;
-              }
-            }
-            log_msg(LGG_DEBUG, "POST Content-Length: %d", length);
+            char *h = strstr(bufptr, "Content-Length: ");
+            h += strlen("Content-Length: ");
+            int length = atoi(strtok(h, "\r\n"));
+
+            log_msg(LGG_DEBUG, "POST socket: %d Content-Length: %d", new_fd, length);
 
             // when the body returns together with the headers, h now will point to the body
-            h = strtok(body + 4, "\r\n");
-            for (; h != NULL; h = strtok(NULL, "\r\n")) {
-              TESTPRINT("body = %s\n", h);
-              length -= strlen(h);
+            if (body && (h=strtok(body + 4, "\r\n"))) {
+              for (; h != NULL; h = strtok(NULL, "\r\n")) {
+                TESTPRINT("body = %s\n", h);
+                length -= strlen(h);
+              }
             }
 
-            log_msg(LGG_DEBUG, "POST expect length: %d\n", length);
+            log_msg(LGG_DEBUG, "POST socket: %d expect length: %d\n", new_fd, length);
+
+            int wait_cnt = 5 / GLOBAL(g, select_timeout);
+            if (wait_cnt < 1) wait_cnt = 1;
 
             // sink data as we're told
-            for (; length > 0; length -= rv) {
+            for (; length > 0 && wait_cnt > 0;) {
               errno = 0;
               if(ssl)
                 rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
               else
                 rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
-              log_msg(LGG_DEBUG, "POST recv length: %d; errno: %d", rv, errno);
-              if (rv <= 0)
-                break;
-              pipedata.rx_total += rv;
+              log_msg(LGG_DEBUG, "POST socket:%d recv length:%d; errno:%d", new_fd, rv, errno);
+
+              if (rv > 0) {
+                pipedata.rx_total += rv;
+                length -= rv;
+              } else
+                --wait_cnt;
             }
             response = http204;
             rsize = sizeof http204 - 1;
@@ -729,7 +730,7 @@ void* conn_handler( void *ptr )
           char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
           if (path == NULL) {
             pipedata.status = SEND_NO_URL;
-            log_msg(LGG_WARNING, "client did not specify URL for GET request");
+            log_msg(LGG_DEBUG, "client did not specify URL for GET request");
           } else if (!strncmp(path, "/log=", strlen("/log="))) {
             int v = atoi(path + strlen("/log="));
             if (v > LGG_DEBUG || v < 0)
@@ -821,13 +822,13 @@ void* conn_handler( void *ptr )
               char *file = strrchr(strtok(path, "?#;="), '/');
               if (file == NULL) {
                 pipedata.status = SEND_BAD_PATH;
-                log_msg(LGG_WARNING, "URL contains invalid file path %s", path);
+                log_msg(LGG_DEBUG, "URL contains invalid file path %s", path);
               } else {
                 TESTPRINT("file: '%s'\n", file);
                 char *ext = strrchr(file, '.');
                 if (ext == NULL) {
                   pipedata.status = SEND_NO_EXT;
-                  log_msg(LGG_WARNING, "no file extension %s from path %s", file, path);
+                  log_msg(LGG_DEBUG, "no file extension %s from path %s", file, path);
                 } else {
                   TESTPRINT("ext: '%s'\n", ext);
                   if (!strcasecmp(ext, ".gif")) {
@@ -863,7 +864,7 @@ void* conn_handler( void *ptr )
                   } else {
                     TESTPRINT("Sending ufe response\n");
                     pipedata.status = SEND_UNK_EXT;
-                    log_msg(LOG_WARNING, "unrecognized file extension %s from path %s", ext, path);
+                    log_msg(LOG_DEBUG, "unrecognized file extension %s from path %s", ext, path);
                   }
                 }
               }
@@ -875,6 +876,7 @@ void* conn_handler( void *ptr )
               else
                 rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
               if (rv > 0) pipedata.rx_total += rv;
+              log_msg(LGG_DEBUG, "Drain full URL from crazy website. socket:%d rv:%d", new_fd, rv);
             } while (rv > 0);
           }
           // end of GET
@@ -884,7 +886,7 @@ void* conn_handler( void *ptr )
             pipedata.status = SEND_HEAD;
           } else {
             // something else, possibly even non-HTTP
-            log_msg(LGG_WARNING, "Sending HTTP 501 response for unknown HTTP method: %s", method);
+            log_msg(LGG_DEBUG, "Sending HTTP 501 response for unknown HTTP method: %s", method);
             pipedata.status = SEND_BAD;
           }
           TESTPRINT("Sending 501 response\n");
@@ -903,7 +905,7 @@ void* conn_handler( void *ptr )
 
     // done processing socket connection; now handle selected result action
     if (pipedata.status == FAIL_GENERAL) {
-      log_msg(LGG_WARNING, "Client request processing completed with FAIL_GENERAL status");
+      log_msg(LGG_DEBUG, "Client request processing completed with FAIL_GENERAL status");
     } else if (pipedata.status != FAIL_TIMEOUT && pipedata.status != FAIL_CLOSED) {
       SET_LINE_NUMBER(__LINE__);
 
@@ -989,7 +991,7 @@ void* conn_handler( void *ptr )
 
       if (rv > 0) break;
       if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) { 
-        log_msg(LGG_DEBUG, "Exit recv loop fd:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n", new_fd, rv, errno, wait_cnt, num_req);
+        log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n", new_fd, rv, errno, wait_cnt, num_req);
         goto done_with_this_thread;
       }
       --wait_cnt;
