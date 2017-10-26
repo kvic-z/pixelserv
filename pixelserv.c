@@ -293,51 +293,52 @@ int main (int argc, char* argv[]) // program start
     FILE *fp = fopen(fname, "r");
     X509 *cacert = X509_new();
     if(fp == NULL || PEM_read_X509(fp, &cacert, NULL, NULL) == NULL)
-     log_msg(LGG_ERR, "Failed to open/read ca.crt");
-    free(fname);
-    
-    EVP_PKEY * pubkey = X509_get_pubkey(cacert);
-    if (X509_verify(cacert, pubkey) <= 0)
-    {
-      BIO *bioin; int fsz; char *cafile;
+      log_msg(LGG_ERR, "Failed to open/read ca.crt");
+    else {
+      EVP_PKEY * pubkey = X509_get_pubkey(cacert);
+      if (X509_verify(cacert, pubkey) <= 0)
+      {
+        BIO *bioin; int fsz; char *cafile;
 
-      if (fseek(fp, 0L, SEEK_END) < 0)
-        log_msg(LGG_ERR, "Failed to seek ca.crt");
-      fsz = ftell(fp);
-      cafile = malloc(fsz);
-      fseek(fp, 0L, SEEK_SET);
-      fread(cafile, 1, fsz, fp);
+        if (fseek(fp, 0L, SEEK_END) < 0)
+          log_msg(LGG_ERR, "Failed to seek ca.crt");
+        fsz = ftell(fp);
+        cafile = malloc(fsz);
+        fseek(fp, 0L, SEEK_SET);
+        fread(cafile, 1, fsz, fp);
 
-      bioin = BIO_new_mem_buf(cafile, fsz);
-      if (!bioin)
-        log_msg(LGG_ERR, "Failed to create new BIO mem buffer");
+        bioin = BIO_new_mem_buf(cafile, fsz);
+        if (!bioin)
+          log_msg(LGG_ERR, "Failed to create new BIO mem buffer");
 
-      cachain = PEM_X509_INFO_read_bio(bioin, NULL, NULL, NULL);
-      if (!cachain)
-        log_msg(LGG_ERR, "Failed to read CA chain from ca.crt");
-      BIO_free(bioin);
-      free(cafile);
+        cachain = PEM_X509_INFO_read_bio(bioin, NULL, NULL, NULL);
+        if (!cachain)
+          log_msg(LGG_ERR, "Failed to read CA chain from ca.crt");
+        BIO_free(bioin);
+        free(cafile);
+      }
+      fclose(fp);
+      free(fname);
+      EVP_PKEY_free(pubkey);
+      X509_free(cacert);
+
+      cert_tlstor.pem_dir = tls_pem;
+  #ifndef USE_PTHREAD
+      if(fork() == 0){
+        sigset_t mask;
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGUSR1);
+  #ifdef DEBUG
+        sigaddset(&mask, SIGUSR2);
+  #endif
+        sigprocmask(SIG_SETMASK, &mask, NULL);
+        cert_generator((void*)&cert_tlstor);
+        exit(0);
+      }
+  #else
+      pthread_create(&certgen_thread, NULL, cert_generator, (void*)&cert_tlstor);
+  #endif
     }
-    fclose(fp);
-    EVP_PKEY_free(pubkey);
-    X509_free(cacert);
-
-    cert_tlstor.pem_dir = tls_pem;
-#ifndef USE_PTHREAD
-    if(fork() == 0){
-      sigset_t mask;
-      sigemptyset(&mask);
-      sigaddset(&mask, SIGUSR1);
-#ifdef DEBUG
-      sigaddset(&mask, SIGUSR2);
-#endif
-      sigprocmask(SIG_SETMASK, &mask, NULL);
-      cert_generator((void*)&cert_tlstor);
-      exit(0);
-    }
-#else
-    pthread_create(&certgen_thread, NULL, cert_generator, (void*)&cert_tlstor);
-#endif
   }
 
   memset(&hints, 0, sizeof hints);
