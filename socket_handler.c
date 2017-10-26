@@ -662,7 +662,7 @@ void* conn_handler( void *ptr )
           strcpy(req_url, req);
 
           // locate and copy Host
-          char *tmpHost = strstr(buf, "Host: "); // e.g. "Host: abc.com"
+          char *tmpHost = strstr(bufptr, "Host: "); // e.g. "Host: abc.com"
           if (tmpHost) {
             tmpHost += strlen("Host: ");
             tmpHost = strtok(tmpHost, "\r\n");
