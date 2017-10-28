@@ -19,10 +19,10 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v35.HZ12.Kl-test3"
+#define VERSION "v35.HZ12.Kl-test4"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
-#define CHAR_BUF_SIZE 8191      // surprising how big requests can be with cookies and lengthy yahoo url!
+#define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
 #define DEFAULT_TIMEOUT 10      // default timeout for select() calls, in seconds
