@@ -487,6 +487,43 @@ free_all:
   return rv;
 }
 
+static int read_socket(int fd, char **msg, SSL *cSSL) {
+  if (*msg == NULL)
+    *msg = malloc(CHAR_BUF_SIZE + 1);
+  else
+    *msg = realloc(*msg, CHAR_BUF_SIZE + 1);
+  if (!(*msg)) {
+    log_msg(LGG_ERR, "Out of memory. Cannot malloc receiver buffer.");
+    return -1;
+  }
+
+  int i, rv, msg_len = 0;
+  char *bufptr = *msg;
+
+  for (i=1; i<=32;) { /* 128K max with CHAR_BUF_SIZE == 4K */
+    if (!cSSL)
+      rv = recv(fd, bufptr, CHAR_BUF_SIZE, 0);
+    else {
+      rv = SSL_read(cSSL, (char *)bufptr, CHAR_BUF_SIZE);
+      TESTPRINT("SSL handshake. errno: %d rv: %d\n", SSL_get_error(cSSL, rv), rv);
+    }
+    msg_len += rv;
+    if (rv < CHAR_BUF_SIZE)
+      break;
+    else {
+      ++i;
+      if (!(*msg = realloc(*msg, CHAR_BUF_SIZE * i + 1))) {
+          log_msg(LGG_ERR, "Out of memory. Cannot realloc receiver buffer. Size: %d", CHAR_BUF_SIZE * i);
+          return -1; /* start processing with whatever we received already */
+      }
+      log_msg(LGG_DEBUG, "Realloc receiver buffer. Size: %d", CHAR_BUF_SIZE * i);
+      bufptr = *msg + CHAR_BUF_SIZE * (i - 1);
+    }
+  }
+  return msg_len;
+}
+
+
 void* conn_handler( void *ptr )
 {
   int argc = GLOBAL(g, argc);
@@ -507,8 +544,7 @@ void* conn_handler( void *ptr )
   response_struct pipedata = {0};
   struct timeval timeout = {GLOBAL(g, select_timeout), 0};
   int rv = 0;
-  char buf[CHAR_BUF_SIZE + 1];
-  char *bufptr = NULL;
+  char *buf = NULL, *bufptr = NULL;
   char *url = NULL;
   char* aspbuf = NULL;
   const char* response = httpnulltext;
@@ -600,6 +636,7 @@ void* conn_handler( void *ptr )
   tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL, SSL_UNKNOWN, NULL };
 
   if(ssl){
+    int ssl_err;
     sslctx = SSL_CTX_new(TLSv1_2_server_method());
     SSL_CTX_set_options(sslctx, /*SSL_OP_SINGLE_DH_USE*/ SSL_MODE_RELEASE_BUFFERS | SSL_OP_NO_COMPRESSION);
     SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
@@ -607,22 +644,19 @@ void* conn_handler( void *ptr )
 
     cSSL = SSL_new(sslctx);
     SSL_set_fd(cSSL, new_fd );
-    int ssl_err = SSL_accept(cSSL);
-
-    TIME_CHECK("SSL setup");
+    ssl_err = SSL_accept(cSSL);
     pipedata.ssl = tlsext_cb_arg.status;
-    if(ssl_err > 0) {
-      rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
-      if (rv == 0) // client disconnects without sending any data
-        pipedata.ssl = SSL_HIT_CLS;
-      TESTPRINT("SSL handshake successful: %d, %d, %d\n", tlsext_cb_arg.status, SSL_get_error(cSSL, rv), rv);
-    } else
-      TESTPRINT("SSL handshake failed: %d\n", SSL_get_error(cSSL, ssl_err));
-  } else {
-    // read some data from the socket to buf
-    rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+    if (ssl_err <= 0)
+      goto event_loop; // will send default reply there
   }
+  TIME_CHECK("SSL setup");
 
+  errno = 0;
+  rv = read_socket(new_fd, &buf, cSSL);
+  if (rv == 0 && ssl) // client disconnects without sending any data
+    pipedata.ssl = SSL_HIT_CLS;
+
+event_loop:
 
   // enter event loop
   while(1) {
@@ -709,10 +743,7 @@ void* conn_handler( void *ptr )
             // sink data as we're told
             for (; length > 0 && wait_cnt > 0;) {
               errno = 0;
-              if(ssl)
-                rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
-              else
-                rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
+              rv = read_socket(new_fd, &buf, cSSL);
               log_msg(LGG_DEBUG, "POST socket:%d recv length:%d; errno:%d", new_fd, rv, errno);
 
               if (rv > 0) {
@@ -979,15 +1010,7 @@ void* conn_handler( void *ptr )
 
     while (wait_cnt >=1) {
       errno = 0;
-      if(ssl){
-        rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
-        if (rv == 0) // client disconnects without sending any data
-          pipedata.ssl = SSL_HIT_CLS;
-        TESTPRINT("SSL handshake successful: %d, %d, %d\n", tlsext_cb_arg.status, SSL_get_error(cSSL, rv), rv);
-      } else {
-        // read some data from the socket to buf
-        rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
-      }
+      rv = read_socket(new_fd, &buf, cSSL);
 
       if (rv > 0) break;
       if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) { 
@@ -995,10 +1018,9 @@ void* conn_handler( void *ptr )
         goto done_with_this_thread;
       }
       --wait_cnt;
-    } // while(wait_cnt >=1 )
-
+    }
     get_time(&start_time);
-  } // while(1)
+  } // event loop
 
 done_with_this_thread:
 
@@ -1039,6 +1061,7 @@ done_with_this_thread:
     log_msg(LGG_ERR, "conn_handler exiting child process with FAIL_GENERAL status");
 #endif
 
+  free(buf);
   free(req_url);
   free(ptr);
   return NULL;
