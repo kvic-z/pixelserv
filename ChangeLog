@@ -1,15 +1,42 @@
+2017-x-x version Kl
+
+* Added support of HTTP/1.1 persistent connections
+* Added option 'O' for specifying timeout of persistent connections
+* Added new counters kcc, kmx, kvg and krq related to service threads that implements
+  HTTP/1.1 persistent connections.
+* Added support for TCP Fast Open. Require Linux kernel >= 3.16.
+* Added support of HTTP POST method
+* Increased size of message buffer for more efficient processing of lengthy requests
+* Corrected/enhanced ring buffer handling in certificate generations
+
+* Added new tiered logging
+* Revised tiers of all logged messages
+* Expanded CLI option '-l' to '-l level' where 'level' corresponds to a logging tier.
+* Expanded URL "/log=<1|0>" to "/log=<level>" 
+* Cleaned up logics/codes in the connection handler.
+
+2017-9-18 version Kk
+
+* Added support for HTTP OPTIONS method. (Issue reported by Popov on snbforums)
+* Added experimental support for HSTS
+* Added a new counter 'slc' that counts the number of clients who disconnect 
+  without sending any data. It usually indicates clients not have ca.crt installed.
+* Added new counter 'cly' - client disconnect before response sent
+* Fixed certificates generated for erroneous domains under extreme load
+* Fixed crashes when non-SNI requests are received [reported by Popov@snb]
+* Fixed crashes when null requests are received while logging enabled
+* Fixed delay in certificate generation
+* Fixed potential duplication in certificate generation
+* Fixed description of counter 'err' and 'cls'
 
 2017-4-21 v35.HZ12.Kj
 
 * Added support for using ECDHE ciphers to exchange keys if browsers request so. 
   Google Chrome starts to mark less secure ciphers such as RSA as obsolete. 
   Less secure ciphers will be depreciated in TLS v1.3.
-
 * Added X509v3 Subject Alternative Name (SAN) extension to generated certificates.
   Google Chrome starting with v58 mark certificates without SAN as invalid, enforcing
   RFC 2818 specified in 2000!
- 
-to use more secure ECDHE ciphers for key exchange
 
 2017-1-26 v35.HZ12.Ki-p1
 
