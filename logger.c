@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <string.h>
 #include <syslog.h>
 #include "logger.h"
 
@@ -14,10 +15,58 @@ logger_level log_get_verb() { return _verb; }
 void log_msg(int verb, char *fmt, ...)
 {
     if (verb > _verb)
-      return;
+        return;
       
     va_list args;
     va_start(args, fmt);
     vsyslog(LOG_CRIT + verb, fmt, args);
     va_end(args);
+}
+
+void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *body)
+{
+    if (verb > _verb)
+      return;
+
+    if (strlen(req) < MAX_LOG_CHUNK_SIZE)
+        syslog(LOG_CRIT + verb, "%s %s %s%s", client_ip, host, req, tls ? " secure" : "");
+    else {
+        int num_chunks = strlen(req) / MAX_LOG_CHUNK_SIZE + 1;
+        char store = req[MAX_LOG_CHUNK_SIZE];
+        req[MAX_LOG_CHUNK_SIZE] = '\0';
+        syslog(LOG_CRIT + verb, "%s %s %s", client_ip, host, req);
+        req[MAX_LOG_CHUNK_SIZE] = store;
+
+        int chunk = 1;
+        if (num_chunks > 2)
+          for (; chunk < num_chunks - 1; chunk++) {
+              store = req[MAX_LOG_CHUNK_SIZE * (chunk + 1)];
+              req[MAX_LOG_CHUNK_SIZE * (chunk + 1)] = '\0';
+              syslog(LOG_CRIT + verb, "%s", req + MAX_LOG_CHUNK_SIZE * chunk);
+              req[MAX_LOG_CHUNK_SIZE * (chunk + 1)] = store;
+          }
+        syslog(LOG_CRIT + verb, "%s%s", req + MAX_LOG_CHUNK_SIZE * chunk, tls ? " secure" : "");
+    }
+
+    if (body) {
+      if (strlen(body) < MAX_LOG_CHUNK_SIZE)
+          syslog(LOG_CRIT + verb, "[%s]", body);
+      else {
+          int num_chunks = strlen(body) / MAX_LOG_CHUNK_SIZE + 1;
+          char store = body[MAX_LOG_CHUNK_SIZE];
+          body[MAX_LOG_CHUNK_SIZE] = '\0';
+          syslog(LOG_CRIT + verb, "[%s", body);
+          body[MAX_LOG_CHUNK_SIZE] = store;
+
+          int chunk = 1;
+          if (num_chunks > 2)
+            for (; chunk < num_chunks - 1; chunk++) {
+                store = body[MAX_LOG_CHUNK_SIZE * (chunk + 1)];
+                body[MAX_LOG_CHUNK_SIZE * (chunk + 1)] = '\0';
+                syslog(LOG_CRIT + verb, "%s", body + MAX_LOG_CHUNK_SIZE * chunk);
+                body[MAX_LOG_CHUNK_SIZE * (chunk + 1)] = store;
+            }
+          syslog(LOG_CRIT + verb, "%s]", body + MAX_LOG_CHUNK_SIZE * chunk);
+      }
+    }
 }
