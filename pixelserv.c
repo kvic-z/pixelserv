@@ -126,6 +126,7 @@ int main (int argc, char* argv[]) // program start
 #ifdef DEBUG
   int warning_time = 0;
 #endif //DEBUG
+  int max_num_threads = DEFAULT_THREAD_MAX;
 
   SET_LINE_NUMBER(__LINE__);
 
@@ -188,6 +189,13 @@ int main (int argc, char* argv[]) // program start
           continue;
           case 's': stats_url = argv[i];                      continue;
           case 't': stats_text_url = argv[i];                 continue;
+          case 'T':
+            errno = 0;
+            max_num_threads = strtol(argv[i], NULL, 10);
+            if (errno || max_num_threads <= 0) {
+              error = 1;
+            }
+          continue;
 #ifdef DROP_ROOT
           case 'u': user = argv[i];                           continue;
 #endif
@@ -219,42 +227,44 @@ int main (int argc, char* argv[]) // program start
   SET_LINE_NUMBER(__LINE__);
 
   if (error) {
-    printf("%s %s" "\n"
-           "\t" "ip_addr/hostname (all if omitted)" "\n"
+    printf("%s: %s compiled: " __DATE__ " " __TIME__ "\n"
+           "Usage: pixelserv-tls [OPTION]" "\n"
+           "options:" "\n"
+           "\t" "ip or hostname (default: 0.0.0.0)" "\n"
            "\t" "-2 (disable HTTP 204 reply to generate_204 URLs)" "\n"
 #ifndef TEST
-           "\t" "-f (stay in foreground - don't daemonize)" "\n"
+           "\t" "-f (stay in foreground/don't daemonize)" "\n"
 #endif // !TEST
-           "\t" "-k https_port ("
+           "\t" "-k https_port (default: "
            SECOND_PORT
-           " if omitted)" "\n"
+           ")" "\n"
            "\t" "-l level (0:critical 1:error<default> 2:warning 3:notice 4:info 5:debug)" "\n"
 #ifdef IF_MODE
-           "\t" "-n i/f (all interfaces if omitted)" "\n"
+           "\t" "-n iface_name (default: all interfaces)" "\n"
 #endif // IF_MODE
-           "\t" "-o select_timeout (%d seconds)" "\n"
-           "\t" "-O keep-alive duration for HTTP/1.1 connections (%d seconds)" "\n"
-           "\t" "-p http_port ("
+           "\t" "-o select_timeout (default: %ds)" "\n"
+           "\t" "-O keep_alive_duration (for HTTP/1.1 connections; default: %ds)" "\n"
+           "\t" "-p http_port (default: "
            DEFAULT_PORT
-           " if omitted)" "\n"
-           "\t" "-r (deprecated - ignored)" "\n"
+           ")" "\n"
            "\t" "-R (disable redirect to encoded path in tracker links)" "\n"
-           "\t" "-s /relative_stats_html_URL ("
+           "\t" "-s /relative_stats_html_URL (default: "
            DEFAULT_STATS_URL
-           " if omitted)" "\n"
-           "\t" "-t /relative_stats_txt_URL ("
+           ")" "\n"
+           "\t" "-t /relative_stats_txt_URL (default: "
            DEFAULT_STATS_TEXT_URL
-           " if omitted)" "\n"
+           ")" "\n"
+           "\t" "-T max_service_threads (default: %d)\n"
 #ifdef DROP_ROOT
-           "\t" "-u user (\"nobody\" if omitted)" "\n"
+           "\t" "-u user (default: \"nobody\")" "\n"
 #endif // DROP_ROOT
 #ifdef DEBUG
            "\t" "-w warning_time (warn when elapsed connection time exceeds value in msec)" "\n"
 #endif //DEBUG
-           "\t" "-z path_to_https_certs ("
+           "\t" "-z path_to_https_certs (default: "
            DEFAULT_PEM_PATH
-           " if omitted)" "\n"
-           , argv[0], VERSION, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE);
+           ")" "\n"
+           , argv[0], VERSION, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE, DEFAULT_THREAD_MAX);
     exit(EXIT_FAILURE);
   }
 
@@ -674,6 +684,13 @@ int main (int argc, char* argv[]) // program start
       }
       continue;
     }
+
+    if (kcc >= max_num_threads) {
+        count++;
+        clt++;
+        close(new_fd);
+        continue;
+    }
     SET_LINE_NUMBER(__LINE__);
 
     conn_tlstor_struct *conn_tlstor = malloc(sizeof(conn_tlstor_struct));
@@ -685,8 +702,10 @@ int main (int argc, char* argv[]) // program start
     pthread_attr_init(&conn_attr);
     pthread_attr_setdetachstate(&conn_attr, PTHREAD_CREATE_DETACHED);
     int err;
-    if ((err=pthread_create(&conn_thread, &conn_attr, conn_handler, (void*)conn_tlstor)))
+    if ((err=pthread_create(&conn_thread, &conn_attr, conn_handler, (void*)conn_tlstor))) {
       log_msg(LGG_ERR, "Failed to create conn_handler thread. err: %d", err);
+      continue;
+    }
 #else
     if (fork() == 0) {
       // detach child from signal handler
