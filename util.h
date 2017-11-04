@@ -19,17 +19,17 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v35.HZ12.Kl-test4"
+#define VERSION "v35.HZ12.Kl-test5"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
-#define CHAR_BUF_SIZE 4095      // surprising how big requests can be with cookies and lengthy yahoo url!
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
-#define DEFAULT_TIMEOUT 10      // default timeout for select() calls, in seconds
-#define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 30)
+#define DEFAULT_TIMEOUT 1       // default timeout for select() calls, in seconds
+#define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 120)
                                 // default keep-alive duration for HTTP/1.1 connections, in seconds
                                 // it's the time a connection will stay active
                                 // until another request comes and refreshes the timer
+#define DEFAULT_THREAD_MAX 400  // maximum number of concurrent service threads
 #define SECOND_PORT "443"
 #define MAX_PORTS 10
 #define MAX_TLS_PORTS 9         // PLEASE ENSURE MAX_TLS_PORTS < MAX_PORTS
@@ -107,6 +107,7 @@ extern volatile sig_atomic_t kmx;
 extern volatile sig_atomic_t kct;
 extern float kvg;
 extern volatile sig_atomic_t krq;
+extern volatile sig_atomic_t clt;
 
 struct Global {
     int argc;
