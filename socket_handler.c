@@ -407,8 +407,8 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
   int rv = SSL_TLSEXT_ERR_OK;
   tlsext_cb_arg_struct *tlsext_cb_arg = (tlsext_cb_arg_struct *)arg;
   const char* pem_dir = tlsext_cb_arg->tls_pem;
-  char *full_pem_path = NULL;
-  char *servername = malloc(PIXELSERV_MAX_SERVER_NAME);
+  char full_pem_path[PIXELSERV_MAX_PATH];
+  char servername[PIXELSERV_MAX_SERVER_NAME];
   if ((tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name)) == NULL)
     goto free_all;
   strcpy(servername, tlsext_cb_arg->servername);
@@ -430,7 +430,6 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
 #ifdef DEBUG
   printf("pem file name: %s\n", pem_file);
 #endif
-  full_pem_path = malloc(PIXELSERV_MAX_PATH);
   strcpy(full_pem_path, pem_dir);
   strcat(full_pem_path, "/");
   strcat(full_pem_path, pem_file);
@@ -481,8 +480,6 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
   printf("%s: sslctx %p\n", __FUNCTION__, (void*) sslctx);
 #endif
 free_all:
-  free(full_pem_path);
-  free(servername);
 
   return rv;
 }
@@ -500,7 +497,7 @@ static int read_socket(int fd, char **msg, SSL *cSSL) {
   int i, rv, msg_len = 0;
   char *bufptr = *msg;
 
-  for (i=1; i<=32;) { /* 128K max with CHAR_BUF_SIZE == 4K */
+  for (i=1; i<=MAX_CHAR_BUF_LOTS;) { /* 128K max with CHAR_BUF_SIZE == 4K */
     if (!cSSL)
       rv = recv(fd, bufptr, CHAR_BUF_SIZE, 0);
     else {
@@ -522,7 +519,6 @@ static int read_socket(int fd, char **msg, SSL *cSSL) {
   }
   return msg_len;
 }
-
 
 void* conn_handler( void *ptr )
 {
@@ -558,6 +554,7 @@ void* conn_handler( void *ptr )
   int req_len = 1023; // size of req_url less one
   #define HOST_LEN_MAX 80
   char host[HOST_LEN_MAX];
+  char *post_buf = NULL;
 
 #ifdef DEBUG
   double time_msec = 0.0;
@@ -727,31 +724,69 @@ event_loop:
 
             log_msg(LGG_DEBUG, "POST socket: %d Content-Length: %d", new_fd, length);
 
+            int post_buf_size = 0;
+            if (length < MAX_HTTP_POST_LEN)
+              post_buf_size = length;
+            else
+              post_buf_size = MAX_HTTP_POST_LEN;
+            post_buf = malloc(post_buf_size + 1);
+            if (!post_buf) {
+              log_msg(LGG_ERR, "Out of memory. Cannot malloc receiver buffer.");
+              goto end_post;
+            }
+            post_buf[post_buf_size] = '\0';
+
             // when the body returns together with the headers, h now will point to the body
+            int recv_len = 0;
             if (body && (h=strtok(body + 4, "\r\n"))) {
               for (; h != NULL; h = strtok(NULL, "\r\n")) {
                 TESTPRINT("body = %s\n", h);
-                length -= strlen(h);
+                memcpy(post_buf + recv_len, h, strlen(h));
+                recv_len += strlen(h);
               }
+              length -= recv_len;
+              post_buf_size -= recv_len;
             }
 
             log_msg(LGG_DEBUG, "POST socket: %d expect length: %d\n", new_fd, length);
 
-            int wait_cnt = 5 / GLOBAL(g, select_timeout);
+            int wait_cnt = MAX_HTTP_POST_WAIT / GLOBAL(g, select_timeout);
             if (wait_cnt < 1) wait_cnt = 1;
 
-            // sink data as we're told
+            /* caputre POST content */
             for (; length > 0 && wait_cnt > 0;) {
               errno = 0;
-              rv = read_socket(new_fd, &buf, cSSL);
+              if (ssl) {
+                rv = SSL_read(cSSL, (char *)(post_buf + recv_len), post_buf_size);
+                TESTPRINT("SSL handshake. errno: %d rv: %d\n", SSL_get_error(cSSL, rv), rv);
+              }else
+                rv = recv(new_fd, post_buf + recv_len, post_buf_size, MSG_WAITALL);
+
               log_msg(LGG_DEBUG, "POST socket:%d recv length:%d; errno:%d", new_fd, rv, errno);
 
               if (rv > 0) {
                 pipedata.rx_total += rv;
                 length -= rv;
+                if ((recv_len + rv) < MAX_HTTP_POST_LEN) {
+                  recv_len += rv;
+                  post_buf_size -= rv;
+                  post_buf[recv_len] = '\0';
+                } else {
+                  if (length > CHAR_BUF_SIZE) {
+                    /* discard bytes from 'MAX_HTTP_POST_LEN - CHAR_BUF_SIZE'
+                    to 'Content-Length - CHAR_BUF_SIZE' */
+                    recv_len += rv - CHAR_BUF_SIZE;
+                    post_buf_size = CHAR_BUF_SIZE;
+                  } else {
+                      recv_len += rv - length;
+                      post_buf_size = length;
+                  }
+                }
               } else
                 --wait_cnt;
             }
+
+          end_post:
             response = http204;
             rsize = sizeof http204 - 1;
         } else if (!strcmp(method, "GET")) {
@@ -900,15 +935,6 @@ event_loop:
                 }
               }
             }
-            // Crazy websites send very long URL. Let's treat them gracefully by draining the full URL.
-            if (body == NULL) do {
-              if(ssl)
-                rv = SSL_read(cSSL, (char *)buf, CHAR_BUF_SIZE);
-              else
-                rv = recv(new_fd, buf, CHAR_BUF_SIZE, 0);
-              if (rv > 0) pipedata.rx_total += rv;
-              log_msg(LGG_DEBUG, "Drain full URL from crazy website. socket:%d rv:%d", new_fd, rv);
-            } while (rv > 0);
           }
           // end of GET
         } else {
@@ -976,9 +1002,12 @@ event_loop:
         {
           perror("getnameinfo");
         }
-        log_msg(LGG_INFO, "(%2d) %s %s %s%s", pipedata.status, client_ip, \
-                          host, req_url, (tlsext_cb_arg.servername) ? " secure" : "");
+        log_xcs(LGG_INFO, client_ip, host, (tlsext_cb_arg.servername != NULL), req_url, post_buf);
       }
+      free(buf);
+      buf = NULL;
+      free(post_buf);
+      post_buf = NULL;
     }
 
     /*** NOTE: pipedata.status should not be altered after this point ***/
