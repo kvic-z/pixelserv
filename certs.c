@@ -167,7 +167,7 @@ void *cert_generator(void *ptr) {
     FILE *fp = fopen(fname, "r");
     X509 *x509 = X509_new();
     if(fp == NULL || PEM_read_X509(fp, &x509, NULL, NULL) == NULL)
-       log_msg(LGG_ERR, "Failed to open/read ca.crt");
+       log_msg(LGG_ERR, "Failed to read ca.crt");
     fclose(fp);
     free(fname);
 

@@ -23,7 +23,7 @@ void log_msg(int verb, char *fmt, ...)
     va_end(args);
 }
 
-void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *body)
+void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *body, int body_len)
 {
     if (verb > _verb)
       return;
@@ -49,7 +49,9 @@ void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *bo
     }
 
     if (body) {
-      if (strlen(body) < MAX_LOG_CHUNK_SIZE)
+      if (strlen(body) < body_len)
+          syslog(LOG_CRIT + verb, "[%s]", "-binary POST content not dumped-");
+      else if (strlen(body) < MAX_LOG_CHUNK_SIZE)
           syslog(LOG_CRIT + verb, "[%s]", body);
       else {
           int num_chunks = strlen(body) / MAX_LOG_CHUNK_SIZE + 1;

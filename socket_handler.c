@@ -555,6 +555,7 @@ void* conn_handler( void *ptr )
   #define HOST_LEN_MAX 80
   char host[HOST_LEN_MAX];
   char *post_buf = NULL;
+  int post_buf_len = 0;
 
 #ifdef DEBUG
   double time_msec = 0.0;
@@ -717,14 +718,17 @@ event_loop:
           response = httpoptions;
           rsize = sizeof httpoptions - 1;
         } else if (!strcmp(method, "POST")) {
-            pipedata.status = SEND_POST;
+            int recv_len = 0;
+            int length = 0;
+            int post_buf_size = 0;
+            int wait_cnt = 0;
             char *h = strstr(bufptr, "Content-Length: ");
+
             h += strlen("Content-Length: ");
-            int length = atoi(strtok(h, "\r\n"));
+            length = atoi(strtok(h, "\r\n"));
 
             log_msg(LGG_DEBUG, "POST socket: %d Content-Length: %d", new_fd, length);
 
-            int post_buf_size = 0;
             if (length < MAX_HTTP_POST_LEN)
               post_buf_size = length;
             else
@@ -737,7 +741,7 @@ event_loop:
             post_buf[post_buf_size] = '\0';
 
             // when the body returns together with the headers, h now will point to the body
-            int recv_len = 0;
+//            int recv_len = 0;
             if (body && (h=strtok(body + 4, "\r\n"))) {
               for (; h != NULL; h = strtok(NULL, "\r\n")) {
                 TESTPRINT("body = %s\n", h);
@@ -750,7 +754,7 @@ event_loop:
 
             log_msg(LGG_DEBUG, "POST socket: %d expect length: %d\n", new_fd, length);
 
-            int wait_cnt = MAX_HTTP_POST_WAIT / GLOBAL(g, select_timeout);
+            wait_cnt = MAX_HTTP_POST_WAIT / GLOBAL(g, select_timeout);
             if (wait_cnt < 1) wait_cnt = 1;
 
             /* caputre POST content */
@@ -787,6 +791,8 @@ event_loop:
             }
 
           end_post:
+            post_buf_len = recv_len;
+            pipedata.status = SEND_POST;
             response = http204;
             rsize = sizeof http204 - 1;
         } else if (!strcmp(method, "GET")) {
@@ -998,16 +1004,18 @@ event_loop:
 
         getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
         if(getnameinfo((struct sockaddr *)&sin_addr,
-                        sin_addr_len, client_ip, sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0) 
-        {
+                       sin_addr_len,
+                       client_ip,
+                       sizeof client_ip,
+                       NULL, 0, NI_NUMERICHOST) != 0)
           perror("getnameinfo");
-        }
-        log_xcs(LGG_INFO, client_ip, host, (tlsext_cb_arg.servername != NULL), req_url, post_buf);
+        log_xcs(LGG_INFO, client_ip, host, (tlsext_cb_arg.servername != NULL), req_url, post_buf, post_buf_len);
       }
       free(buf);
       buf = NULL;
       free(post_buf);
       post_buf = NULL;
+      post_buf_len = 0;
     }
 
     /*** NOTE: pipedata.status should not be altered after this point ***/
