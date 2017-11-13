@@ -682,6 +682,7 @@ event_loop:
       hex_dump(buf, rv);
 #endif
       char *body = strstr(buf, "\r\n\r\n");
+      int body_len = (body) ? (rv + buf - body) : 0;
       char *req = strtok_r(buf, "\r\n", &bufptr);
       if (log_get_verb() >= LGG_INFO) {
         req_url[0] = '\0';
@@ -740,14 +741,10 @@ event_loop:
             }
             post_buf[post_buf_size] = '\0';
 
-            // when the body returns together with the headers, h now will point to the body
-//            int recv_len = 0;
-            if (body && (h=strtok(body + 4, "\r\n"))) {
-              for (; h != NULL; h = strtok(NULL, "\r\n")) {
-                TESTPRINT("body = %s\n", h);
-                memcpy(post_buf + recv_len, h, strlen(h));
-                recv_len += strlen(h);
-              }
+            /* body points to "\r\n\r\n" */
+            if (body && body_len > 4) {
+              recv_len = body_len - 4;
+              memcpy(post_buf, body + 4, recv_len);
               length -= recv_len;
               post_buf_size -= recv_len;
             }

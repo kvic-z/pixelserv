@@ -9,6 +9,16 @@ static logger_level _verb = LGG_ERR;
 static logger_level _verb = LGG_DEBUG;
 #endif
 
+static int ctrl_char(char *buf, int len) {
+    if (strlen(buf) < len)
+        return 1;
+    int i;
+    for (i=0; i<len; i++)
+        if (buf[i] < 32)
+            return 1;
+    return 0;
+}
+
 void log_set_verb(logger_level verb) { _verb = verb; }
 logger_level log_get_verb() { return _verb; }
 
@@ -49,7 +59,7 @@ void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *bo
     }
 
     if (body) {
-      if (strlen(body) < body_len)
+      if (ctrl_char(body, body_len))
           syslog(LOG_CRIT + verb, "[%s]", "-binary POST content not dumped-");
       else if (strlen(body) < MAX_LOG_CHUNK_SIZE)
           syslog(LOG_CRIT + verb, "[%s]", body);

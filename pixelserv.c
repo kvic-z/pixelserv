@@ -32,6 +32,8 @@
 #endif
 #include <linux/version.h>
 
+#define THREAD_STACK_SIZE  32767
+
 void signal_handler(int sig)
 {
   if (sig != SIGTERM
@@ -230,38 +232,38 @@ int main (int argc, char* argv[]) // program start
     printf("%s: %s compiled: " __DATE__ " " __TIME__ "\n"
            "Usage: pixelserv-tls [OPTION]" "\n"
            "options:" "\n"
-           "\t" "ip or hostname (default: 0.0.0.0)" "\n"
-           "\t" "-2 (disable HTTP 204 reply to generate_204 URLs)" "\n"
+           "\t" "ip_addr/hostname\t(default: 0.0.0.0)" "\n"
+           "\t" "-2\t\t\t(disable HTTP 204 reply to generate_204 URLs)" "\n"
 #ifndef TEST
-           "\t" "-f (stay in foreground/don't daemonize)" "\n"
+           "\t" "-f\t\t\t(stay in foreground/don't daemonize)" "\n"
 #endif // !TEST
-           "\t" "-k https_port (default: "
+           "\t" "-R\t\t\t(disable redirect to encoded path in tracker links)" "\n"
+           "\t" "-k  https_port\t\t(default: "
            SECOND_PORT
            ")" "\n"
-           "\t" "-l level (0:critical 1:error<default> 2:warning 3:notice 4:info 5:debug)" "\n"
+           "\t" "-l  level\t\t(0:critical 1:error<default> 2:warning 3:notice 4:info 5:debug)" "\n"
 #ifdef IF_MODE
-           "\t" "-n iface_name (default: all interfaces)" "\n"
+           "\t" "-n  iface\t\t(default: all interfaces)" "\n"
 #endif // IF_MODE
-           "\t" "-o select_timeout (default: %ds)" "\n"
-           "\t" "-O keep_alive_duration (for HTTP/1.1 connections; default: %ds)" "\n"
-           "\t" "-p http_port (default: "
+           "\t" "-o  select_timeout\t(default: %ds)" "\n"
+           "\t" "-O  keep_alive_time\t(for HTTP/1.1 connections; default: %ds)" "\n"
+           "\t" "-p  http_port\t\t(default: "
            DEFAULT_PORT
            ")" "\n"
-           "\t" "-R (disable redirect to encoded path in tracker links)" "\n"
-           "\t" "-s /relative_stats_html_URL (default: "
+           "\t" "-s  stats_html_URL\t(default: "
            DEFAULT_STATS_URL
            ")" "\n"
-           "\t" "-t /relative_stats_txt_URL (default: "
+           "\t" "-t  stats_txt_URL\t(default: "
            DEFAULT_STATS_TEXT_URL
            ")" "\n"
-           "\t" "-T max_service_threads (default: %d)\n"
+           "\t" "-T  max_service_threads\t(default: %d)\n"
 #ifdef DROP_ROOT
-           "\t" "-u user (default: \"nobody\")" "\n"
+           "\t" "-u  user\t\t(default: \"nobody\")" "\n"
 #endif // DROP_ROOT
 #ifdef DEBUG
-           "\t" "-w warning_time (warn when elapsed connection time exceeds value in msec)" "\n"
+           "\t" "-w  warning_time\t(warn when elapsed connection time exceeds value in msec)" "\n"
 #endif //DEBUG
-           "\t" "-z path_to_https_certs (default: "
+           "\t" "-z  path_to_certs\t(default: "
            DEFAULT_PEM_PATH
            ")" "\n"
            , argv[0], VERSION, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE, DEFAULT_THREAD_MAX);
@@ -297,6 +299,14 @@ int main (int argc, char* argv[]) // program start
   pw = getpwnam(user);
   chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid);
   {
+    struct rlimit l = {THREAD_STACK_SIZE, THREAD_STACK_SIZE * 2};
+    if (setrlimit(RLIMIT_STACK, &l) == -1)
+      log_msg(LGG_ERR, "setrlimit STACK failed: %d", l.rlim_cur, l.rlim_max);
+    l.rlim_cur = max_num_threads + 50;
+    l.rlim_max = max_num_threads * 2;
+    if (setrlimit(RLIMIT_NOFILE, &l) == -1)
+      log_msg(LGG_ERR, "setrlimit NOFILE failed: %d", l.rlim_cur, l.rlim_max);
+
     char *fname = malloc(PIXELSERV_MAX_PATH);
     strcpy(fname, tls_pem);
     strcat(fname, "/ca.crt");
@@ -346,7 +356,10 @@ int main (int argc, char* argv[]) // program start
         exit(0);
       }
   #else
-      pthread_create(&certgen_thread, NULL, cert_generator, (void*)&cert_tlstor);
+      pthread_attr_t attr;
+      pthread_attr_init(&attr);
+      pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
+      pthread_create(&certgen_thread, &attr, cert_generator, (void*)&cert_tlstor);
   #endif
     }
   }
@@ -698,11 +711,12 @@ int main (int argc, char* argv[]) // program start
 
 #ifdef USE_PTHREAD
     pthread_t conn_thread;
-    pthread_attr_t conn_attr;
-    pthread_attr_init(&conn_attr);
-    pthread_attr_setdetachstate(&conn_attr, PTHREAD_CREATE_DETACHED);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
     int err;
-    if ((err=pthread_create(&conn_thread, &conn_attr, conn_handler, (void*)conn_tlstor))) {
+    if ((err=pthread_create(&conn_thread, &attr, conn_handler, (void*)conn_tlstor))) {
       log_msg(LGG_ERR, "Failed to create conn_handler thread. err: %d", err);
       continue;
     }

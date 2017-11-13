@@ -19,7 +19,7 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v35.HZ12.Kl-test6"
+#define VERSION "v35.HZ12.Kl-test7"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
@@ -29,7 +29,7 @@
                                 // default keep-alive duration for HTTP/1.1 connections, in seconds
                                 // it's the time a connection will stay active
                                 // until another request comes and refreshes the timer
-#define DEFAULT_THREAD_MAX 400  // maximum number of concurrent service threads
+#define DEFAULT_THREAD_MAX 1200 // maximum number of concurrent service threads
 #define SECOND_PORT "443"
 #define MAX_PORTS 10
 #define MAX_TLS_PORTS 9         // PLEASE ENSURE MAX_TLS_PORTS < MAX_PORTS
