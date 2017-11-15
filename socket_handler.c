@@ -94,7 +94,7 @@
 
   static const char httpnulltext[] =
   "HTTP/1.1 200 OK\r\n"
-  "Strict-Transport-Security: max-age=10886400; includeSubDomains\r\n" //experimental support for HSTS
+  "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n" //experimental support for HSTS
   "Content-type: text/html\r\n"
   "Content-length: 0\r\n"
   "Connection: keep-alive\r\n"
@@ -230,6 +230,16 @@
   "Connection: keep-alive\r\n"
   "\r\n"
   "GET,OPTIONS";
+
+/* ECDHE-RSA-AES128-GCM-SHA256 :
+   Android >= 4.4.2; Chrome >= 51; Firefox >= 49;
+   IE 11 Win 10; Edge >= 13; Safari >= 9; Apple ATS 9 iOS 9
+   ECDHE-RSA-AES128-SHA :
+   IE 11 Win 7,8.1; IE 11 Winphone 8.1; Opera >= 17; Safar 7 iOS 7.1 */
+#define PIXELSERV_CIPHER_LIST \
+  "ECDHE-ECDSA-AES128-GCM-SHA256:" \
+  "ECDHE-RSA-AES128-GCM-SHA256:" \
+  "ECDHE-RSA-AES128-SHA:"
 
 // private functions for socket_handler() use
 #ifdef HEX_DUMP
@@ -408,21 +418,26 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
   tlsext_cb_arg_struct *tlsext_cb_arg = (tlsext_cb_arg_struct *)arg;
   const char* pem_dir = tlsext_cb_arg->tls_pem;
   char full_pem_path[PIXELSERV_MAX_PATH];
-  char servername[PIXELSERV_MAX_SERVER_NAME];
+  char servername[PIXELSERV_MAX_SERVER_NAME+1];
+  servername[PIXELSERV_MAX_SERVER_NAME] = '\0';
   if ((tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name)) == NULL)
-    goto free_all;
-  strcpy(servername, tlsext_cb_arg->servername);
+    //goto free_all;
+    strncpy(servername, tlsext_cb_arg->server_ip, PIXELSERV_MAX_SERVER_NAME);
+  else
+    strncpy(servername, tlsext_cb_arg->servername, PIXELSERV_MAX_SERVER_NAME);
 #ifdef DEBUG
   printf("https request for hostname: %s\n", servername);
 #endif
   int dot_count=0;
   char *pem_file = strchr(servername, '.');
+  char *tld = NULL;
 
   while(pem_file != NULL){
     dot_count++;
-    pem_file = strchr(pem_file+1, '.');
+    tld = pem_file + 1;
+    pem_file = strchr(tld, '.');
   }
-  if (dot_count > 1){
+  if (dot_count > 1 && !(dot_count == 3 && atoi(tld) >= 0)){
     pem_file = strchr(servername, '.');
     *(--pem_file) = '_';
   } else
@@ -453,8 +468,15 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
   }
 
   sslctx = SSL_CTX_new(TLSv1_2_server_method());
+  SSL_CTX_set_options(sslctx,
+      SSL_OP_SINGLE_DH_USE |
+      SSL_MODE_RELEASE_BUFFERS |
+      SSL_OP_NO_COMPRESSION |
+      SSL_OP_CIPHER_SERVER_PREFERENCE);
   SSL_CTX_set_ecdh_auto(sslctx, 1);
-  SSL_CTX_set_options(sslctx, SSL_OP_SINGLE_DH_USE);
+  if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
+    log_msg(LGG_DEBUG, "cipher_list cannot be set");
+
   if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0 ||
     SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0) {
     log_msg(LGG_ERR, "Cannot use %s\n",full_pem_path);
@@ -476,11 +498,11 @@ static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
   SSL_set_SSL_CTX(cSSL, sslctx);
   tlsext_cb_arg->status = SSL_HIT;
   tlsext_cb_arg->sslctx = (void*)sslctx;
+
+free_all:
 #ifdef DEBUG
   printf("%s: sslctx %p\n", __FUNCTION__, (void*) sslctx);
 #endif
-free_all:
-
   return rv;
 }
 
@@ -603,14 +625,17 @@ void* conn_handler( void *ptr )
   SET_LINE_NUMBER(__LINE__);
   
   // determine https port or not
+  char server_ip[INET6_ADDRSTRLEN] = {'\0'};
   {
     struct sockaddr_storage sin_addr;
     socklen_t sin_addr_len = sizeof(sin_addr);
     char port[NI_MAXSERV] = {'\0'};
 
     getsockname(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
-    if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, NULL, 0, port, \
-                sizeof port, NI_NUMERICSERV) != 0)
+    if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len,
+                   server_ip, sizeof server_ip,
+                   port, sizeof port,
+                   NI_NUMERICHOST | NI_NUMERICSERV) != 0)
       perror("getnameinfo");
 
     int i;
@@ -631,12 +656,17 @@ void* conn_handler( void *ptr )
 
   SSL_CTX *sslctx = NULL;
   SSL *cSSL = NULL;
-  tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL, SSL_UNKNOWN, NULL };
+  tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL, server_ip, SSL_UNKNOWN, NULL };
 
   if(ssl){
     int ssl_err;
     sslctx = SSL_CTX_new(TLSv1_2_server_method());
-    SSL_CTX_set_options(sslctx, /*SSL_OP_SINGLE_DH_USE*/ SSL_MODE_RELEASE_BUFFERS | SSL_OP_NO_COMPRESSION);
+    SSL_CTX_set_options(sslctx,
+        SSL_MODE_RELEASE_BUFFERS |
+        SSL_OP_NO_COMPRESSION |
+        SSL_OP_CIPHER_SERVER_PREFERENCE);
+    if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
+      log_msg(LGG_DEBUG, "cipher_list cannot be set");
     SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
     SSL_CTX_set_tlsext_servername_arg(sslctx, &tlsext_cb_arg);
 
@@ -649,27 +679,41 @@ void* conn_handler( void *ptr )
   }
   TIME_CHECK("SSL setup");
 
-  errno = 0;
-  rv = read_socket(new_fd, &buf, cSSL);
-  if (rv == 0 && ssl) // client disconnects without sending any data
-    pipedata.ssl = SSL_HIT_CLS;
-
 event_loop:
+  pipedata.run_time = elapsed_time_msec(start_time);
 
   // enter event loop
   while(1) {
     response = httpnulltext;
     rsize = sizeof httpnulltext - 1;
+    int wait_cnt = GLOBAL(g, http_keepalive) / GLOBAL(g, select_timeout);
+    if (wait_cnt < 1) wait_cnt = 1;
+
+    while (wait_cnt >=1) {
+      errno = 0;
+      rv = read_socket(new_fd, &buf, cSSL);
+      if (rv > 0)
+        break;
+      if (rv == 0 && ssl) // client disconnects without sending any data
+        pipedata.ssl = SSL_HIT_CLS;
+      if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) { 
+        log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n",
+             new_fd, rv, errno, wait_cnt, num_req);
+        goto done_with_this_thread;
+      }
+      --wait_cnt;
+    }
+    get_time(&start_time);
 
     if (rv <= 0) {
       if (errno == ECONNRESET || rv == 0) {
-        log_msg(LGG_DEBUG, "recv() reported connection error: %m");
+        log_msg(LGG_DEBUG, "recv() ECONNRESET: %m");
         pipedata.status = FAIL_CLOSED;
       } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        log_msg(LGG_DEBUG, "recv() reported timeout error: %m");
+        log_msg(LGG_DEBUG, "recv() EAGAIN: %m");
         pipedata.status = FAIL_TIMEOUT;
       } else {
-        log_msg(LGG_DEBUG, "recv() reported error: %m");
+        log_msg(LGG_DEBUG, "recv() error: %m");
         pipedata.status = FAIL_GENERAL;
       }
     } else {                    // got some data
@@ -699,7 +743,7 @@ event_loop:
           if (tmpHost) {
             tmpHost += strlen("Host: ");
             tmpHost = strtok(tmpHost, "\r\n");
-            log_msg(LGG_DEBUG, "host log:%s socket:%d\n", tmpHost, new_fd);
+            TESTPRINT("host log:%s socket:%d\n", tmpHost, new_fd);
             if (strlen(tmpHost) < HOST_LEN_MAX)
                strcpy(host, tmpHost);
             else
@@ -1020,7 +1064,7 @@ event_loop:
     TIME_CHECK("response send()");
 
     // store time delta in milliseconds
-    pipedata.run_time = elapsed_time_msec(start_time);
+    pipedata.run_time += elapsed_time_msec(start_time);
 
     SET_LINE_NUMBER(__LINE__);
 
@@ -1028,6 +1072,7 @@ event_loop:
     // note that the parent must not perform a blocking pipe read without checking
     // for available data, or else it may deadlock when we don't write anything
     rv = write(pipefd, &pipedata, sizeof(pipedata));
+    pipedata.run_time = 0.0;
     if (rv < 0) {
       log_msg(LGG_ERR, "write() to pipe reported error: %m");
     } else if (rv == 0) {
@@ -1038,22 +1083,6 @@ event_loop:
 
     TIME_CHECK("pipe write()");
     SET_LINE_NUMBER(__LINE__);
-
-    int wait_cnt = GLOBAL(g, http_keepalive) / GLOBAL(g, select_timeout);
-    if (wait_cnt < 1) wait_cnt = 1;
-
-    while (wait_cnt >=1) {
-      errno = 0;
-      rv = read_socket(new_fd, &buf, cSSL);
-
-      if (rv > 0) break;
-      if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) { 
-        log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n", new_fd, rv, errno, wait_cnt, num_req);
-        goto done_with_this_thread;
-      }
-      --wait_cnt;
-    }
-    get_time(&start_time);
   } // event loop
 
 done_with_this_thread:

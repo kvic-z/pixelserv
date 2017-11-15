@@ -58,7 +58,7 @@ void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *bo
         syslog(LOG_CRIT + verb, "%s%s", req + MAX_LOG_CHUNK_SIZE * chunk, tls ? " secure" : "");
     }
 
-    if (body) {
+    if (body_len > 0 && body) {
       if (ctrl_char(body, body_len))
           syslog(LOG_CRIT + verb, "[%s]", "-binary POST content not dumped-");
       else if (strlen(body) < MAX_LOG_CHUNK_SIZE)

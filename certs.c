@@ -77,6 +77,8 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     X509_EXTENSION *ext = NULL;
     X509V3_CTX ext_ctx;
     char *san_str = NULL;
+    char *tld = NULL, *tld_tmp = NULL;
+    int dot_count = 0;
 
     if(pem_fn[0] == '_') pem_fn[0] = '*';
 
@@ -102,11 +104,18 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     X509_NAME *name = X509_get_subject_name(x509);
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char *)pem_fn, -1, -1, 0);
     X509V3_set_ctx_nodb(&ext_ctx);
-    asprintf(&san_str, "DNS:%s", pem_fn);
+
+    tld_tmp = strchr(pem_fn, '.');
+    while(tld_tmp != NULL){
+        dot_count++;
+        tld = tld_tmp + 1;
+        tld_tmp = strchr(tld, '.');
+    }
+    tld_tmp = (dot_count == 3 && (atoi(tld) > 0 || atoi(tld) == 0 && strlen(tld) == 1)) ? "IP" : "DNS";
+    asprintf(&san_str, "%s:%s", tld_tmp, pem_fn);
     if ((ext = X509V3_EXT_conf_nid(NULL, &ext_ctx, NID_subject_alt_name, san_str)) == NULL)
         goto free_all;
     X509_add_ext(x509, ext, -1);
-
     X509_set_pubkey(x509, key);
     X509_sign_ctx(x509, p_ctx);
 #ifdef DEBUG

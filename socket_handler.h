@@ -60,6 +60,7 @@ typedef struct {
 typedef struct {
     const char *tls_pem;
     const char *servername;
+    const char *server_ip;
     ssl_enum status;
     void *sslctx;
 } tlsext_cb_arg_struct;

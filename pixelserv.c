@@ -689,7 +689,7 @@ int main (int argc, char* argv[]) // program start
       if (errno == EAGAIN
        || errno == EWOULDBLOCK) {
         // client closed connection before we got a chance to accept it
-        log_msg(LGG_DEBUG, "accept: %m");
+        log_msg(LGG_DEBUG, "accept EAGAIN: %m");
         count++;
         cls++;
       } else {
