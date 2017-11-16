@@ -57,15 +57,6 @@
 # define TESTPRINT(x,y...)
 #endif
 
-#ifdef DEBUG
-static unsigned long LINE_NUMBER = __LINE__;
-# define SET_LINE_NUMBER(x) {\
-  LINE_NUMBER = x;\
-}
-#else
-# define SET_LINE_NUMBER(x)
-#endif //DEBUG
-
 // cross-thread count variables
 extern volatile sig_atomic_t count; // req
 extern volatile sig_atomic_t avg; // cumulative moving average request size
@@ -151,6 +142,8 @@ float ema(float curr, int new, int *cnt);
 
 double elapsed_time_msec(const struct timespec start_time);
 
+#if defined(__GLIBC__) && defined(BACKTRACE)
 void print_trace();
+#endif
 
 #endif // UTIL_H

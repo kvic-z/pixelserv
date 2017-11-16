@@ -47,7 +47,7 @@ void signal_handler(int sig)
   }
 #ifdef DEBUG
   if (sig == SIGUSR2) {
-    log_msg(LGG_INFO, "Main process caught signal %d near line number %lu of file %s", sig, LINE_NUMBER, __FILE__);
+    log_msg(LGG_INFO, "Main process caught signal %d file %s", sig, __FILE__);
   } else {
 #endif
     if (sig == SIGTERM) {
@@ -129,8 +129,6 @@ int main (int argc, char* argv[]) // program start
   int warning_time = 0;
 #endif //DEBUG
   int max_num_threads = DEFAULT_THREAD_MAX;
-
-  SET_LINE_NUMBER(__LINE__);
 
   // command line arguments processing
   for (i = 1; i < argc && error == 0; ++i) {
@@ -226,8 +224,6 @@ int main (int argc, char* argv[]) // program start
     } // -
   } // for
 
-  SET_LINE_NUMBER(__LINE__);
-
   if (error) {
     printf("%s: %s compiled: " __DATE__ " " __TIME__ "\n"
            "Usage: pixelserv-tls [OPTION]" "\n"
@@ -270,15 +266,12 @@ int main (int argc, char* argv[]) // program start
     exit(EXIT_FAILURE);
   }
 
-  SET_LINE_NUMBER(__LINE__);
-
 #ifndef TEST
   if (!do_foreground && daemon(0, 0)) {
     log_msg(LGG_ERR, "failed to daemonize, exit: %m");
     exit(EXIT_FAILURE);
   }
 #endif
-  SET_LINE_NUMBER(__LINE__);
 
   openlog("pixelserv-tls", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
   version_string = get_version(argc, argv);
@@ -288,8 +281,6 @@ int main (int argc, char* argv[]) // program start
   } else {
     exit(EXIT_FAILURE);
   }
-
-  SET_LINE_NUMBER(__LINE__);
 
   SSL_library_init();
 #ifdef USE_PTHREAD
@@ -385,9 +376,6 @@ int main (int argc, char* argv[]) // program start
 
   // clear the set
   FD_ZERO(&readfds);
-
-  SET_LINE_NUMBER(__LINE__);
-
   for (i = 0; i < num_ports; i++) {
     port = ports[i];
 
@@ -418,8 +406,6 @@ int main (int argc, char* argv[]) // program start
       exit(EXIT_FAILURE);
     }
 
-    SET_LINE_NUMBER(__LINE__);
-
     sockfds[i] = sockfd;
     // add descriptor to the set
     FD_SET(sockfd, &readfds);
@@ -434,8 +420,6 @@ int main (int argc, char* argv[]) // program start
     log_msg(LGG_CRIT, "Listening on %s:%s", ip_addr, port);
 #endif
   }
-
-  SET_LINE_NUMBER(__LINE__);
 
   // set up signal handling
   {
@@ -460,7 +444,7 @@ int main (int argc, char* argv[]) // program start
       log_msg(LOG_ERR, "SIGUSR1 %m");
       exit(EXIT_FAILURE);
     }
-#ifdef BACKTRACE
+#if defined(__GLIBC__) && defined(BACKTRACE)
     sa.sa_handler = print_trace;
     if (sigaction(SIGSEGV, &sa, NULL)) {
       log_msg(LOG_ERR, "SIGSEGV %m");
@@ -478,8 +462,6 @@ int main (int argc, char* argv[]) // program start
 #endif
   }
 
-  SET_LINE_NUMBER(__LINE__);
-
 #ifdef DROP_ROOT // no longer fatal error if doesn't work
   if ( (pw = getpwnam(user)) == NULL ) {
     log_msg(LGG_WARNING, "Unknown user \"%s\"", user);
@@ -489,13 +471,9 @@ int main (int argc, char* argv[]) // program start
   }
 #endif
 
-  SET_LINE_NUMBER(__LINE__);
-
   // cause failed pipe I/O calls to result in error return values instead of
   //  SIGPIPE signals
   signal(SIGPIPE, SIG_IGN);
-
-  SET_LINE_NUMBER(__LINE__);
 
   // open pipe for children to use for writing data back to main
   if (pipe(pipefd) == -1) {
@@ -509,8 +487,6 @@ int main (int argc, char* argv[]) // program start
     exit(EXIT_FAILURE);
   }
 
-  SET_LINE_NUMBER(__LINE__);
-
   // also have select() monitor the read end of the stats pipe
   FD_SET(pipefd[0], &readfds);
   // note if pipe read descriptor is the largest fd number we care about
@@ -523,8 +499,6 @@ int main (int argc, char* argv[]) // program start
   ++nfds;
 
   sin_size = sizeof their_addr;
-
-  SET_LINE_NUMBER(__LINE__);
 
   struct Global _g = {
         argc,
@@ -546,9 +520,6 @@ int main (int argc, char* argv[]) // program start
 
   // main accept() loop
   while(1) {
-
-    SET_LINE_NUMBER(__LINE__);
-
     // only call select() if we have something more to process
     if (select_rv <= 0) {
       // select() modifies its fd set, so make a working copy
@@ -568,8 +539,6 @@ int main (int argc, char* argv[]) // program start
       }
     }
 
-    SET_LINE_NUMBER(__LINE__);
-
     // find first socket descriptor that is ready to read (if any)
     // note that even though multiple sockets may be ready, we only process one
     //  per loop iteration; subsequent ones will be handled on subsequent passes
@@ -582,8 +551,6 @@ int main (int argc, char* argv[]) // program start
         break;
       }
     }
-
-    SET_LINE_NUMBER(__LINE__);
 
     // if select() didn't return due to a socket connection, check for pipe I/O
     if (!sockfd && FD_ISSET(pipefd[0], &selectfds)) {

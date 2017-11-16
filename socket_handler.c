@@ -347,7 +347,7 @@ void child_signal_handler(int sig)
     signal(SIGTERM, SIG_IGN);
   }
 
-  log_msg(LGG_DEBUG, "Thread or child process caught signal %d near line number %lu of file %s", sig, LINE_NUMBER, __FILE__);
+  log_msg(LGG_DEBUG, "Thread or child process caught signal %d file %s", sig, __FILE__);
 
   if (sig == SIGTERM) {
     // exit program on SIGTERM
@@ -692,13 +692,8 @@ void* conn_handler( void *ptr )
               char *decoded = malloc(strlen(path)+1);
               urldecode(decoded, path);
 
-              SET_LINE_NUMBER(__LINE__);
-
               // double decode
               urldecode(path, decoded);
-
-              SET_LINE_NUMBER(__LINE__);
-
               free(decoded);
               url = strstr_last(path, "http://");
               if (url == NULL) {
@@ -707,9 +702,6 @@ void* conn_handler( void *ptr )
               // WORKAROUND: google analytics block - request bomb on pages with conversion callbacks (see in chrome)
               if (url) {
                 char *tok = NULL;
-
-                SET_LINE_NUMBER(__LINE__);
-
                 for (tok = strtok_r(NULL, "\r\n", &bufptr); tok; tok = strtok_r(NULL, "\r\n", &bufptr)) {
                   char *hkey = strtok(tok, ":");
                   char *hvalue = strtok(NULL, "\r\n");
@@ -719,9 +711,6 @@ void* conn_handler( void *ptr )
                     break;
                   }
                 }
-
-                SET_LINE_NUMBER(__LINE__);
-
               }
             }
             if (do_redirect && url) {

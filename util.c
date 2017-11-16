@@ -1,12 +1,7 @@
 #include "util.h"
 #include "logger.h"
+#if defined(__GLIBC__) && defined(BACKTRACE)
 #include <execinfo.h>
-
-// make gcc happy
-#ifdef DEBUG
-void dummy() {
-  SET_LINE_NUMBER(__LINE__)
-}
 #endif
 
 // stats data
@@ -172,6 +167,7 @@ double elapsed_time_msec(const struct timespec start_time) {
   return diff_time.tv_sec * 1000 + ((double)diff_time.tv_nsec / 1000000);
 }
 
+#if defined(__GLIBC__) && defined(BACKTRACE)
 void print_trace() {
 
   void *buf[32];
@@ -185,3 +181,4 @@ void print_trace() {
   free(strings);
   exit(EXIT_FAILURE);
 }
+#endif
