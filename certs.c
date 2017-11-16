@@ -5,6 +5,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
@@ -18,6 +20,7 @@
 
 #include "certs.h"
 #include "logger.h"
+#include "util.h"
 
 #ifdef USE_PTHREAD
 
@@ -111,7 +114,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
         tld = tld_tmp + 1;
         tld_tmp = strchr(tld, '.');
     }
-    tld_tmp = (dot_count == 3 && (atoi(tld) > 0 || atoi(tld) == 0 && strlen(tld) == 1)) ? "IP" : "DNS";
+    tld_tmp = (dot_count == 3 && (atoi(tld) > 0 || (atoi(tld) == 0 && strlen(tld) == 1))) ? "IP" : "DNS";
     asprintf(&san_str, "%s:%s", tld_tmp, pem_fn);
     if ((ext = X509V3_EXT_conf_nid(NULL, &ext_ctx, NID_subject_alt_name, san_str)) == NULL)
         goto free_all;
@@ -258,4 +261,164 @@ void *cert_generator(void *ptr) {
     X509_NAME_free(issuer);
     free(buf);
     return NULL;
+}
+
+static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
+
+    int rv = SSL_TLSEXT_ERR_OK;
+    tlsext_cb_arg_struct *cbarg = (tlsext_cb_arg_struct *)arg;
+    char full_pem_path[PIXELSERV_MAX_PATH + 1 + 1]; /* worst case ':\0' */
+    int len;
+
+    full_pem_path[PIXELSERV_MAX_PATH] = '\0';
+    strncpy(full_pem_path, cbarg->tls_pem, PIXELSERV_MAX_PATH);
+    len = strlen(cbarg->tls_pem);
+    strncat(full_pem_path, "/", PIXELSERV_MAX_PATH - len);
+    ++len;
+
+    char *srv_name = NULL;
+    cbarg->servername = (char*)SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+    if (cbarg->servername)
+        srv_name = (char *)cbarg->servername;
+    else if (cbarg->server_ip)
+        srv_name = cbarg->server_ip;
+    else {
+        log_msg(LGG_WARNING, "SNI failed. server name and server ip empty.");
+        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+        goto quit_cb;
+    }
+#ifdef DEBUG
+    printf("SNI servername: %s\n", srv_name);
+#endif
+
+    int dot_count = 0;
+    char *tld = NULL;
+    char *pem_file = strchr(srv_name, '.');
+    while(pem_file){
+        dot_count++;
+        tld = pem_file + 1;
+        pem_file = strchr(tld, '.');
+    }
+    if (dot_count == 1 || (dot_count == 3 && atoi(tld) > 0)) {
+        pem_file = srv_name;
+        strncat(full_pem_path, srv_name, PIXELSERV_MAX_PATH - len);
+        len += strlen(srv_name);
+    } else {
+        pem_file = full_pem_path + strlen(full_pem_path);
+        strncat(full_pem_path, "_", PIXELSERV_MAX_PATH - len);
+        len += 1;
+        strncat(full_pem_path, strchr(srv_name, '.'), PIXELSERV_MAX_PATH - len);
+        len += strlen(strchr(srv_name, '.'));
+    }
+#ifdef DEBUG
+    printf("PEM filename: %s\n",full_pem_path);
+#endif
+    if (len > PIXELSERV_MAX_PATH) {
+        log_msg(LGG_ERR, "Buffer overflow. %s", full_pem_path);
+        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+        goto quit_cb;
+    }
+    struct stat st;
+    if(stat(full_pem_path, &st) != 0){
+        int fd;
+        cbarg->status = SSL_MISS;
+        log_msg(LGG_WARNING, "%s %s missing", srv_name, pem_file);
+        if((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
+            log_msg(LGG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
+        else {
+            strcat(pem_file, ":");
+            write(fd, pem_file, strlen(pem_file));
+            close(fd);
+        }
+        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+        goto quit_cb;
+    }
+
+    SSL_CTX *sslctx = NULL;
+    sslctx = SSL_CTX_new(TLSv1_2_server_method());
+    SSL_CTX_set_ecdh_auto(sslctx, 1);
+    SSL_CTX_set_options(sslctx,
+          SSL_OP_SINGLE_DH_USE |
+          SSL_MODE_RELEASE_BUFFERS |
+          SSL_OP_NO_COMPRESSION |
+          SSL_OP_CIPHER_SERVER_PREFERENCE);
+    if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
+        log_msg(LGG_DEBUG, "Failed to set cipher list");
+    if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0
+       || SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0)
+    {
+        SSL_CTX_free(sslctx);
+        cbarg->status = SSL_ERR;
+        log_msg(LGG_ERR, "Cannot use %s\n",full_pem_path);
+        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+        goto quit_cb;
+    }
+    if (cbarg->cachain) {
+        X509_INFO *inf; int i;
+        for (i=sk_X509_INFO_num(cbarg->cachain)-1; i >= 0; i--) {
+            if ((inf = sk_X509_INFO_value(cbarg->cachain, i)) && inf->x509 &&
+                    !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509))) {
+                SSL_CTX_free(sslctx);
+                log_msg(LGG_ERR, "Cannot add CA cert %d\n", i);  /* X509_ref_up requires >= v1.1 */
+                rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+                goto quit_cb;
+            }
+        }
+    }
+    SSL_set_SSL_CTX(ssl, sslctx);
+    cbarg->status = SSL_HIT;
+    cbarg->sslctx = (void*)sslctx;
+
+quit_cb:
+
+#ifdef DEBUG
+    printf("%s: sslctx %p\n", __FUNCTION__, (void*) sslctx);
+#endif
+    return rv;
+}
+
+SSL_CTX * create_default_sslctx(const char *pem_dir) {
+
+    SSL_CTX *sslctx = NULL;
+    sslctx = SSL_CTX_new(TLSv1_2_server_method());
+    SSL_CTX_set_options(sslctx,
+          SSL_MODE_RELEASE_BUFFERS |
+          SSL_OP_NO_COMPRESSION |
+          SSL_OP_CIPHER_SERVER_PREFERENCE);
+    if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
+        log_msg(LGG_DEBUG, "cipher_list cannot be set");
+    SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
+
+    return sslctx;
+}
+
+int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int num_ssl_ports) {
+
+    char server_ip[INET6_ADDRSTRLEN] = {'\0'};
+    struct sockaddr_storage sin_addr;
+    socklen_t sin_addr_len = sizeof(sin_addr);
+    char port[NI_MAXSERV] = {'\0'};
+    int rv = 0, i;
+    errno = 0;
+    getsockname(fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
+    if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len,
+                   server_ip, sizeof server_ip,
+                   port, sizeof port,
+                   NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+        log_msg(LGG_ERR, "getnameinfo: %s", strerror(errno));
+    if (srv_ip)
+        strncpy(srv_ip, server_ip, srv_ip_len);
+    for(i=0; i<num_ssl_ports; i++)
+        if(atoi(port) == ssl_ports[i])
+            rv = 1;
+#ifdef DEBUG
+    char client_ip[INET6_ADDRSTRLEN]= {'\0'};
+    getpeername(fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
+    if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
+            sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
+        perror("getnameinfo");
+    printf("new connection from %s on %s\n", client_ip, port);
+#endif
+
+    return rv;
 }

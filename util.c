@@ -1,5 +1,6 @@
 #include "util.h"
 #include "logger.h"
+#include <execinfo.h>
 
 // make gcc happy
 #ifdef DEBUG
@@ -146,4 +147,41 @@ float ema(float curr, int new, int *cnt) {
     } else
       curr += 0.002 * (new - curr);
     return curr;
+}
+
+double elapsed_time_msec(const struct timespec start_time) {
+  struct timespec current_time = {0, 0};
+  struct timespec diff_time = {0, 0};
+
+  if (!start_time.tv_sec &&
+      !start_time.tv_nsec) {
+    log_msg(LGG_DEBUG, "check_time(): returning because start_time not set");
+    return -1.0;
+  }
+
+  get_time(&current_time);
+
+  diff_time.tv_sec = difftime(current_time.tv_sec, start_time.tv_sec) + 0.5;
+  diff_time.tv_nsec = current_time.tv_nsec - start_time.tv_nsec;
+  if (diff_time.tv_nsec < 0) {
+    // normalize nanoseconds
+    diff_time.tv_sec  -= 1;
+    diff_time.tv_nsec += 1000000000;
+  }
+
+  return diff_time.tv_sec * 1000 + ((double)diff_time.tv_nsec / 1000000);
+}
+
+void print_trace() {
+
+  void *buf[32];
+  char **strings;
+  int size, i;
+  size = backtrace(buf, 32);
+  strings = backtrace_symbols(buf, size);
+  log_msg(LGG_CRIT, "backtrace:");
+  for (i = 0; i < size; i++)
+    log_msg(LGG_CRIT, "%d %s", buf[i], strings[i]);
+  free(strings);
+  exit(EXIT_FAILURE);
 }

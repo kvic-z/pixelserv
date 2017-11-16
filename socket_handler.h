@@ -1,10 +1,10 @@
 #ifndef SOCKET_HANDLER_H
 #define SOCKET_HANDLER_H
 
-#define DEFAULT_REPLY SEND_TXT
-
+#include "certs.h"
 #include "logger.h"
 
+#define DEFAULT_REPLY SEND_TXT
 #define CHAR_BUF_SIZE       4095     /* initial/incremental size of msg buffer */
 #define MAX_CHAR_BUF_LOTS   32       /* max msg buffer size in unit of CHAR_BUF_SIZE */
 #define MAX_HTTP_POST_LEN   262143   /* max POST Content-Length before discarding */
@@ -37,15 +37,6 @@ typedef enum {
   ACTION_DEC_KCC
 } response_enum;
 
-typedef enum {
-  SSL_NOT_TLS,
-  SSL_ERR,
-  SSL_MISS,
-  SSL_HIT,
-  SSL_HIT_CLS,
-  SSL_UNKNOWN
-} ssl_enum;
-
 typedef struct {
     response_enum status;
     union {
@@ -56,20 +47,6 @@ typedef struct {
     double run_time;
     ssl_enum ssl;
 } response_struct;
-
-typedef struct {
-    const char *tls_pem;
-    const char *servername;
-    const char *server_ip;
-    ssl_enum status;
-    void *sslctx;
-} tlsext_cb_arg_struct;
-
-typedef struct {
-    int new_fd;
-} conn_tlstor_struct;
-
-#define CONN_TLSTOR(p, e) ((conn_tlstor_struct*)p)->e
 
 void* conn_handler(void *ptr);
 

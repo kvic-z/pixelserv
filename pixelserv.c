@@ -301,11 +301,11 @@ int main (int argc, char* argv[]) // program start
   {
     struct rlimit l = {THREAD_STACK_SIZE, THREAD_STACK_SIZE * 2};
     if (setrlimit(RLIMIT_STACK, &l) == -1)
-      log_msg(LGG_ERR, "setrlimit STACK failed: %d", l.rlim_cur, l.rlim_max);
+      log_msg(LGG_ERR, "setrlimit STACK failed: %d %d errno:%d", l.rlim_cur, l.rlim_max, errno);
     l.rlim_cur = max_num_threads + 50;
     l.rlim_max = max_num_threads * 2;
     if (setrlimit(RLIMIT_NOFILE, &l) == -1)
-      log_msg(LGG_ERR, "setrlimit NOFILE failed: %d", l.rlim_cur, l.rlim_max);
+      log_msg(LGG_ERR, "setrlimit NOFILE failed: %d %d errno:%d", l.rlim_cur, l.rlim_max, errno);
 
     char *fname = malloc(PIXELSERV_MAX_PATH);
     strcpy(fname, tls_pem);
@@ -443,26 +443,31 @@ int main (int argc, char* argv[]) // program start
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
-
     // set signal handler for termination
     if (sigaction(SIGTERM, &sa, NULL)) {
       log_msg(LOG_ERR, "SIGTERM %m");
       exit(EXIT_FAILURE);
     }
-
     // attempt to set SIGCHLD to ignore
     // in K26 this should cause children to be automatically reaped on exit
     // in K24 it will accomplish nothing, so we still need to use waitpid()
     if (signal(SIGCHLD, SIG_IGN) == SIG_ERR) {
       log_msg(LGG_WARNING, "SIGCHLD %m");
     }
-
     // set signal handler for info
     sa.sa_flags = SA_RESTART; // prevent EINTR from interrupted library calls
     if (sigaction(SIGUSR1, &sa, NULL)) {
       log_msg(LOG_ERR, "SIGUSR1 %m");
       exit(EXIT_FAILURE);
     }
+#ifdef BACKTRACE
+    sa.sa_handler = print_trace;
+    if (sigaction(SIGSEGV, &sa, NULL)) {
+      log_msg(LOG_ERR, "SIGSEGV %m");
+      exit(EXIT_FAILURE);
+    }
+#endif
+
 #ifdef DEBUG
     // set signal handler for debug
     sa.sa_flags = SA_RESTART; // prevent EINTR from interrupted library calls
@@ -536,6 +541,8 @@ int main (int argc, char* argv[]) // program start
 #endif
   };
   g = &_g;
+
+  SSL_CTX *sslctx = create_default_sslctx(tls_pem);
 
   // main accept() loop
   while(1) {
@@ -618,21 +625,13 @@ int main (int argc, char* argv[]) // program start
           default:
             log_msg(LOG_DEBUG, "conn_handler reported unknown response value: %d", pipedata.status);
         }
-        
         switch (pipedata.ssl) {
           case SSL_HIT:        ++slh; break;
-          case SSL_MISS:       ++slm; break;
-          case SSL_ERR:        ++sle; break;
           case SSL_HIT_CLS:    ++slc; break;
-          case SSL_NOT_TLS:    break;
-          default:
-            ++slu;
-            log_msg(LGG_DEBUG, "conn_handler reported unknown ssl state: %d", pipedata.ssl);
+          default:             ;
         }
-        count++;
-        SET_LINE_NUMBER(__LINE__);
-
         if (pipedata.status < ACTION_LOG_VERB) {
+          count++;
           // count only positive receive sizes
           if (pipedata.rx_total <= 0) {
             log_msg(LOG_DEBUG, "pipe read() got nonsensical rx_total data value %d - ignoring", pipedata.rx_total);
@@ -658,6 +657,7 @@ int main (int argc, char* argv[]) // program start
               tmx = (pipedata.run_time + 0.5);
           }
         } else if (pipedata.status == ACTION_DEC_KCC) {
+          count--; /* deduct the very first request double counted */
           static int kvg_cnt = 0;
           kvg = ema(kvg, pipedata.krq, &kvg_cnt);
           if (pipedata.krq > krq)
@@ -667,8 +667,6 @@ int main (int argc, char* argv[]) // program start
       --select_rv;
       continue;
     }
-
-    SET_LINE_NUMBER(__LINE__);
 
     // if select() returned but no fd's of interest were found, give up
     // note that this is bad because it means that select() will probably never
@@ -684,30 +682,66 @@ int main (int argc, char* argv[]) // program start
       continue;
     }
 
+    count++;
+    struct timespec init_time = {0, 0};
+    get_time(&init_time);
     new_fd = accept(sockfd, (struct sockaddr *) &their_addr, &sin_size);
     if (new_fd < 0) {
-      if (errno == EAGAIN
-       || errno == EWOULDBLOCK) {
-        // client closed connection before we got a chance to accept it
-        log_msg(LGG_DEBUG, "accept EAGAIN: %m");
-        count++;
-        cls++;
-      } else {
-        log_msg(LGG_WARNING, "accept: %m");
-      }
-      continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            count++;
+            cls++;   /* client closed connection before we got a chance to accept it */
+        }
+        log_msg(LGG_DEBUG, "accept: %m");
+        continue;
     }
-
     if (kcc >= max_num_threads) {
         count++;
         clt++;
+        shutdown(new_fd, SHUT_RDWR);
         close(new_fd);
         continue;
     }
-    SET_LINE_NUMBER(__LINE__);
 
     conn_tlstor_struct *conn_tlstor = malloc(sizeof(conn_tlstor_struct));
     conn_tlstor->new_fd = new_fd;
+    conn_tlstor->ssl = NULL;
+    conn_tlstor->tlsext_cb_arg = NULL;
+    char server_ip[INET6_ADDRSTRLEN] = {'\0'};
+    if (is_ssl_conn(new_fd, server_ip, INET6_ADDRSTRLEN, tls_ports, num_tls_ports)) {
+        SSL *ssl = NULL;
+        tlsext_cb_arg_struct *t = malloc(sizeof(tlsext_cb_arg_struct));
+        t->tls_pem = tls_pem;
+        t->cachain = cachain;
+        t->servername = NULL;
+        strncpy(t->server_ip, server_ip, INET6_ADDRSTRLEN);
+        t->status = SSL_UNKNOWN;
+        t->sslctx = NULL;
+
+        SSL_CTX_set_tlsext_servername_arg(sslctx, t);
+        ssl = SSL_new(sslctx);
+        SSL_set_fd(ssl, new_fd);
+        int ssl_err = SSL_accept(ssl);
+        switch(t->status) {
+            case SSL_HIT:        ++slh; break;
+            case SSL_MISS:       ++slm; break;
+            case SSL_ERR:        ++sle; break;
+            case SSL_UNKNOWN:    ++slu; break;
+            default:             ;
+        }
+        if (ssl_err != 1) {
+            log_msg(LGG_DEBUG, "SSL_accept error:%d status:%d\n", ssl_err, t->status);
+            SSL_free(ssl);
+            SSL_CTX_free((SSL_CTX*)t->sslctx);
+            shutdown(new_fd, SHUT_RDWR);
+            close(new_fd);
+            free(t);
+            continue;
+        }
+        TESTPRINT("ssl new_fd:%d\n", new_fd);
+        conn_tlstor->ssl = ssl;
+        conn_tlstor->tlsext_cb_arg = t;
+    }
+    conn_tlstor->init_time = elapsed_time_msec(init_time);
 
 #ifdef USE_PTHREAD
     pthread_t conn_thread;
@@ -740,8 +774,6 @@ int main (int argc, char* argv[]) // program start
       exit(0);
     } // end of forked child process
 
-    SET_LINE_NUMBER(__LINE__);
-
     // this is guaranteed to be the parent process, as the child calls exit()
     //  above when it's done instead of proceeding to this point
     close(new_fd);  // parent doesn't need this
@@ -751,8 +783,6 @@ int main (int argc, char* argv[]) // program start
     if (++kcc > kmx)
       kmx = kcc;
 
-    SET_LINE_NUMBER(__LINE__);
-
     // reap any zombie child processes that have exited
     // irony note: I wrote this while watching The Walking Dead :p
     for (errno = 0; waitpid(-1, 0, WNOHANG) > 0 || (errno && errno != ECHILD); errno = 0) {
@@ -760,8 +790,6 @@ int main (int argc, char* argv[]) // program start
         log_msg(LGG_ERR, "waitpid() reported error: %m");
       }
     }
-
-    SET_LINE_NUMBER(__LINE__);
   } // end of perpetual accept() loop
 
 #ifdef USE_PTHREAD
@@ -769,6 +797,7 @@ int main (int argc, char* argv[]) // program start
   pthread_join(certgen_thread, NULL);
 #endif
   sk_X509_pop_free(cachain, X509_free);
+  SSL_CTX_free(sslctx);
   ssl_free_locks();
   return (EXIT_SUCCESS);
 }

@@ -149,4 +149,8 @@ char* get_stats(const int sta_offset, const int stt_offset);
 
 float ema(float curr, int new, int *cnt);
 
+double elapsed_time_msec(const struct timespec start_time);
+
+void print_trace();
+
 #endif // UTIL_H

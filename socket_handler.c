@@ -231,16 +231,6 @@
   "\r\n"
   "GET,OPTIONS";
 
-/* ECDHE-RSA-AES128-GCM-SHA256 :
-   Android >= 4.4.2; Chrome >= 51; Firefox >= 49;
-   IE 11 Win 10; Edge >= 13; Safari >= 9; Apple ATS 9 iOS 9
-   ECDHE-RSA-AES128-SHA :
-   IE 11 Win 7,8.1; IE 11 Winphone 8.1; Opera >= 17; Safar 7 iOS 7.1 */
-#define PIXELSERV_CIPHER_LIST \
-  "ECDHE-ECDSA-AES128-GCM-SHA256:" \
-  "ECDHE-RSA-AES128-GCM-SHA256:" \
-  "ECDHE-RSA-AES128-SHA:"
-
 // private functions for socket_handler() use
 #ifdef HEX_DUMP
 // from http://sws.dett.de/mini/hexdump-c/
@@ -343,29 +333,6 @@ void urldecode(char* const decoded, char* const encoded) {
   *pbuf = '\0';
 }
 
-double elapsed_time_msec(const struct timespec start_time) {
-  struct timespec current_time = {0, 0};
-  struct timespec diff_time = {0, 0};
-
-  if (!start_time.tv_sec &&
-      !start_time.tv_nsec) {
-    log_msg(LGG_DEBUG, "check_time(): returning because start_time not set");
-    return -1.0;
-  }
-
-  get_time(&current_time);
-
-  diff_time.tv_sec = difftime(current_time.tv_sec, start_time.tv_sec) + 0.5;
-  diff_time.tv_nsec = current_time.tv_nsec - start_time.tv_nsec;
-  if (diff_time.tv_nsec < 0) {
-    // normalize nanoseconds
-    diff_time.tv_sec  -= 1;
-    diff_time.tv_nsec += 1000000000;
-  }
-
-  return diff_time.tv_sec * 1000 + ((double)diff_time.tv_nsec / 1000000);
-}
-
 #ifdef DEBUG
 void child_signal_handler(int sig)
 {
@@ -405,126 +372,22 @@ void child_signal_handler(int sig)
 # define TIME_CHECK(x,y...)
 #endif //DEBUG
 
-extern const char *tls_pem;
-extern int tls_ports[];
-extern int num_tls_ports;
-extern STACK_OF(X509_INFO) *cachain;
 extern struct Global *g;
 
-static int tls_servername_cb(SSL *cSSL, int *ad, void *arg)
-{
-  SSL_CTX *sslctx = NULL;
-  int rv = SSL_TLSEXT_ERR_OK;
-  tlsext_cb_arg_struct *tlsext_cb_arg = (tlsext_cb_arg_struct *)arg;
-  const char* pem_dir = tlsext_cb_arg->tls_pem;
-  char full_pem_path[PIXELSERV_MAX_PATH];
-  char servername[PIXELSERV_MAX_SERVER_NAME+1];
-  servername[PIXELSERV_MAX_SERVER_NAME] = '\0';
-  if ((tlsext_cb_arg->servername = (char*)SSL_get_servername(cSSL, TLSEXT_NAMETYPE_host_name)) == NULL)
-    //goto free_all;
-    strncpy(servername, tlsext_cb_arg->server_ip, PIXELSERV_MAX_SERVER_NAME);
-  else
-    strncpy(servername, tlsext_cb_arg->servername, PIXELSERV_MAX_SERVER_NAME);
-#ifdef DEBUG
-  printf("https request for hostname: %s\n", servername);
-#endif
-  int dot_count=0;
-  char *pem_file = strchr(servername, '.');
-  char *tld = NULL;
-
-  while(pem_file != NULL){
-    dot_count++;
-    tld = pem_file + 1;
-    pem_file = strchr(tld, '.');
-  }
-  if (dot_count > 1 && !(dot_count == 3 && atoi(tld) >= 0)){
-    pem_file = strchr(servername, '.');
-    *(--pem_file) = '_';
-  } else
-    pem_file = servername;
-#ifdef DEBUG
-  printf("pem file name: %s\n", pem_file);
-#endif
-  strcpy(full_pem_path, pem_dir);
-  strcat(full_pem_path, "/");
-  strcat(full_pem_path, pem_file);
-#ifdef DEBUG
-  printf("full_pem_path: %s\n",full_pem_path);
-#endif
-  struct stat st;
-  if(stat(full_pem_path, &st) != 0){
-    log_msg(LGG_WARNING, "%s %s missing", tlsext_cb_arg->servername, pem_file);
-    tlsext_cb_arg->status = SSL_MISS;
-    int fd = open(PIXEL_CERT_PIPE, O_WRONLY);
-    if(fd == -1)
-      log_msg(LGG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
-    else {
-      strcat(pem_file,":");
-      write(fd, pem_file, strlen(pem_file));
-      close(fd);
-    }
-    rv = SSL_TLSEXT_ERR_ALERT_FATAL;
-    goto free_all;
-  }
-
-  sslctx = SSL_CTX_new(TLSv1_2_server_method());
-  SSL_CTX_set_options(sslctx,
-      SSL_OP_SINGLE_DH_USE |
-      SSL_MODE_RELEASE_BUFFERS |
-      SSL_OP_NO_COMPRESSION |
-      SSL_OP_CIPHER_SERVER_PREFERENCE);
-  SSL_CTX_set_ecdh_auto(sslctx, 1);
-  if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
-    log_msg(LGG_DEBUG, "cipher_list cannot be set");
-
-  if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0 ||
-    SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0) {
-    log_msg(LGG_ERR, "Cannot use %s\n",full_pem_path);
-    tlsext_cb_arg->status = SSL_ERR;
-    rv = SSL_TLSEXT_ERR_ALERT_FATAL;
-    goto free_all;
-  }
-
-  if (cachain) {
-    X509_INFO *inf; int i;
-    for (i=sk_X509_INFO_num(cachain)-1; i >= 0; i--)
-    {
-      if ((inf = sk_X509_INFO_value(cachain, i)) && inf->x509 &&
-             !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509))) //X509_ref_up requires >= v1.1
-        log_msg(LGG_ERR, "Cannot add CA cert %d\n", i);
-    }
-  }
-
-  SSL_set_SSL_CTX(cSSL, sslctx);
-  tlsext_cb_arg->status = SSL_HIT;
-  tlsext_cb_arg->sslctx = (void*)sslctx;
-
-free_all:
-#ifdef DEBUG
-  printf("%s: sslctx %p\n", __FUNCTION__, (void*) sslctx);
-#endif
-  return rv;
-}
-
-static int read_socket(int fd, char **msg, SSL *cSSL) {
-  if (*msg == NULL)
-    *msg = malloc(CHAR_BUF_SIZE + 1);
-  else
-    *msg = realloc(*msg, CHAR_BUF_SIZE + 1);
+static int read_socket(int fd, char **msg, SSL *ssl) {
+  *msg = realloc(*msg, CHAR_BUF_SIZE + 1);
   if (!(*msg)) {
     log_msg(LGG_ERR, "Out of memory. Cannot malloc receiver buffer.");
     return -1;
   }
-
   int i, rv, msg_len = 0;
   char *bufptr = *msg;
-
   for (i=1; i<=MAX_CHAR_BUF_LOTS;) { /* 128K max with CHAR_BUF_SIZE == 4K */
-    if (!cSSL)
+    if (!ssl)
       rv = recv(fd, bufptr, CHAR_BUF_SIZE, 0);
     else {
-      rv = SSL_read(cSSL, (char *)bufptr, CHAR_BUF_SIZE);
-      TESTPRINT("SSL handshake. errno: %d rv: %d\n", SSL_get_error(cSSL, rv), rv);
+      rv = SSL_read(ssl, (char *)bufptr, CHAR_BUF_SIZE);
+      TESTPRINT("SSL handshake. errno: %d rv: %d\n", SSL_get_error(ssl, rv), rv);
     }
     msg_len += rv;
     if (rv < CHAR_BUF_SIZE)
@@ -542,6 +405,16 @@ static int read_socket(int fd, char **msg, SSL *cSSL) {
   return msg_len;
 }
 
+static int write_socket(int fd, const char *msg, int msg_len, SSL *ssl) {
+  int rv;
+  if (ssl)
+    rv = SSL_write(ssl, msg, msg_len);
+  else
+    /* a blocking call, so zero should not be returned */
+    rv = send(fd, msg, msg_len, MSG_NOSIGNAL);
+  return rv;
+}
+
 void* conn_handler( void *ptr )
 {
   int argc = GLOBAL(g, argc);
@@ -555,7 +428,6 @@ void* conn_handler( void *ptr )
 #ifdef DEBUG
   const int warning_time = GLOBAL(g, warning_time);
 #endif
-
   // NOTES:
   // - from here on, all exit points should be counted or at least logged
   // - exit() should not be called from the child process
@@ -570,119 +442,46 @@ void* conn_handler( void *ptr )
   char* version_string = NULL;
   char* stat_string = NULL;
   struct timespec start_time = {0, 0};
-  int ssl = 0;
   int num_req = 0; // number of requests processed by this thread
-  char *req_url = malloc(1024); // initial size only
-  int req_len = 1023; // size of req_url less one
+  char *req_url = NULL;
+  int req_len = 0;
   #define HOST_LEN_MAX 80
-  char host[HOST_LEN_MAX];
+  char host[HOST_LEN_MAX + 1];
   char *post_buf = NULL;
   int post_buf_len = 0;
 
 #ifdef DEBUG
   double time_msec = 0.0;
   int do_warning = (warning_time > 0);
-
-  SET_LINE_NUMBER(__LINE__);
-
   // set up signal handling
   {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = child_signal_handler;
     sigemptyset(&sa.sa_mask);
-
     // set signal handler for termination
     if (sigaction(SIGTERM, &sa, NULL)) {
       log_msg(LGG_DEBUG, "sigaction(SIGTERM) reported error: %m");
     }
-
     // set signal handler for info
     sa.sa_flags = SA_RESTART; // prevent EINTR from interrupted library calls
     if (sigaction(SIGUSR2, &sa, NULL)) {
       log_msg(LGG_DEBUG, "sigaction(SIGUSR2) reported error: %m");
     }
   }
-
-  SET_LINE_NUMBER(__LINE__);
 #ifdef USE_PTHREAD
     printf("%s: tid = %d\n", __FUNCTION__, (int)pthread_self());
 #endif
 #endif
-
-  // note the time
-  get_time(&start_time);
 
   // the socket is connected, but we need to perform a check for incoming data
   // since we're using blocking checks, we first want to set a timeout
   if (setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval)) < 0) {
     log_msg(LGG_DEBUG, "setsockopt(timeout) reported error: %m");
   }
+  pipedata.run_time = CONN_TLSTOR(ptr, init_time);
 
-  // select() is used because we want to give up after a specified timeout
-  //  period, in case the client is messing with us
-
-  SET_LINE_NUMBER(__LINE__);
-  
-  // determine https port or not
-  char server_ip[INET6_ADDRSTRLEN] = {'\0'};
-  {
-    struct sockaddr_storage sin_addr;
-    socklen_t sin_addr_len = sizeof(sin_addr);
-    char port[NI_MAXSERV] = {'\0'};
-
-    getsockname(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
-    if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len,
-                   server_ip, sizeof server_ip,
-                   port, sizeof port,
-                   NI_NUMERICHOST | NI_NUMERICSERV) != 0)
-      perror("getnameinfo");
-
-    int i;
-    for(i=0; i<num_tls_ports; i++)
-      if(atoi(port) == tls_ports[i]) ssl = 1;
-#ifdef DEBUG    
-    printf("socket handler port number %s\n", port);
-
-    char client_ip[INET6_ADDRSTRLEN]= {'\0'};
-    getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
-    if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
-            sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
-      perror("getnameinfo");
-
-    printf("socket handler Connection from %s\n", client_ip);
-#endif
-  }
-
-  SSL_CTX *sslctx = NULL;
-  SSL *cSSL = NULL;
-  tlsext_cb_arg_struct tlsext_cb_arg = { tls_pem, NULL, server_ip, SSL_UNKNOWN, NULL };
-
-  if(ssl){
-    int ssl_err;
-    sslctx = SSL_CTX_new(TLSv1_2_server_method());
-    SSL_CTX_set_options(sslctx,
-        SSL_MODE_RELEASE_BUFFERS |
-        SSL_OP_NO_COMPRESSION |
-        SSL_OP_CIPHER_SERVER_PREFERENCE);
-    if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
-      log_msg(LGG_DEBUG, "cipher_list cannot be set");
-    SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
-    SSL_CTX_set_tlsext_servername_arg(sslctx, &tlsext_cb_arg);
-
-    cSSL = SSL_new(sslctx);
-    SSL_set_fd(cSSL, new_fd );
-    ssl_err = SSL_accept(cSSL);
-    pipedata.ssl = tlsext_cb_arg.status;
-    if (ssl_err <= 0)
-      goto event_loop; // will send default reply there
-  }
-  TIME_CHECK("SSL setup");
-
-event_loop:
-  pipedata.run_time = elapsed_time_msec(start_time);
-
-  // enter event loop
+  /* main event loop */
   while(1) {
     response = httpnulltext;
     rsize = sizeof httpnulltext - 1;
@@ -691,18 +490,23 @@ event_loop:
 
     while (wait_cnt >=1) {
       errno = 0;
-      rv = read_socket(new_fd, &buf, cSSL);
-      if (rv > 0)
+      rv = read_socket(new_fd, &buf, CONN_TLSTOR(ptr, ssl));
+      if (rv > 0) {
+        if (CONN_TLSTOR(ptr, ssl)) pipedata.ssl = SSL_HIT;
         break;
-      if (rv == 0 && ssl) // client disconnects without sending any data
-        pipedata.ssl = SSL_HIT_CLS;
-      if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) { 
+      }
+      if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) {
+        /* client disconnects without sending any data */
+        if (rv == 0 && CONN_TLSTOR(ptr, ssl))
+          pipedata.ssl = SSL_HIT_CLS;
         log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n",
              new_fd, rv, errno, wait_cnt, num_req);
         goto done_with_this_thread;
       }
       --wait_cnt;
     }
+
+    // note the time
     get_time(&start_time);
 
     if (rv <= 0) {
@@ -728,27 +532,23 @@ event_loop:
       char *body = strstr(buf, "\r\n\r\n");
       int body_len = (body) ? (rv + buf - body) : 0;
       char *req = strtok_r(buf, "\r\n", &bufptr);
-      if (log_get_verb() >= LGG_INFO) {
+      if(req_url)
         req_url[0] = '\0';
-        host[0] = '\0';
+      host[0] = '\0';
+      if (log_get_verb() >= LGG_INFO) {
         if (req) {
           if (strlen(req) > req_len) {
             req_len = strlen(req);
             req_url = realloc(req_url, req_len + 1);
           }
           strcpy(req_url, req);
-
-          // locate and copy Host
-          char *tmpHost = strstr(bufptr, "Host: "); // e.g. "Host: abc.com"
-          if (tmpHost) {
-            tmpHost += strlen("Host: ");
-            tmpHost = strtok(tmpHost, "\r\n");
-            TESTPRINT("host log:%s socket:%d\n", tmpHost, new_fd);
-            if (strlen(tmpHost) < HOST_LEN_MAX)
-               strcpy(host, tmpHost);
-            else
-               strcpy(host, tmpHost + (strlen(tmpHost) - HOST_LEN_MAX) + 1);
-            *(tmpHost + strlen(tmpHost)) = '\r';
+          /* locate and copy Host */
+          char *tmph = strstr(bufptr, "Host: "); // e.g. "Host: abc.com"
+          if (tmph) {
+            host[HOST_LEN_MAX] = '\0';
+            strncpy(host, tmph + 6 /* strlen("Host: ") */, HOST_LEN_MAX);
+            strtok(host, "\r\n");
+            TESTPRINT("socket:%d host:%s\n", new_fd, host);
           }
         }
       }
@@ -801,14 +601,13 @@ event_loop:
             /* caputre POST content */
             for (; length > 0 && wait_cnt > 0;) {
               errno = 0;
-              if (ssl) {
-                rv = SSL_read(cSSL, (char *)(post_buf + recv_len), post_buf_size);
-                TESTPRINT("SSL handshake. errno: %d rv: %d\n", SSL_get_error(cSSL, rv), rv);
+              if (CONN_TLSTOR(ptr, ssl)) {
+                rv = SSL_read(CONN_TLSTOR(ptr, ssl), (char *)(post_buf + recv_len), post_buf_size);
+                TESTPRINT("SSL handshake. errno: %d rv: %d\n", SSL_get_error(CONN_TLSTOR(ptr, ssl), rv), rv);
               }else
                 rv = recv(new_fd, post_buf + recv_len, post_buf_size, MSG_WAITALL);
 
               log_msg(LGG_DEBUG, "POST socket:%d recv length:%d; errno:%d", new_fd, rv, errno);
-
               if (rv > 0) {
                 pipedata.rx_total += rv;
                 length -= rv;
@@ -1011,15 +810,8 @@ event_loop:
     if (pipedata.status == FAIL_GENERAL) {
       log_msg(LGG_DEBUG, "Client request processing completed with FAIL_GENERAL status");
     } else if (pipedata.status != FAIL_TIMEOUT && pipedata.status != FAIL_CLOSED) {
-      SET_LINE_NUMBER(__LINE__);
-
       // only attempt to send response if we've chosen a valid response type
-      if (ssl)
-        rv = SSL_write(cSSL, response, rsize);
-      else
-        // this is currently a blocking call, so zero should not be returned
-        rv = send(new_fd, response, rsize, MSG_NOSIGNAL);
-
+      rv = write_socket(new_fd, response, rsize, CONN_TLSTOR(ptr, ssl));
       if (rv < 0) { // check for error message, but don't bother checking that all bytes sent
         if (errno == EPIPE || errno == ECONNRESET) {
           // client closed socket sometime after initial check
@@ -1033,11 +825,6 @@ event_loop:
       } else if (rv != rsize) {
         log_msg(LGG_ERR, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
       }
-
-      free(aspbuf);  // free memory allocated by asprintf() if any
-      aspbuf = NULL;
-      response = httpnullpixel;
-    
       if (log_get_verb() >= LGG_INFO) {
         struct sockaddr_storage sin_addr;
         socklen_t sin_addr_len = sizeof(sin_addr);
@@ -1050,12 +837,12 @@ event_loop:
                        sizeof client_ip,
                        NULL, 0, NI_NUMERICHOST) != 0)
           perror("getnameinfo");
-        log_xcs(LGG_INFO, client_ip, host, (tlsext_cb_arg.servername != NULL), req_url, post_buf, post_buf_len);
+        log_xcs(LGG_INFO, client_ip, host, (CONN_TLSTOR(ptr, ssl) != NULL), req_url, post_buf, post_buf_len);
       }
-      free(buf);
-      buf = NULL;
-      free(post_buf);
-      post_buf = NULL;
+      // free memory allocated by asprintf() if any
+      free(aspbuf);     aspbuf = NULL;
+      free(buf);        buf = NULL;
+      free(post_buf);   post_buf = NULL;
       post_buf_len = 0;
     }
 
@@ -1066,13 +853,10 @@ event_loop:
     // store time delta in milliseconds
     pipedata.run_time += elapsed_time_msec(start_time);
 
-    SET_LINE_NUMBER(__LINE__);
-
     // write pipedata to pipe
     // note that the parent must not perform a blocking pipe read without checking
     // for available data, or else it may deadlock when we don't write anything
     rv = write(pipefd, &pipedata, sizeof(pipedata));
-    pipedata.run_time = 0.0;
     if (rv < 0) {
       log_msg(LGG_ERR, "write() to pipe reported error: %m");
     } else if (rv == 0) {
@@ -1080,24 +864,24 @@ event_loop:
     } else if (rv != sizeof(pipedata)) {
       log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u", rv, (unsigned int)sizeof(pipedata));
     }
+    pipedata.run_time = 0.0;
 
     TIME_CHECK("pipe write()");
-    SET_LINE_NUMBER(__LINE__);
   } // event loop
 
 done_with_this_thread:
 
   // signal the socket connection that we're done read-write
-  if(ssl){
-    SSL_set_shutdown(cSSL, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+  if(CONN_TLSTOR(ptr, ssl)){
 #ifdef DEBUG
-    printf("%s: sslctx %p\n", __FUNCTION__, (void*) tlsext_cb_arg.sslctx);
+    printf("%s: sslctx %p\n", __FUNCTION__, (void*) CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx);
 #endif
-    SSL_free(cSSL);
-    SSL_CTX_free((SSL_CTX*)tlsext_cb_arg.sslctx);
-    SSL_CTX_free(sslctx);
+    SSL_set_shutdown(CONN_TLSTOR(ptr, ssl), SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+    SSL_free(CONN_TLSTOR(ptr, ssl));
+    SSL_CTX_free((SSL_CTX*)CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx);
+    free(CONN_TLSTOR(ptr, tlsext_cb_arg));
   }
-  
+
   if (shutdown(new_fd, SHUT_RDWR) < 0)
     log_msg(LGG_DEBUG, "shutdown() socket in thread or child process reported error: %m");
   if (close(new_fd) < 0)
@@ -1124,8 +908,10 @@ done_with_this_thread:
     log_msg(LGG_ERR, "conn_handler exiting child process with FAIL_GENERAL status");
 #endif
 
+  free(ptr);
   free(buf);
   free(req_url);
-  free(ptr);
+  free(post_buf);
+  free(aspbuf);
   return NULL;
 }
