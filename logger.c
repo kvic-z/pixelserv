@@ -13,9 +13,13 @@ static int ctrl_char(char *buf, int len) {
     if (strlen(buf) < len)
         return 1;
     int i;
-    for (i=0; i<len; i++)
-        if (buf[i] < 32)
+    for (i=0; i<(len - 1); i++) {
+        if (buf[i] >= 10 && buf[i] <= 13)
+            continue;
+        if (buf[i] < 32) {
             return 1;
+        }
+    }
     return 0;
 }
 
