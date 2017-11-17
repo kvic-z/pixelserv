@@ -449,6 +449,8 @@ void* conn_handler( void *ptr )
   char host[HOST_LEN_MAX + 1];
   char *post_buf = NULL;
   int post_buf_len = 0;
+  int wait_cnt = 0;
+  int keepalive = 1;
 
 #ifdef DEBUG
   double time_msec = 0.0;
@@ -481,30 +483,35 @@ void* conn_handler( void *ptr )
   }
   pipedata.run_time = CONN_TLSTOR(ptr, init_time);
 
-  /* main event loop */
-  while(1) {
+  /* main event loop: keepalive <= 0 to quit
+     0 = quit && send status; -1 = quit && don't send status */
+  while(keepalive > 0) {
+
+    int log_verbose = log_get_verb();
     response = httpnulltext;
     rsize = sizeof httpnulltext - 1;
     post_buf_len = 0;
-    int log_verbose = log_get_verb();
 
-    int wait_cnt = GLOBAL(g, http_keepalive) / GLOBAL(g, select_timeout);
+    wait_cnt = GLOBAL(g, http_keepalive) / GLOBAL(g, select_timeout);
     if (wait_cnt < 1) wait_cnt = 1;
 
     while (wait_cnt >=1) {
       errno = 0;
       rv = read_socket(new_fd, &buf, CONN_TLSTOR(ptr, ssl));
       if (rv > 0) {
-        if (CONN_TLSTOR(ptr, ssl)) pipedata.ssl = SSL_HIT;
+        num_req++;
+        pipedata.ssl = (CONN_TLSTOR(ptr, ssl)) ? SSL_HIT : SSL_NOT_TLS;
         break;
       }
       if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) {
-        /* client disconnects without sending any data */
-        if (rv == 0 && CONN_TLSTOR(ptr, ssl))
-          pipedata.ssl = SSL_HIT_CLS;
-        log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n",
-             new_fd, rv, errno, wait_cnt, num_req);
-        goto done_with_this_thread;
+        if (num_req == 0) {
+          num_req++; /* the very first request ended up in nothing to process */
+          keepalive = 0;
+          if (rv == 0 && CONN_TLSTOR(ptr, ssl))
+            pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
+        } else
+          keepalive = -1;
+        break;
       }
       --wait_cnt;
     }
@@ -789,9 +796,6 @@ void* conn_handler( void *ptr )
         }
       }
     }
-
-    num_req++;
-
 #ifdef DEBUG
     if (pipedata.status != FAIL_TIMEOUT)
       TIME_CHECK("response selection");
@@ -842,23 +846,26 @@ void* conn_handler( void *ptr )
     // store time delta in milliseconds
     pipedata.run_time += elapsed_time_msec(start_time);
 
-    // write pipedata to pipe
     // note that the parent must not perform a blocking pipe read without checking
     // for available data, or else it may deadlock when we don't write anything
-    rv = write(pipefd, &pipedata, sizeof(pipedata));
-    if (rv < 0) {
-      log_msg(LGG_ERR, "write() to pipe reported error: %m");
-    } else if (rv == 0) {
-      log_msg(LGG_ERR, "write() to pipe reported no data written and no error");
-    } else if (rv != sizeof(pipedata)) {
-      log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u", rv, (unsigned int)sizeof(pipedata));
+    if (keepalive >= 0) {
+      rv = write(pipefd, &pipedata, sizeof(pipedata));
+      if (rv < 0) {
+        log_msg(LGG_ERR, "write() to pipe reported error: %m");
+      } else if (rv == 0) {
+        log_msg(LGG_ERR, "write() to pipe reported no data written and no error");
+      } else if (rv != sizeof(pipedata)) {
+        log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u", rv, (unsigned int)sizeof(pipedata));
+      }
     }
     pipedata.run_time = 0.0;
 
     TIME_CHECK("pipe write()");
-  } // event loop
+  } /* end of main event loop */
 
-done_with_this_thread:
+  /* done with the thread and let's finish with some house keeping */
+  log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n",
+      new_fd, rv, errno, wait_cnt, num_req);
 
   // signal the socket connection that we're done read-write
   if(CONN_TLSTOR(ptr, ssl)){

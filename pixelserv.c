@@ -624,9 +624,6 @@ int main (int argc, char* argv[]) // program start
               tmx = (pipedata.run_time + 0.5);
           }
         } else if (pipedata.status == ACTION_DEC_KCC) {
-          count--; /* deduct the very first request double counted */
-          if (pipedata.ssl != SSL_UNKNOWN)
-            slh--;
           static int kvg_cnt = 0;
           kvg = ema(kvg, pipedata.krq, &kvg_cnt);
           if (pipedata.krq > krq)
@@ -651,7 +648,6 @@ int main (int argc, char* argv[]) // program start
       continue;
     }
 
-    count++;
     struct timespec init_time = {0, 0};
     get_time(&init_time);
     new_fd = accept(sockfd, (struct sockaddr *) &their_addr, &sin_size);
@@ -688,15 +684,15 @@ int main (int argc, char* argv[]) // program start
         ssl = SSL_new(sslctx);
         SSL_set_fd(ssl, new_fd);
         int ssl_err = SSL_accept(ssl);
-        switch(t->status) {
-            case SSL_HIT:        ++slh; break;
-            case SSL_MISS:       ++slm; break;
-            case SSL_ERR:        ++sle; break;
-            case SSL_UNKNOWN:    ++slu; break;
-            default:             ;
-        }
         if (ssl_err != 1) {
+            count++;
             log_msg(LGG_DEBUG, "SSL_accept error:%d status:%d\n", ssl_err, t->status);
+            switch(t->status) {
+                case SSL_MISS:       ++slm; break;
+                case SSL_ERR:        ++sle; break;
+                case SSL_UNKNOWN:    ++slu; break;
+                default:             ;
+            }
             SSL_free(ssl);
             SSL_CTX_free((SSL_CTX*)t->sslctx);
             shutdown(new_fd, SHUT_RDWR);
