@@ -342,6 +342,7 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
+    SSL_CTX_set_session_cache_mode(sslctx, SSL_SESS_CACHE_OFF);
     if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
         log_msg(LGG_DEBUG, "Failed to set cipher list");
     if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0
@@ -385,6 +386,7 @@ SSL_CTX * create_default_sslctx(const char *pem_dir) {
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
+    SSL_CTX_set_session_cache_mode(sslctx, SSL_SESS_CACHE_OFF);
     if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
         log_msg(LGG_DEBUG, "cipher_list cannot be set");
     SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);

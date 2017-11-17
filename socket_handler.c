@@ -485,6 +485,9 @@ void* conn_handler( void *ptr )
   while(1) {
     response = httpnulltext;
     rsize = sizeof httpnulltext - 1;
+    post_buf_len = 0;
+    int log_verbose = log_get_verb();
+
     int wait_cnt = GLOBAL(g, http_keepalive) / GLOBAL(g, select_timeout);
     if (wait_cnt < 1) wait_cnt = 1;
 
@@ -532,14 +535,13 @@ void* conn_handler( void *ptr )
       char *body = strstr(buf, "\r\n\r\n");
       int body_len = (body) ? (rv + buf - body) : 0;
       char *req = strtok_r(buf, "\r\n", &bufptr);
-      if(req_url)
-        req_url[0] = '\0';
-      host[0] = '\0';
-      if (log_get_verb() >= LGG_INFO) {
+      if (log_verbose >= LGG_INFO) {
         if (req) {
+          host[0] = '\0';
           if (strlen(req) > req_len) {
             req_len = strlen(req);
             req_url = realloc(req_url, req_len + 1);
+            req_url[0] = '\0';
           }
           strcpy(req_url, req);
           /* locate and copy Host */
@@ -578,7 +580,7 @@ void* conn_handler( void *ptr )
               post_buf_size = length;
             else
               post_buf_size = MAX_HTTP_POST_LEN;
-            post_buf = malloc(post_buf_size + 1);
+            post_buf = realloc(post_buf, post_buf_size + 1);
             if (!post_buf) {
               log_msg(LGG_ERR, "Out of memory. Cannot malloc receiver buffer.");
               goto end_post;
@@ -814,7 +816,7 @@ void* conn_handler( void *ptr )
       } else if (rv != rsize) {
         log_msg(LGG_ERR, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
       }
-      if (log_get_verb() >= LGG_INFO) {
+      if (log_verbose >= LGG_INFO) {
         struct sockaddr_storage sin_addr;
         socklen_t sin_addr_len = sizeof(sin_addr);
         char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
@@ -829,10 +831,8 @@ void* conn_handler( void *ptr )
         log_xcs(LGG_INFO, client_ip, host, (CONN_TLSTOR(ptr, ssl) != NULL), req_url, post_buf, post_buf_len);
       }
       // free memory allocated by asprintf() if any
-      free(aspbuf);     aspbuf = NULL;
-      free(buf);        buf = NULL;
-      free(post_buf);   post_buf = NULL;
-      post_buf_len = 0;
+      free(aspbuf);
+      aspbuf = NULL;
     }
 
     /*** NOTE: pipedata.status should not be altered after this point ***/

@@ -625,10 +625,12 @@ int main (int argc, char* argv[]) // program start
           }
         } else if (pipedata.status == ACTION_DEC_KCC) {
           count--; /* deduct the very first request double counted */
+          if (pipedata.ssl != SSL_UNKNOWN)
+            slh--;
           static int kvg_cnt = 0;
           kvg = ema(kvg, pipedata.krq, &kvg_cnt);
           if (pipedata.krq > krq)
-             krq = pipedata.krq;
+            krq = pipedata.krq;
         }
       }
       --select_rv;
@@ -655,14 +657,12 @@ int main (int argc, char* argv[]) // program start
     new_fd = accept(sockfd, (struct sockaddr *) &their_addr, &sin_size);
     if (new_fd < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            count++;
             cls++;   /* client closed connection before we got a chance to accept it */
         }
         log_msg(LGG_DEBUG, "accept: %m");
         continue;
     }
     if (kcc >= max_num_threads) {
-        count++;
         clt++;
         shutdown(new_fd, SHUT_RDWR);
         close(new_fd);
