@@ -231,6 +231,7 @@
   "\r\n"
   "GET,OPTIONS";
 
+
 // private functions for socket_handler() use
 #ifdef HEX_DUMP
 // from http://sws.dett.de/mini/hexdump-c/
@@ -361,6 +362,7 @@ void child_signal_handler(int sig)
 #define TIME_CHECK(x) {\
   if (do_warning) {\
     do_warning = 0;\
+    double time_msec = 0.0;\
     time_msec = elapsed_time_msec(start_time);\
     if (time_msec > warning_time) {\
       log_msg(LGG_DEBUG, "Elapsed time %f msec exceeded warning_time=%d msec following operation: %s", time_msec, warning_time, x);\
@@ -368,11 +370,30 @@ void child_signal_handler(int sig)
   }\
 }
 
+#define ELAPSED_TIME(op) {\
+    double time_msec = 0.0;\
+    time_msec = elapsed_time_msec(start_time);\
+    log_msg(LGG_DEBUG, "Elapsed time %f msec following operation: %s", time_msec, op);\
+}
 #else
-# define TIME_CHECK(x,y...)
+#define TIME_CHECK(x,y...)
+#define ELAPSED_TIME(x,y...)
 #endif //DEBUG
 
 extern struct Global *g;
+static struct timespec start_time = {0, 0};
+
+static int peek_socket(int fd, SSL *ssl) {
+  char buf[10];
+  int rv = -1;
+
+  if (!ssl)
+    rv = recv(fd, buf, 10, MSG_PEEK);
+  else
+    rv = SSL_peek(ssl, buf, 10);
+  TESTPRINT("%s rv:%d\n", __FUNCTION__, rv);
+  return rv;
+}
 
 static int read_socket(int fd, char **msg, SSL *ssl) {
   *msg = realloc(*msg, CHAR_BUF_SIZE + 1);
@@ -402,6 +423,7 @@ static int read_socket(int fd, char **msg, SSL *ssl) {
       bufptr = *msg + CHAR_BUF_SIZE * (i - 1);
     }
   }
+  TESTPRINT("read_socket. fd:%d msg_len:%d\n", fd, msg_len);
   return msg_len;
 }
 
@@ -441,7 +463,6 @@ void* conn_handler( void *ptr )
   int rsize = sizeof httpnulltext - 1;
   char* version_string = NULL;
   char* stat_string = NULL;
-  struct timespec start_time = {0, 0};
   int num_req = 0; // number of requests processed by this thread
   char *req_url = NULL;
   int req_len = 0;
@@ -449,11 +470,9 @@ void* conn_handler( void *ptr )
   char host[HOST_LEN_MAX + 1];
   char *post_buf = NULL;
   int post_buf_len = 0;
-  int wait_cnt = 0;
-  int keepalive = 1;
+  int wait_cnt;
 
 #ifdef DEBUG
-  double time_msec = 0.0;
   int do_warning = (warning_time > 0);
   // set up signal handling
   {
@@ -483,42 +502,18 @@ void* conn_handler( void *ptr )
   }
   pipedata.run_time = CONN_TLSTOR(ptr, init_time);
 
-  /* main event loop: keepalive <= 0 to quit
-     0 = quit && send status; -1 = quit && don't send status */
-  while(keepalive > 0) {
+  /* main event loop */
+  while(1) {
+
+    get_time(&start_time);
 
     int log_verbose = log_get_verb();
     response = httpnulltext;
     rsize = sizeof httpnulltext - 1;
     post_buf_len = 0;
 
-    wait_cnt = GLOBAL(g, http_keepalive) / GLOBAL(g, select_timeout);
-    if (wait_cnt < 1) wait_cnt = 1;
-
-    while (wait_cnt >=1) {
-      errno = 0;
-      rv = read_socket(new_fd, &buf, CONN_TLSTOR(ptr, ssl));
-      if (rv > 0) {
-        num_req++;
-        pipedata.ssl = (CONN_TLSTOR(ptr, ssl)) ? SSL_HIT : SSL_NOT_TLS;
-        break;
-      }
-      if (rv == 0 || (rv < 0 && (errno == ECONNRESET || errno == ETIMEDOUT)) || wait_cnt == 1) {
-        if (num_req == 0) {
-          num_req++; /* the very first request ended up in nothing to process */
-          keepalive = 0;
-          if (rv == 0 && CONN_TLSTOR(ptr, ssl))
-            pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
-        } else
-          keepalive = -1;
-        break;
-      }
-      --wait_cnt;
-    }
-
-    // note the time
-    get_time(&start_time);
-
+    errno = 0;
+    rv = read_socket(new_fd, &buf, CONN_TLSTOR(ptr, ssl));
     if (rv <= 0) {
       if (errno == ECONNRESET || rv == 0) {
         log_msg(LGG_DEBUG, "recv() ECONNRESET: %m");
@@ -530,7 +525,12 @@ void* conn_handler( void *ptr )
         log_msg(LGG_DEBUG, "recv() error: %m");
         pipedata.status = FAIL_GENERAL;
       }
+      if (CONN_TLSTOR(ptr, ssl))
+        pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
     } else {                    // got some data
+      num_req++;
+      pipedata.ssl = (CONN_TLSTOR(ptr, ssl)) ? SSL_HIT : SSL_NOT_TLS;
+
       TIME_CHECK("initial recv()");
       buf[rv] = '\0';
       TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
@@ -848,21 +848,51 @@ void* conn_handler( void *ptr )
 
     // note that the parent must not perform a blocking pipe read without checking
     // for available data, or else it may deadlock when we don't write anything
-    if (keepalive >= 0) {
-      rv = write(pipefd, &pipedata, sizeof(pipedata));
-      if (rv < 0) {
-        log_msg(LGG_ERR, "write() to pipe reported error: %m");
-      } else if (rv == 0) {
-        log_msg(LGG_ERR, "write() to pipe reported no data written and no error");
-      } else if (rv != sizeof(pipedata)) {
-        log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u", rv, (unsigned int)sizeof(pipedata));
-      }
+    rv = write(pipefd, &pipedata, sizeof(pipedata));
+    if (rv < 0) {
+      log_msg(LGG_ERR, "write() to pipe reported error: %m");
+    } else if (rv == 0) {
+      log_msg(LGG_ERR, "write() to pipe reported no data written and no error");
+    } else if (rv != sizeof(pipedata)) {
+      log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u",
+          rv, (unsigned int)sizeof(pipedata));
     }
+    TESTPRINT("run_time %.2f\n", pipedata.run_time);
     pipedata.run_time = 0.0;
 
     TIME_CHECK("pipe write()");
+
+    /* wait for next request */
+    wait_cnt = GLOBAL(g, http_keepalive) / GLOBAL(g, select_timeout);
+    if (wait_cnt < 1) wait_cnt = 1;
+    fd_set rfds;
+    FD_ZERO(&rfds);
+
+    while (wait_cnt > 0) {
+      /* note that some implementations of select() clears timeout */
+      struct timeval timeout = {GLOBAL(g, select_timeout), 0};
+      FD_SET(new_fd, &rfds);
+      errno = 0;
+      int selrv = TEMP_FAILURE_RETRY(select(new_fd + 1, &rfds, NULL, NULL, &timeout));
+      TESTPRINT("socket:%d selrv:%d errno:%d\n", new_fd, selrv, errno);
+      if (selrv > 0) {
+        errno = 0;
+        rv = peek_socket(new_fd, CONN_TLSTOR(ptr, ssl));
+        if (rv == 0 || errno == ECONNRESET)
+          goto done_with_this_thread;
+        else
+          break;
+      } else { /* error: -1, no data within timeout: < -1 */
+        if (rv == 0 || errno == ECONNRESET || errno == ETIMEDOUT || wait_cnt == 1) {
+          /* done with the thread and let's finish with some house keeping */
+          goto done_with_this_thread;
+        }
+      }
+      --wait_cnt;
+    }
   } /* end of main event loop */
 
+done_with_this_thread:
   /* done with the thread and let's finish with some house keeping */
   log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n",
       new_fd, rv, errno, wait_cnt, num_req);
