@@ -142,6 +142,12 @@ int main (int argc, char* argv[]) // program start
         case 'r': /* deprecated - ignoring */                 continue;
         case 'R': do_redirect = 0;                            continue;
         // no default here because we want to move on to the next section
+        case 'l':
+          if ((i + 1) == argc || argv[i + 1][0] == '-') {
+            log_set_verb(LGG_INFO);
+            continue;
+          }
+          /* fall through */
       }
       // handle arguments that require a subsequent argument
       if ((i + 1) < argc) {
