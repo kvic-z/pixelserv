@@ -437,6 +437,21 @@ static int write_socket(int fd, const char *msg, int msg_len, SSL *ssl) {
   return rv;
 }
 
+static int write_pipe(int fd, response_struct *pipedata) {
+  // note that the parent must not perform a blocking pipe read without checking
+  // for available data, or else it may deadlock when we don't write anything
+  int rv = write(fd, pipedata, sizeof(*pipedata));
+  if (rv < 0) {
+    log_msg(LGG_ERR, "write() to pipe reported error: %m");
+  } else if (rv == 0) {
+    log_msg(LGG_ERR, "write() to pipe reported no data written and no error");
+  } else if (rv != sizeof(*pipedata)) {
+    log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u",
+        rv, (unsigned int)sizeof(*pipedata));
+  }
+  return rv;
+}
+
 void* conn_handler( void *ptr )
 {
   int argc = GLOBAL(g, argc);
@@ -471,6 +486,7 @@ void* conn_handler( void *ptr )
   char *post_buf = NULL;
   int post_buf_len = 0;
   int wait_cnt;
+  unsigned int total_bytes = 0; /* number of bytes received by this thread */
 
 #ifdef DEBUG
   int do_warning = (warning_time > 0);
@@ -528,13 +544,13 @@ void* conn_handler( void *ptr )
       if (CONN_TLSTOR(ptr, ssl))
         pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
     } else {                    // got some data
-      num_req++;
       pipedata.ssl = (CONN_TLSTOR(ptr, ssl)) ? SSL_HIT : SSL_NOT_TLS;
 
       TIME_CHECK("initial recv()");
       buf[rv] = '\0';
       TESTPRINT("\nreceived %d bytes\n'%s'\n", rv, buf);
       pipedata.rx_total = rv;
+      total_bytes += rv;
 
 #ifdef HEX_DUMP
       hex_dump(buf, rv);
@@ -845,18 +861,20 @@ void* conn_handler( void *ptr )
 
     // store time delta in milliseconds
     pipedata.run_time += elapsed_time_msec(start_time);
+    write_pipe(pipefd, &pipedata);
+    num_req++;
 
-    // note that the parent must not perform a blocking pipe read without checking
-    // for available data, or else it may deadlock when we don't write anything
-    rv = write(pipefd, &pipedata, sizeof(pipedata));
-    if (rv < 0) {
-      log_msg(LGG_ERR, "write() to pipe reported error: %m");
-    } else if (rv == 0) {
-      log_msg(LGG_ERR, "write() to pipe reported no data written and no error");
-    } else if (rv != sizeof(pipedata)) {
-      log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u",
-          rv, (unsigned int)sizeof(pipedata));
-    }
+//     note that the parent must not perform a blocking pipe read without checking
+//     for available data, or else it may deadlock when we don't write anything
+//     rv = write(pipefd, &pipedata, sizeof(pipedata));
+//     if (rv < 0) {
+//       log_msg(LGG_ERR, "write() to pipe reported error: %m");
+//     } else if (rv == 0) {
+//       log_msg(LGG_ERR, "write() to pipe reported no data written and no error");
+//     } else if (rv != sizeof(pipedata)) {
+//       log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u",
+//           rv, (unsigned int)sizeof(pipedata));
+//     }
     TESTPRINT("run_time %.2f\n", pipedata.run_time);
     pipedata.run_time = 0.0;
 
@@ -878,18 +896,32 @@ void* conn_handler( void *ptr )
       if (selrv > 0) {
         errno = 0;
         rv = peek_socket(new_fd, CONN_TLSTOR(ptr, ssl));
-        if (rv == 0 || errno == ECONNRESET)
+        if (rv == 0 || errno == ECONNRESET) {
+          if (total_bytes == 0) {
+            /* client disconnects w/o sending any request; run_time is ignorable */
+            pipedata.status = FAIL_CLOSED;
+            pipedata.rx_total = 0;
+            write_pipe(pipefd, &pipedata);
+            num_req++;
+          }
           goto done_with_this_thread;
-        else
+        } else
           break;
       } else { /* error: -1, no data within timeout: < -1 */
         if (rv == 0 || errno == ECONNRESET || errno == ETIMEDOUT || wait_cnt == 1) {
-          /* done with the thread and let's finish with some house keeping */
+          if (wait_cnt > 1 && total_bytes == 0) {
+            /* client disconnects w/o sending any request; run_time is ignorable */
+            pipedata.status = FAIL_CLOSED;
+            pipedata.rx_total = 0;
+            write_pipe(pipefd, &pipedata);
+            num_req++;
+          }
           goto done_with_this_thread;
         }
       }
       --wait_cnt;
     }
+    pipedata.run_time = 0.0;
   } /* end of main event loop */
 
 done_with_this_thread:
