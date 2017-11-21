@@ -13,10 +13,6 @@ make install
 ````
 #### Launch pixelserv-tls
 ````
-pixelserv-tls
-````
-or
-````
 pixelserv-tls <listening ip>
 ````
 
@@ -32,23 +28,9 @@ Check out this [page](/pixelserv-tls/wiki/Command-Line-Options) for details of c
 sh -c "$(wget -qO - https://kazoo.ga/pixelserv-tls/install-beta.sh)"
 ````
 
-### Access the servstats page
-
-* http://\<your listening ip\>/servstats
-
-Check out the [sample servstats page](/kvic-z/pixelserv-tls/wiki/pixelserv‑tls-servstats).
-
-
-### Announcement and Discussion
+### Announcement and discussion
 
 * https://kazoo.ga/pixelserv-tls/
-
-
-### Other References
 * [pixelserv-tls on snb]: A pixelserv-tls chit-chat thread on SNBfourms.
-* [pixelserv]: An old pixelserv thread on LinksysInfo.org
-* [pixelserv-ddwrt]: An even older thread of an early version of pixelserv.
 
 [pixelserv-tls on snb]: <http://www.snbforums.com/threads/pixelserv-a-better-one-pixel-webserver-for-adblock.26114>
-[pixelserv]: <http://www.linksysinfo.org/index.php?threads/pixelserv-compiled-to-run-on-router-wrt54g.30509/page-3#post-229342>
-[pixelserv-ddwrt]: <http://www.dd-wrt.com/phpBB2/viewtopic.php?p=685201>
