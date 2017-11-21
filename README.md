@@ -1,12 +1,11 @@
 _pixelserv-tls_ is a tiny bespoke HTTP/1.1 webserver with HTTPS support that acts on behalf of hundreds of thousands of adverts/tracker servers. It responds to all requests with nothing and can be configured to capture what ad networks and trackers intend to send them about you.
 
-pixelserv-tls supports TLS1.2 for HTTPS. Server certificates for domains are automatically generated on demand and on the first request. It can output access log and HTTP POST contnets to syslog. pixelserv-tls is a useful tool to inspect and whitelist domains aggressively adblocked and giving trouble in loading a webpage.
+_pixelserv-tls_ supports TLS1.2 for HTTPS. Server certificates for domains are automatically generated on demand and on the first request. It can output access log and HTTP POST contnets to syslog. _pixelserv-tls_ is a useful tool to inspect and whitelist domains aggressively adblocked and giving trouble in loading a webpage.
 
-Best of of all pixelserv-tls speeds up web browsing! Check out the numbers [here](https://kazoo.ga/pixelserv-tls-more-is-less/).
+Best of of all _pixelserv-tls_ accelerates web browsing! Check out the numbers [here](https://kazoo.ga/pixelserv-tls-more-is-less/).
 
 ### Install from source
 
-#### Check out the git repo and then:
 ````
 autoreconf -i
 ./configure
@@ -28,9 +27,14 @@ opkg install pixelserv-tls
 
 Check out this [page](/pixelserv-tls/wiki/Command-Line-Options) for details of command line options.
 
+### Install beta versions on Entware-ng systems
+````
+sh -c "$(wget -qO - https://kazoo.ga/pixelserv-tls/install-beta.sh)"
+````
+
 ### Access the servstats page
 
-* http://<your listening ip>/servstats
+* http://\<your listening ip\>/servstats
 
 Check out the [sample servstats page](/kvic-z/pixelserv-tls/wiki/pixelserv‑tls-servstats).
 
