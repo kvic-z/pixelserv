@@ -1,4 +1,3 @@
-## pixelserv-tls
 _pixelserv-tls_ is a tiny bespoke HTTP/1.1 webserver with HTTPS support that acts on behalf of hundreds of thousands of adverts/tracker servers. It responds to all requests with nothing and can be configured to capture what ad networks and trackers intend to send them about you.
 
 pixelserv-tls supports TLS1.2 for HTTPS. Server certificates for domains are automatically generated on demand and on the first request. It can output access log and HTTP POST contnets to syslog. pixelserv-tls is a useful tool to inspect and whitelist domains aggressively adblocked and giving trouble in loading a webpage.
@@ -14,15 +13,15 @@ autoreconf -i
 make install
 ````
 #### Launch pixelserv-tls
+````
+pixelserv-tls
+````
+or
+````
+pixelserv-tls <listening ip>
+````
 
-A few examples:
-* `pixelserv-tls`
-* `pixelserv-tls 192.168.1.1`
-
-### Install pre-built binaries
-
-Binaries are available from [Entware-ng](/Entware-ng/Entware-ng).
-
+### Install pre-built binaries from Entware-ng
 ````
 opkg install pixelserv-tls
 ````
