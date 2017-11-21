@@ -28,9 +28,8 @@ Check out this [page](/pixelserv-tls/wiki/Command-Line-Options) for details of c
 sh -c "$(wget -qO - https://kazoo.ga/pixelserv-tls/install-beta.sh)"
 ````
 
-### Announcement and discussion
+### Announcement/discussion
 
 * https://kazoo.ga/pixelserv-tls/
-* [pixelserv-tls on snb]: A pixelserv-tls chit-chat thread on SNBfourms.
+* A pixelserv-tls chit-chat [thread](http://www.snbforums.com/threads/pixelserv-a-better-one-pixel-webserver-for-adblock.26114) on SNBfourms.
 
-[pixelserv-tls on snb]: <http://www.snbforums.com/threads/pixelserv-a-better-one-pixel-webserver-for-adblock.26114>
