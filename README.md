@@ -22,7 +22,7 @@ opkg install pixelserv-tls
 sh -c "$(wget -qO - https://kazoo.ga/pixelserv-tls/install-beta.sh)"
 ````
 
-#### Launch pixelserv-tls
+### Launch pixelserv-tls
 ````
 pixelserv-tls <listening ip>
 ````
