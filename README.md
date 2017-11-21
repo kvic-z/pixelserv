@@ -11,22 +11,23 @@ autoreconf -i
 ./configure
 make install
 ````
-#### Launch pixelserv-tls
-````
-pixelserv-tls <listening ip>
-````
 
 ### Install pre-built binaries from Entware-ng
 ````
 opkg install pixelserv-tls
 ````
 
-Check out this [page](/pixelserv-tls/wiki/Command-Line-Options) for details of command line options.
-
-### Install beta versions on Entware-ng systems
+### Install beta version on Entware-ng systems
 ````
 sh -c "$(wget -qO - https://kazoo.ga/pixelserv-tls/install-beta.sh)"
 ````
+
+#### Launch pixelserv-tls
+````
+pixelserv-tls <listening ip>
+````
+
+Check out this [page](/pixelserv-tls/wiki/Command-Line-Options) for details of command line options.
 
 ### Announcement/discussion
 
