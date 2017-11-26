@@ -130,13 +130,13 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     asprintf(&fname, "%s/%s", pem_dir, pem_fn);
     FILE *fp = fopen(fname, "wb");
     if(fp == NULL) {
-        log_msg(LGG_ERR, "Failed to open file %s", fname);
+        log_msg(LGG_ERR, "Failed to open file for write: %s", fname);
         goto free_all;
     }
     PEM_write_X509(fp, x509);
     PEM_write_PrivateKey(fp, key, NULL, NULL, 0, NULL, NULL);
     fclose(fp);
-    log_msg(LGG_NOTICE, "cert %s generated and saved", pem_fn);
+    log_msg(LGG_NOTICE, "cert generated and saved: %s", pem_fn);
 
 free_all:
     EVP_PKEY_free(key);

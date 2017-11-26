@@ -239,33 +239,33 @@ int main (int argc, char* argv[]) // program start
 #ifndef TEST
            "\t" "-f\t\t\t(stay in foreground/don't daemonize)" "\n"
 #endif // !TEST
-           "\t" "-R\t\t\t(disable redirect to encoded path in tracker links)" "\n"
-           "\t" "-k  https_port\t\t(default: "
+           "\t" "-k  HTTPS_PORT\t\t(default: "
            SECOND_PORT
            ")" "\n"
-           "\t" "-l  level\t\t(0:critical 1:error<default> 2:warning 3:notice 4:info 5:debug)" "\n"
+           "\t" "-l  LEVEL\t\t(0:critical 1:error<default> 2:warning 3:notice 4:info 5:debug)" "\n"
 #ifdef IF_MODE
-           "\t" "-n  iface\t\t(default: all interfaces)" "\n"
+           "\t" "-n  IFACE\t\t(default: all interfaces)" "\n"
 #endif // IF_MODE
-           "\t" "-o  select_timeout\t(default: %ds)" "\n"
-           "\t" "-O  keep_alive_time\t(for HTTP/1.1 connections; default: %ds)" "\n"
-           "\t" "-p  http_port\t\t(default: "
+           "\t" "-o  SELECT_TIMEOUT\t(default: %ds)" "\n"
+           "\t" "-O  KEEPALIVE_TIME\t(for HTTP/1.1 connections; default: %ds)" "\n"
+           "\t" "-p  HTTP_PORT\t\t(default: "
            DEFAULT_PORT
            ")" "\n"
-           "\t" "-s  stats_html_URL\t(default: "
+           "\t" "-R\t\t\t(disable redirect to encoded path in tracker links)" "\n"
+           "\t" "-s  STATS_HTML_URL\t(default: "
            DEFAULT_STATS_URL
            ")" "\n"
-           "\t" "-t  stats_txt_URL\t(default: "
+           "\t" "-t  STATS_TXT_URL\t(default: "
            DEFAULT_STATS_TEXT_URL
            ")" "\n"
-           "\t" "-T  max_service_threads\t(default: %d)\n"
+           "\t" "-T  MAX_THREADS\t\t(default: %d)\n"
 #ifdef DROP_ROOT
-           "\t" "-u  user\t\t(default: \"nobody\")" "\n"
+           "\t" "-u  USER\t\t(default: \"nobody\")" "\n"
 #endif // DROP_ROOT
 #ifdef DEBUG
            "\t" "-w  warning_time\t(warn when elapsed connection time exceeds value in msec)" "\n"
 #endif //DEBUG
-           "\t" "-z  path_to_certs\t(default: "
+           "\t" "-z  CERT_PATH\t\t(default: "
            DEFAULT_PEM_PATH
            ")" "\n"
            , argv[0], VERSION, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE, DEFAULT_THREAD_MAX);
