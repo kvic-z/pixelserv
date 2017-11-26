@@ -27,7 +27,7 @@ sh -c "$(wget -qO - https://kazoo.ga/pixelserv-tls/install-beta.sh)"
 pixelserv-tls <listening ip>
 ````
 
-Check out this [page](/pixelserv-tls/wiki/Command-Line-Options) for details of command line options.
+Check out this [page](https://github.com/kvic-z/pixelserv-tls/wiki/Command-Line-Options) for details of command line options.
 
 ### Announcement/discussion
 
