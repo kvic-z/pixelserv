@@ -1,0 +1,90 @@
+.TH PIXELSERV-TLS 1
+.SH NAME
+pixelserv-tls \- a tiny bespoke HTTP/1.1 webserver with HTTPS support for blocking and logging adverts requests
+.SH SYNOPSIS
+.B pixelserv-tls 
+[\fIip_addr\fR | \fIhostname\fR]
+[\fB\-2\fR]
+[\fB\-f\fR]
+[\fB\-k\fR \fIHTTPS_PORT\fR]
+[\fB\-l\fR]
+[\fB\-l\fR \fILEVEL\fR]
+[\fB\-n\fR \fIIFACE\fR]
+[\fB\-o\fR \fISELECT_TIMEOUT\fR]
+[\fB\-O\fR \fIKEEPALIVE_TIME\fR]
+[\fB\-p\fR \fIHTTP_PORT\fR]
+[\fB\-R\fR]
+[\fB\-s\fR \fISTATS_HTML_URL\fR]
+[\fB\-t\fR \fISTATS_TXT_URL\fR]
+[\fB\-T\fR \fIMAX_THREADS\fR]
+[\fB\-u\fR \fIUSER\fR]
+[\fB\-z\fR \fIPATH_CERTS\fR]
+
+.SH DESCRIPTION
+.B pixelserv-tls
+is a tiny bespoke HTTP/1.1 webserver with HTTPS support that acts on behalf of hundreds of thousands of adverts/tracker servers.
+It responds to all requests with nothing and can be configured to capture what ad networks and trackers intend to send them about you.
+
+.B pixelserv-tls
+supports TLS1.2 for HTTPS.
+Server certificates for domains are automatically generated on demand and on the first request.
+It can output access log and HTTP POST contents to syslog. 
+.B pixelserv-tls
+is a useful tool to inspect and whitelist domains aggressively adblocked and giving trouble in loading a webpage.
+
+Best of of all 
+.B pixelserv-tls 
+accelerates web browsing!
+.SH OPTIONS
+.TP
+.BR \fIip_addr\fR ", " \fIhostname\fR
+Specify an IP address pixelserv-tls shall listen on. Hostname can be used in place of IP address.
+If omitted and no '-n IFACE' specified, pixelserv-tls will listen on 0.0.0.0.
+.TP
+.BR \-2
+Disable HTTP 204 response to '/generate_204' requests.
+In the event that Chrome detects network issues that might be caused by a captive portal, Chrome will make a cookieless request to http://www.gstatic.com/generate_204 and check the response code. If that request is redirected, Chrome will open the redirect target in a new tab on the assumption that it's a login page.
+.TP
+.BR \-f
+Stay in foreground. Do not daemonize the process.
+.TP
+.BR \-k " " \fIHTTPS_PORT\fR
+Specify a port pixelserv-tls shall accept HTTPS connections. This option can be set multiple times to specify more than one port.
+If omitted, default is 443.
+.TP
+.BR \-l
+For backward compatibility. Equivalent to '-l 4'.
+.TP
+.BR \-l " " \fILEVEL\fR
+Set log level. Messages will be output to syslog. pixelserv-tls has six tiers of logging with increasing verbosity. 0 - critical 1 -error 2 - warning 3 - notice 4 - info 5 debug. To log request URLs and POST contents, set level to 4 or higher. If omitted, default is set to 1.
+.TP
+.BR \-n " " \fIIFACE\fR
+The network interface pixelserv-tls shall listen on. If omitted and no ip_addr or hostname specified, pixelserv-tls will listen on all interfaces.
+.TP
+.BR \-o " " \fISELECT_TIMEOUT\fR
+Specify the amount of time in seconds select() and recv() syscalls used in pixelserv-tls shall wait for data. After SELECT_TIMEOUT seconds and still no data from network, these syscalls will return. Default is 1 second.
+.TP
+.BR \-O " " \fIKEEPALIVE_TIME\fR
+Set the minimum amount of time in seconds that a HTTP/1.1 persistent connection shall be kept alive. The connection will be closed if client side shuts down or this amount of time expires without receiving any request.
+.TP
+.BR \-p " " \fIHTTP_PORT\fR
+Specify a port pixelserv-tls shall accept HTTP connections. This option can be set multiple times to specify more than one port.
+If omitted, default is 80.
+.TP
+.BR \-s " " \fISTATS_HTML_URL\fR
+Customize the path where pixelserv-tls shall respond with the HTML verson of server statistics page. If omitted, default is '/servstats'.
+.TP
+.BR \-t " " \fISTATS_TXT_URL\fR
+Customize the path where pixelserv-tls shall respond with the plain text verson of server statistics page. If omitted, default is '/servstats.txt'.
+.TP
+.BR \-T " " \fIMAX_THREADS\fR
+Set the limit on maximum number of concurrent threads. pixelserv-tls currently handles one HTTP/1.1 persistent connection in each thread. This limit will prevent overloading the system if pixelserv-tls happens to be serving many clients.
+If omitted, default is 1200. Default is more than enough for all SOHO environemnts.
+.TP
+.BR \-u " " \fIUSER\fR
+Set the user account pixelserv-tls shall use after dropping root. Default is 'nobody'.
+.TP
+.BR \-z " " \fIDIR_CERTS\fR
+pixelserv-tls will read the CA certificate (ca.crt) and its private key (ca.key) from this directory on startup. Automatically generated certificates will also be saved to this directory. If omitted, default is '/opt/var/cache/pixelserv'.
+
+DIR_CERTS shall have read/write permission for 'nobody' or 'USER' if '-u USER' is set.
