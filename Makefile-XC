@@ -28,7 +28,7 @@ UPX       := upx -9
 
 # packaging macros
 PFILES     = LICENSE README.md dist/$(DISTNAME).$(ARCH).performance.*
-PVERSION  := $(shell grep VERSION util.h | awk -F '.' '{print $$NF}' | sed 's|\"||g')
+PVERSION  := $(shell grep VERSION util.h | awk -F ' ' '{print $$NF}' | sed 's/"//g')
 PCMD      := zip
 
 # x86 environment
