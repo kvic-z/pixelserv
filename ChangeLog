@@ -1,19 +1,27 @@
-2017-x-x version Kl
+2017-11-28 v2.0.0
 
-* Added support of HTTP/1.1 persistent connections
-* Added option 'O' for specifying timeout of persistent connections
-* Added new counters kcc, kmx, kvg and krq related to service threads that implements
-  HTTP/1.1 persistent connections.
-* Added support for TCP Fast Open. Require Linux kernel >= 3.16.
-* Added support of HTTP POST method
-* Increased size of message buffer for more efficient processing of lengthy requests
-* Corrected/enhanced ring buffer handling in certificate generations
-
-* Added new tiered logging
-* Revised tiers of all logged messages
-* Expanded CLI option '-l' to '-l level' where 'level' corresponds to a logging tier.
-* Expanded URL "/log=<1|0>" to "/log=<level>" 
-* Cleaned up logics/codes in the connection handler.
+* NEW support for HTTP/1.1 persistent connections
+* NEW hugely increased scalability on concurrent connections & reduced memory requirement
+* NEW logging facility. Six levels of granularities. No more chopped messages in syslog.
+* NEW support for HTTP POST method & logging POST content (with -l 4)
+* NEW added option '-O keepalive_time' to specify idle timeout of persistent connections
+* NEW added option '-T max_threads' to specify maximum allowed service threads 
+* NEW added option '-l level' to specify log level
+* NEW added counters kcc, kmx, kvg, krq & clt related to persistent connections
+* NEW added a MAN page as part of effort to bring pixelserv-tls more Linux
+* NEW support for TCP Fast Open. Require Linux kernel >= 3.16.
+* NEW support for GNU Autotools. Easier for native Linux systems to build and install.
+* CHANGED default select_timeout to 1s
+* CHANGED reviewed & updated log messages
+* CHANGED descriptions of a few counters on servstats page
+* CHANGED refactored SSL code & clean up connection handler
+* CHANGED removed legacy build.sh from code repository
+* CHANGED version naming scheme to MAJOR.MINOR.MICRO
+* CHANGED enhanced ring buffer handling in certificate generations
+* FIXED no matching cipher when servstats page is accessed using IP address
+* FIXED measurement of POST processing time
+* FIXED compilation failure on LEDGE due to missing TEMP_RETRY_FAILURE (thanks to a fix from laoshaw@github)
+* FIXED crash when the CA certificate is not available on startup.
 
 2017-9-18 version Kk
 

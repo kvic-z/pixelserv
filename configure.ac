@@ -1,4 +1,4 @@
-AC_INIT([pixelserv-tls], [KL-test3], [])
+AC_INIT([pixelserv-tls], [2.0.0], [])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_PROG_CC
 AC_CONFIG_HEADERS([config.h])
