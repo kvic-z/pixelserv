@@ -5,7 +5,7 @@ AC_CONFIG_HEADERS([config.h])
 
 AC_CHECK_LIB([crypto], [EVP_EncryptInit], [], 
 	AC_MSG_FAILURE([can't find openssl crypto lib]))
-AC_CHECK_LIB([ssl], [SSL_library_init], [], 
+AC_CHECK_LIB([ssl], [SSL_CTX_new], [], 
 	AC_MSG_FAILURE([can't find openssl ssl lib]))
 AC_CHECK_LIB([pthread], [main], [], 
 	AC_MSG_ERROR([libpthread not found]))
