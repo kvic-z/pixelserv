@@ -551,6 +551,7 @@ int main (int argc, char* argv[]) // program start
     //  through the loop
     for (i = 0, sockfd = 0; i < num_ports; i++) {
       if ( FD_ISSET(sockfds[i], &selectfds) ) {
+        FD_CLR(sockfd, &selectfds);
         // select sockfds[i] for servicing during this loop pass
         sockfd = sockfds[i];
         --select_rv;
@@ -721,6 +722,14 @@ int main (int argc, char* argv[]) // program start
     int err;
     if ((err=pthread_create(&conn_thread, &attr, conn_handler, (void*)conn_tlstor))) {
       log_msg(LGG_ERR, "Failed to create conn_handler thread. err: %d", err);
+      if(conn_tlstor->ssl){
+        SSL_set_shutdown(conn_tlstor->ssl, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+        SSL_free(conn_tlstor->ssl);
+        SSL_CTX_free((SSL_CTX*)conn_tlstor->tlsext_cb_arg->sslctx);
+        free(conn_tlstor->tlsext_cb_arg);
+      }
+      shutdown(new_fd, SHUT_RDWR);
+      close(new_fd);
       continue;
     }
 #else

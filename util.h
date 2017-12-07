@@ -19,13 +19,13 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v2.0.0"
+#define VERSION "v2.0.1-rc2"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
-#define DEFAULT_TIMEOUT 1       // default timeout for select() calls, in seconds
-#define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 120)
+#define DEFAULT_TIMEOUT 10     // default timeout for select() calls, in seconds
+#define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 12)
                                 // default keep-alive duration for HTTP/1.1 connections, in seconds
                                 // it's the time a connection will stay active
                                 // until another request comes and refreshes the timer

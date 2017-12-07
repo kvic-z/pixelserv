@@ -864,17 +864,6 @@ void* conn_handler( void *ptr )
     write_pipe(pipefd, &pipedata);
     num_req++;
 
-//     note that the parent must not perform a blocking pipe read without checking
-//     for available data, or else it may deadlock when we don't write anything
-//     rv = write(pipefd, &pipedata, sizeof(pipedata));
-//     if (rv < 0) {
-//       log_msg(LGG_ERR, "write() to pipe reported error: %m");
-//     } else if (rv == 0) {
-//       log_msg(LGG_ERR, "write() to pipe reported no data written and no error");
-//     } else if (rv != sizeof(pipedata)) {
-//       log_msg(LGG_ERR, "write() to pipe reported writing only %d bytes of expected %u",
-//           rv, (unsigned int)sizeof(pipedata));
-//     }
     TESTPRINT("run_time %.2f\n", pipedata.run_time);
     pipedata.run_time = 0.0;
 
