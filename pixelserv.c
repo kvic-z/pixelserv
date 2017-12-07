@@ -551,10 +551,10 @@ int main (int argc, char* argv[]) // program start
     //  through the loop
     for (i = 0, sockfd = 0; i < num_ports; i++) {
       if ( FD_ISSET(sockfds[i], &selectfds) ) {
-        FD_CLR(sockfd, &selectfds);
         // select sockfds[i] for servicing during this loop pass
         sockfd = sockfds[i];
         --select_rv;
+        FD_CLR(sockfd, &selectfds);
         break;
       }
     }
