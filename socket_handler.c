@@ -592,9 +592,11 @@ void* conn_handler( void *ptr )
             int length = 0;
             int post_buf_size = 0;
             int wait_cnt = 0;
-            char *h = strstr(bufptr, "Content-Length: ");
+            char *h = strstr(bufptr, "Content-Length:");
 
-            h += strlen("Content-Length: ");
+            if (!h)
+              goto end_post;
+            h += strlen("Content-Length:");
             length = atoi(strtok(h, "\r\n"));
 
             log_msg(LGG_DEBUG, "POST socket: %d Content-Length: %d", new_fd, length);
