@@ -454,7 +454,6 @@ int main (int argc, char* argv[]) // program start
     sa.sa_handler = print_trace;
     if (sigaction(SIGSEGV, &sa, NULL)) {
       log_msg(LOG_ERR, "SIGSEGV %m");
-      exit(EXIT_FAILURE);
     }
 #endif
 
@@ -687,6 +686,8 @@ int main (int argc, char* argv[]) // program start
         t->status = SSL_UNKNOWN;
         t->sslctx = NULL;
 
+        const struct timeval timeout = { 0, 500000 };
+        setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval));
         SSL_CTX_set_tlsext_servername_arg(sslctx, t);
         ssl = SSL_new(sslctx);
         SSL_set_fd(ssl, new_fd);
