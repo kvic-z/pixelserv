@@ -19,7 +19,7 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v2.0.1-rc2"
+#define VERSION "v2.0.1"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
