@@ -5,6 +5,7 @@
 #ifdef USE_PTHREAD
   #include <pthread.h>
 #endif
+#include <sys/poll.h>
 #include <sys/stat.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -872,53 +873,35 @@ void* conn_handler( void *ptr )
     TIME_CHECK("pipe write()");
 
     /* wait for next request */
-    wait_cnt = GLOBAL(g, http_keepalive) / GLOBAL(g, select_timeout);
-    if (wait_cnt < 1) wait_cnt = 1;
-    fd_set rfds;
-    FD_ZERO(&rfds);
 
-    while (wait_cnt > 0) {
-      /* note that some implementations of select() clears timeout */
-      struct timeval timeout = {GLOBAL(g, select_timeout), 0};
-      FD_SET(new_fd, &rfds);
-      errno = 0;
-      int selrv = TEMP_FAILURE_RETRY(select(new_fd + 1, &rfds, NULL, NULL, &timeout));
-      TESTPRINT("socket:%d selrv:%d errno:%d\n", new_fd, selrv, errno);
-      if (selrv > 0) {
-        errno = 0;
-        rv = peek_socket(new_fd, CONN_TLSTOR(ptr, ssl));
-        if (rv == 0 || errno == ECONNRESET) {
-          if (total_bytes == 0) {
-            /* client disconnects w/o sending any request; run_time is ignorable */
-            pipedata.status = FAIL_CLOSED;
-            pipedata.rx_total = 0;
-            write_pipe(pipefd, &pipedata);
-            num_req++;
-          }
-          goto done_with_this_thread;
-        } else
-          break;
-      } else { /* error: -1, no data within timeout: < -1 */
-        if (rv == 0 || errno == ECONNRESET || errno == ETIMEDOUT || wait_cnt == 1) {
-          if (wait_cnt > 1 && total_bytes == 0) {
-            /* client disconnects w/o sending any request; run_time is ignorable */
-            pipedata.status = FAIL_CLOSED;
-            pipedata.rx_total = 0;
-            write_pipe(pipefd, &pipedata);
-            num_req++;
-          }
-          goto done_with_this_thread;
-        }
+    if (pipedata.status == FAIL_CLOSED)
+      break; /* goto done_with_this_thread */
+
+    struct pollfd pfd = { new_fd, POLLIN, POLLIN };
+    int selrv = poll(&pfd, 1, 1000 * GLOBAL(g, http_keepalive));
+    TESTPRINT("socket:%d selrv:%d errno:%d\n", new_fd, selrv, errno);
+
+    /* selrv -1: error; selrv 0: no data before timed out;
+       selrv > 0 and peek_socket <= 0: client disconnects */
+
+    if (selrv <= 0 || peek_socket(new_fd, CONN_TLSTOR(ptr, ssl)) <= 0) {
+      /* no data in the top and first read_socket(). counted as one 'tmo'
+         no data in the whole session. further counted as one 'cls'
+         run_time is ignorable */
+      if (total_bytes == 0) {
+        pipedata.status = FAIL_CLOSED;
+        pipedata.rx_total = 0;
+        write_pipe(pipefd, &pipedata);
+        num_req++;
       }
-      --wait_cnt;
+      break; /* goto done_with_this_thread */
     }
-    pipedata.run_time = 0.0;
+
   } /* end of main event loop */
 
 done_with_this_thread:
   /* done with the thread and let's finish with some house keeping */
-  log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d wait_cnt:%d num_req:%d\n",
-      new_fd, rv, errno, wait_cnt, num_req);
+  log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d num_req:%d\n", new_fd, rv, errno, num_req);
 
   // signal the socket connection that we're done read-write
   if(CONN_TLSTOR(ptr, ssl)){
