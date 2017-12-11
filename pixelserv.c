@@ -619,7 +619,7 @@ int main (int argc, char* argv[]) // program start
               rmx = pipedata.rx_total;
           }
 
-          if (pipedata.status != FAIL_TIMEOUT) {
+          if (pipedata.status != FAIL_TIMEOUT && pipedata.rx_total > 0) {
             // calculate average process time (tav) using
             static float ftav = 0.0;
             static int ftav_cnt = 0;
