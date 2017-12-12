@@ -326,16 +326,17 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
         if((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
             log_msg(LGG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
         else {
-            strcat(pem_file, ":");
-            write(fd, pem_file, strlen(pem_file));
+            /* reuse full_pem_path as scratchpad */
+            strcpy(full_pem_path, pem_file);
+            strcat(full_pem_path, ":");
+            write(fd, full_pem_path, strlen(full_pem_path));
             close(fd);
         }
         rv = SSL_TLSEXT_ERR_ALERT_FATAL;
         goto quit_cb;
     }
 
-    SSL_CTX *sslctx = NULL;
-    sslctx = SSL_CTX_new(TLSv1_2_server_method());
+    SSL_CTX *sslctx = SSL_CTX_new(TLSv1_2_server_method());
     SSL_CTX_set_ecdh_auto(sslctx, 1);
     SSL_CTX_set_options(sslctx,
           SSL_OP_SINGLE_DH_USE |

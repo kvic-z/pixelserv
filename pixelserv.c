@@ -452,9 +452,10 @@ int main (int argc, char* argv[]) // program start
     }
 #if defined(__GLIBC__) && defined(BACKTRACE)
     sa.sa_handler = print_trace;
-    if (sigaction(SIGSEGV, &sa, NULL)) {
+    if (sigaction(SIGSEGV, &sa, NULL))
       log_msg(LOG_ERR, "SIGSEGV %m");
-    }
+    if (sigaction(SIGABRT, &sa, NULL))
+      log_msg(LOG_ERR, "SIGABRT %m");
 #endif
 
 #ifdef DEBUG
@@ -703,9 +704,9 @@ int main (int argc, char* argv[]) // program start
             }
             SSL_free(ssl);
             SSL_CTX_free((SSL_CTX*)t->sslctx);
+            free(t);
             shutdown(new_fd, SHUT_RDWR);
             close(new_fd);
-            free(t);
             continue;
         }
         TESTPRINT("ssl new_fd:%d\n", new_fd);
