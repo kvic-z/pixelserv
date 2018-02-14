@@ -22,6 +22,18 @@ opkg install pixelserv-tls
 sh -c "$(wget -qO - https://kazoo.ga/pixelserv-tls/install-beta.sh)"
 ````
 
+### Install from AUR on Arch Linux/Manjaro/Antergos/Chakra and other Arch based distributions
+#### Using `yaourt`
+````
+yaourt -S pixelserv-tls
+````
+#### Manual
+````
+git clone https://aur.archlinux.org/pixelserv-tls.git
+cd pixelserv-tls
+makepkg -si
+````
+
 ### Launch pixelserv-tls
 ````
 pixelserv-tls <listening ip>
