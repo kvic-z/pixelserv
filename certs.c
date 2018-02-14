@@ -337,7 +337,15 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
     }
 
     SSL_CTX *sslctx = SSL_CTX_new(TLSv1_2_server_method());
+#ifdef PIXELSERV_SSL_HAS_ECDH_AUTO
     SSL_CTX_set_ecdh_auto(sslctx, 1);
+#else
+    EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_secp384r1);
+    if (!ecdh)
+        log_msg(LGG_ERR, "Cannot get ECDH curve");
+    SSL_CTX_set_tmp_ecdh(sslctx, ecdh);
+    EC_KEY_free(ecdh);
+#endif
     SSL_CTX_set_options(sslctx,
           SSL_OP_SINGLE_DH_USE |
           SSL_MODE_RELEASE_BUFFERS |

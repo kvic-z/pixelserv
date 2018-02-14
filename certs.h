@@ -22,6 +22,10 @@
   "ECDHE-RSA-AES128-SHA:" \
   "AES128-SHA256:AES128-SHA"
 
+#if defined(SSL_CTX_set_ecdh_auto)
+# define PIXELSRV_SSL_HAS_ECDH_AUTO
+#endif
+
 typedef struct {
     const char* pem_dir;
     X509 *cacert;
