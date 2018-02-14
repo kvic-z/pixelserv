@@ -9,6 +9,7 @@ AC_CHECK_LIB([ssl], [SSL_CTX_new], [],
 	AC_MSG_FAILURE([can't find openssl ssl lib]))
 AC_CHECK_LIB([pthread], [main], [], 
 	AC_MSG_ERROR([libpthread not found]))
+AC_CHECK_LIB([rt], [clock_gettime], [], [])
 
 AC_CONFIG_FILES([
  Makefile
