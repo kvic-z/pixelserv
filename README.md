@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/kvic-z/pixelserv-tls.svg?branch=master)](https://travis-ci.org/kvic-z/pixelserv-tls)
+
 _pixelserv-tls_ is a tiny bespoke HTTP/1.1 webserver with HTTPS support that acts on behalf of hundreds of thousands of adverts/tracker servers. It responds to all requests with nothing and can be configured to capture what ad networks and trackers intend to send them about you.
 
 _pixelserv-tls_ supports TLS1.2 for HTTPS. Server certificates for domains are automatically generated on demand and on the first request. It can output access log and HTTP POST contents to syslog. _pixelserv-tls_ is a useful tool to inspect and whitelist domains aggressively adblocked and giving trouble in loading a webpage.
