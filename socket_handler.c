@@ -2,9 +2,7 @@
 
 #include <ctype.h>
 #include <fcntl.h>
-#ifdef USE_PTHREAD
-  #include <pthread.h>
-#endif
+#include <pthread.h>
 #include <sys/poll.h>
 #include <sys/stat.h>
 #include <openssl/ssl.h>
@@ -486,7 +484,6 @@ void* conn_handler( void *ptr )
   char host[HOST_LEN_MAX + 1];
   char *post_buf = NULL;
   int post_buf_len = 0;
-  int wait_cnt;
   unsigned int total_bytes = 0; /* number of bytes received by this thread */
 
 #ifdef DEBUG
@@ -507,9 +504,7 @@ void* conn_handler( void *ptr )
       log_msg(LGG_DEBUG, "sigaction(SIGUSR2) reported error: %m");
     }
   }
-#ifdef USE_PTHREAD
-    printf("%s: tid = %d\n", __FUNCTION__, (int)pthread_self());
-#endif
+  printf("%s: tid = %d\n", __FUNCTION__, (int)pthread_self());
 #endif
 
   // the socket is connected, but we need to perform a check for incoming data
@@ -894,12 +889,11 @@ void* conn_handler( void *ptr )
         write_pipe(pipefd, &pipedata);
         num_req++;
       }
-      break; /* goto done_with_this_thread */
+      break; /* done with this thread */
     }
 
   } /* end of main event loop */
 
-done_with_this_thread:
   /* done with the thread and let's finish with some house keeping */
   log_msg(LGG_DEBUG, "Exit recv loop socket:%d rv:%d errno:%d num_req:%d\n", new_fd, rv, errno, num_req);
 
@@ -927,18 +921,6 @@ done_with_this_thread:
   pipedata.status = ACTION_DEC_KCC;
   pipedata.krq = num_req;
   rv = write(pipefd, &pipedata, sizeof(pipedata));
-
-#ifndef USE_PTHREAD
-  // child no longer needs write pipe, so close descriptor
-  // this is probably redundant since we are about to exit() anyway
-  if (close(pipefd) < 0)
-    log_msg(LGG_DEBUG, "close() pipe in child process reported error: %m");
-
-  TIME_CHECK("pipe close()");
-
-  if (pipedata.status == FAIL_GENERAL)
-    log_msg(LGG_ERR, "conn_handler exiting child process with FAIL_GENERAL status");
-#endif
 
   free(ptr);
   free(buf);

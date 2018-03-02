@@ -13,16 +13,12 @@
 #include <openssl/crypto.h> 
 #include <openssl/x509v3.h> 
 
-#ifdef USE_PTHREAD
 #include <pthread.h>
 #include <signal.h>
-#endif
 
 #include "certs.h"
 #include "logger.h"
 #include "util.h"
-
-#ifdef USE_PTHREAD
 
 static pthread_mutex_t *locks;
 
@@ -70,7 +66,6 @@ void ssl_free_locks()
 
     OPENSSL_free(locks);
 }
-#endif //USE_PTHREAD
 
 static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, EVP_MD_CTX *p_ctx)
 {

@@ -22,15 +22,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
+#include <pthread.h>
+#include <linux/version.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include "certs.h"
 #include "logger.h"
-
-#ifdef USE_PTHREAD
-#include <pthread.h>
-#endif
-#include <linux/version.h>
 
 #define THREAD_STACK_SIZE  32767
 
@@ -77,9 +74,7 @@ int num_tls_ports = 0;
 STACK_OF(X509_INFO) *cachain = NULL;
 struct Global *g;
 cert_tlstor_t cert_tlstor;
-#ifdef USE_PTHREAD
 pthread_t certgen_thread;
-#endif
 
 int main (int argc, char* argv[]) // program start
 {
@@ -289,9 +284,7 @@ int main (int argc, char* argv[]) // program start
   }
 
   SSL_library_init();
-#ifdef USE_PTHREAD
   ssl_init_locks();
-#endif
   mkfifo(PIXEL_CERT_PIPE, 0600);
   pw = getpwnam(user);
   chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid);
@@ -340,24 +333,10 @@ int main (int argc, char* argv[]) // program start
       X509_free(cacert);
 
       cert_tlstor.pem_dir = tls_pem;
-  #ifndef USE_PTHREAD
-      if(fork() == 0){
-        sigset_t mask;
-        sigemptyset(&mask);
-        sigaddset(&mask, SIGUSR1);
-  #ifdef DEBUG
-        sigaddset(&mask, SIGUSR2);
-  #endif
-        sigprocmask(SIG_SETMASK, &mask, NULL);
-        cert_generator((void*)&cert_tlstor);
-        exit(0);
-      }
-  #else
       pthread_attr_t attr;
       pthread_attr_init(&attr);
       pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
       pthread_create(&certgen_thread, &attr, cert_generator, (void*)&cert_tlstor);
-  #endif
     }
   }
 
@@ -715,7 +694,6 @@ int main (int argc, char* argv[]) // program start
     }
     conn_tlstor->init_time = elapsed_time_msec(init_time);
 
-#ifdef USE_PTHREAD
     pthread_t conn_thread;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -734,31 +712,6 @@ int main (int argc, char* argv[]) // program start
       close(new_fd);
       continue;
     }
-#else
-    if (fork() == 0) {
-      // detach child from signal handler
-      signal(SIGTERM, SIG_DFL); // default is kill?
-      signal(SIGUSR1, SIG_DFL); // default is ignore?
-#ifdef DEBUG
-      signal(SIGUSR2, SIG_DFL); // default is ignore?
-#endif
-      // close unneeded file handles inherited from the parent process
-      close(sockfd);
-
-      // note that only the read end is closed
-      // even main() should leave the write end open so that children can
-      //  inherit it
-      close(pipefd[0]);
-
-      conn_handler( (void*)conn_tlstor );
-      exit(0);
-    } // end of forked child process
-
-    // this is guaranteed to be the parent process, as the child calls exit()
-    //  above when it's done instead of proceeding to this point
-    close(new_fd);  // parent doesn't need this
-    free(conn_tlstor);
-#endif // USE_PTHREAD
 
     if (++kcc > kmx)
       kmx = kcc;
@@ -772,10 +725,8 @@ int main (int argc, char* argv[]) // program start
     }
   } // end of perpetual accept() loop
 
-#ifdef USE_PTHREAD
   pthread_cancel(certgen_thread);
   pthread_join(certgen_thread, NULL);
-#endif
   sk_X509_pop_free(cachain, X509_free);
   SSL_CTX_free(sslctx);
   ssl_free_locks();

@@ -6,7 +6,7 @@ OPTS      := -DDROP_ROOT -DIF_MODE
 SRCS      := util.c socket_handler.c pixelserv.c certs.c logger.c
 
 ROOT      := .
-CFLAGS    := -I$(ROOT)/openssl/include -DUSE_PTHREAD
+CFLAGS    := -I$(ROOT)/openssl/include
 LDFLAGS    = -L$(ROOT)/openssl/$(ARCH) -L$(ROOT)/openssl/$(ARCH)
 SHAREDLIB := -lssl -lcrypto -ldl -lpthread
 STATICLIB  = $(ROOT)/openssl/$(ARCH)/libssl.a $(ROOT)/openssl/$(ARCH)/libcrypto.a
@@ -114,7 +114,6 @@ printver:
 
 x86: ARCH = i386
 x86: LDFLAGS += -lpthread
-x86: CFLAGS += -DUSE_PTHREAD
 x86: printver dist
 	@echo "=== Building x86 ==="
 	$(CC32) $(CFLAGS_D) $(LDFLAGS_D) $(OPTS) $(SRCS) -o dist/$(DISTNAME).$@.debug.dynamic $(SHAREDLIB)
@@ -127,7 +126,6 @@ x86: printver dist
 
 amd64: ARCH = amd64
 amd64: LDFLAGS += -lpthread
-amd64: CFLAGS += -DUSE_PTHREAD
 amd64: printver dist
 	@echo "=== Building amd64 ==="
 	$(CC64) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
@@ -153,7 +151,7 @@ mips: printver dist
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
 mips.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-uClibc.so.0 -lpthread -L/home/yipst/Entware-ng/staging_dir/toolchain-mipsel_mips32r2_gcc-5.4.0_uClibc-1.0.17/lib
-mips.ent: CFLAGS += -DUSE_PTHREAD -isystem/home/yipst/Entware-ng/staging_dir/toolchain-mipsel_mips32r2_gcc-5.4.0_uClibc-1.0.17/include
+mips.ent: CFLAGS += -isystem/home/yipst/Entware-ng/staging_dir/toolchain-mipsel_mips32r2_gcc-5.4.0_uClibc-1.0.17/include
 mips.ent: ARCH = mips.ent
 mips.ent: export STAGING_DIR = /home/yipst/Entware-ng/staging_dir/target-mipsel_mips32r2_uClibc-1.0.17
 mips.ent: printver dist
@@ -163,7 +161,7 @@ mips.ent: printver dist
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-ng.mipsel.zip $(PFILES)
 
 mipsel.deb: LDFLAGS += -lpthread -L/home/yipst/pixelserv-tls/openssl/mipsel.deb -Wl,-rpath-link,/home/yipst/pixelserv-tls/openssl/mipsel.deb
-mipsel.deb: CFLAGS += -DUSE_PTHREAD -isystem/usr/include/mipsel-linux-gnu
+mipsel.deb: CFLAGS += -isystem/usr/include/mipsel-linux-gnu
 mipsel.deb: ARCH = mipsel.deb
 mipsel.deb: printver dist
 	@echo "=== Building mipsel Debian ==="
@@ -184,10 +182,8 @@ arm: printver dist
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
-#arm.ent: LDFLAGS += -Wl,-rpath=/opt/lib,--dynamic-linker=/opt/lib/ld-linux.so.3 -lpthread -L../arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot
-#arm.ent: CFLAGS += -DUSE_PTHREAD -isystem../arm-unknown-linux-gnueabi/arm-unknown-linux-gnueabi/sysroot/include
 arm.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-linux.so.3 -lpthread -L/home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/lib
-arm.ent: CFLAGS += -DUSE_PTHREAD -isystem/home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/include
+arm.ent: CFLAGS += -isystem/home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/include
 arm.ent: ARCH = arm.ent
 arm.ent: printver dist
 	@echo "=== Building ARM (Entware) ==="
