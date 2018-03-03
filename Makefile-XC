@@ -78,13 +78,6 @@ MIPSentPREFIX := mipsel-openwrt-linux-uclibc-
 MIPSentCC     := $(MIPSentPREFIX)$(CC)
 MIPSentSTRIP  := $(MIPSentPREFIX)$(STRIP)
 
-# mipsel(Debian) environment
-MIPSdebTOOLS  := /usr/bin
-MIPSdebPATH   := PATH=$(MIPSdebTOOLS):$(PATH)
-MIPSdebPREFIX := mipsel-linux-gnu-
-MIPSdebCC     := $(MIPSdebPREFIX)$(CC)
-MIPSdebSTRIP  := $(MIPSdebPREFIX)$(STRIP)
-
 # tomatoware environment uses basic setup options because it compiles native
 
 # targets - notes:
@@ -159,15 +152,6 @@ mips.ent: printver dist
 	$(MIPSentPATH) $(MIPSentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
 	$(MIPSentPATH) $(MIPSentSTRIP) dist/$(DISTNAME).$@.performance.*
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-ng.mipsel.zip $(PFILES)
-
-mipsel.deb: LDFLAGS += -lpthread -L/home/yipst/pixelserv-tls/openssl/mipsel.deb -Wl,-rpath-link,/home/yipst/pixelserv-tls/openssl/mipsel.deb
-mipsel.deb: CFLAGS += -isystem/usr/include/mipsel-linux-gnu
-mipsel.deb: ARCH = mipsel.deb
-mipsel.deb: printver dist
-	@echo "=== Building mipsel Debian ==="
-	$(MIPSdebPATH) $(MIPSdebCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
-#	$(MIPSdebPATH) $(MIPSdebSTRIP) dist/$(DISTNAME).$@.performance.*
-	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
 arm: ARCH = arm
 arm: printver dist
