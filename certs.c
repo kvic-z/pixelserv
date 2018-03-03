@@ -80,8 +80,8 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
         }
         if (_name_len != SSLCTX_TBL_get(idx, name_len))
             continue;
-        if (_name_len > 10 && SSLCTX_TBL_get(idx, cert_name)[7] != cert_name[7] &&
-            SSLCTX_TBL_get(idx, cert_name)[10] != cert_name[10])
+        if (_name_len > 10 && (SSLCTX_TBL_get(idx, cert_name)[7] != cert_name[7] ||
+            SSLCTX_TBL_get(idx, cert_name)[10] != cert_name[10]))
             continue;
         if (memcmp(cert_name, SSLCTX_TBL_get(idx, cert_name), _name_len) == 0)
         {
