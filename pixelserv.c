@@ -124,6 +124,7 @@ int main (int argc, char* argv[]) // program start
   int warning_time = 0;
 #endif //DEBUG
   int max_num_threads = DEFAULT_THREAD_MAX;
+  int cert_cache_size = DEFAULT_CERT_CACHE_SIZE;
 
   // command line arguments processing
   for (i = 1; i < argc && error == 0; ++i) {
@@ -148,6 +149,13 @@ int main (int argc, char* argv[]) // program start
       if ((i + 1) < argc) {
         // switch on parameter letter and process subsequent argument
         switch (argv[i++][1]) {
+          case 'c':
+            errno = 0;
+            cert_cache_size = strtol(argv[i], NULL, 10);
+            if (errno || cert_cache_size <= 0) {
+              error = 1;
+            }
+            continue;
           case 'l':
             if ((logger_level)atoi(argv[i]) > LGG_DEBUG
                 || (logger_level)atoi(argv[i]) < 0)
@@ -231,6 +239,7 @@ int main (int argc, char* argv[]) // program start
            "options:" "\n"
            "\t" "ip_addr/hostname\t(default: 0.0.0.0)" "\n"
            "\t" "-2\t\t\t(disable HTTP 204 reply to generate_204 URLs)" "\n"
+           "\t" "-c  CERT_CACHE_SIZE\t(default: %d)" "\n"
 #ifndef TEST
            "\t" "-f\t\t\t(stay in foreground/don't daemonize)" "\n"
 #endif // !TEST
@@ -263,7 +272,8 @@ int main (int argc, char* argv[]) // program start
            "\t" "-z  CERT_PATH\t\t(default: "
            DEFAULT_PEM_PATH
            ")" "\n"
-           , argv[0], VERSION, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE, DEFAULT_THREAD_MAX);
+           , argv[0], VERSION, DEFAULT_CERT_CACHE_SIZE, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE,
+           DEFAULT_THREAD_MAX);
     exit(EXIT_FAILURE);
   }
 
@@ -501,6 +511,7 @@ int main (int argc, char* argv[]) // program start
   };
   g = &_g;
 
+  sslctx_tbl_init(cert_cache_size);
   SSL_CTX *sslctx = create_default_sslctx(tls_pem);
 
   // main accept() loop
@@ -727,6 +738,7 @@ int main (int argc, char* argv[]) // program start
 
   pthread_cancel(certgen_thread);
   pthread_join(certgen_thread, NULL);
+  sslctx_tbl_cleanup();
   sk_X509_pop_free(cachain, X509_free);
   SSL_CTX_free(sslctx);
   ssl_free_locks();

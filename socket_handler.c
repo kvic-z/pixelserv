@@ -904,7 +904,6 @@ void* conn_handler( void *ptr )
 #endif
     SSL_set_shutdown(CONN_TLSTOR(ptr, ssl), SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
     SSL_free(CONN_TLSTOR(ptr, ssl));
-    SSL_CTX_free((SSL_CTX*)CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx);
     free(CONN_TLSTOR(ptr, tlsext_cb_arg));
   }
 

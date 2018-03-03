@@ -5,9 +5,10 @@
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 
+#define PIXEL_SSL_SESS_CACHE_SIZE 256*20
 #define PIXEL_CERT_PIPE "/tmp/pixelcerts"
-#define PIXELSERV_MAX_PATH 1024
 #define DEFAULT_PEM_PATH "/opt/var/cache/pixelserv"
+#define PIXELSERV_MAX_PATH 1024
 #define PIXELSERV_MAX_PATH 1024
 #define PIXELSERV_MAX_SERVER_NAME 255
 
@@ -56,11 +57,25 @@ typedef struct {
     tlsext_cb_arg_struct * tlsext_cb_arg;
 } conn_tlstor_struct;
 
+typedef struct {
+    int name_len;
+    int alloc_len;
+    char *cert_name;
+    unsigned int last_use; /* seconds since process up */
+    SSL_CTX *sslctx;
+} sslctx_cache_struct;
+
 #define CONN_TLSTOR(p, e) ((conn_tlstor_struct*)p)->e
 
 void ssl_init_locks();
 void ssl_free_locks();
 void *cert_generator(void *ptr);
+void sslctx_tbl_init(int tbl_size);
+void sslctx_tbl_cleanup();
+int sslctx_tbl_get_cnt_total();
+int sslctx_tbl_get_cnt_hit();
+int sslctx_tbl_get_cnt_miss();
+int sslctx_tbl_get_cnt_purge();
 SSL_CTX * create_default_sslctx(const char *pem_dir);
 int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int num_ssl_ports);
 

@@ -20,7 +20,121 @@
 #include "logger.h"
 #include "util.h"
 
+static sslctx_cache_struct *sslctx_tbl;
+static int sslctx_tbl_size, sslctx_tbl_end;
+static int sslctx_tbl_cnt_hit, sslctx_tbl_cnt_miss, sslctx_tbl_cnt_purge;
 static pthread_mutex_t *locks;
+
+#define SSLCTX_TBL_ptr(h)         ((sslctx_cache_struct *)(sslctx_tbl + h))
+#define SSLCTX_TBL_get(h, k)      SSLCTX_TBL_ptr(h)->k
+#define SSLCTX_TBL_set(h, k, v)   SSLCTX_TBL_ptr(h)->k = v
+
+inline int sslctx_tbl_get_cnt_total() { return sslctx_tbl_end; }
+inline int sslctx_tbl_get_cnt_hit() { return sslctx_tbl_cnt_hit; }
+inline int sslctx_tbl_get_cnt_miss() { return sslctx_tbl_cnt_miss; }
+inline int sslctx_tbl_get_cnt_purge() { return sslctx_tbl_cnt_purge; }
+
+void sslctx_tbl_init(int tbl_size)
+{
+    sslctx_tbl_end = 0;
+    sslctx_tbl = malloc(tbl_size * sizeof(sslctx_cache_struct));
+    if (!sslctx_tbl)
+    {
+        sslctx_tbl_size = 0;
+        log_msg(LGG_ERR, "Failed to allocate sslctx_tbl of size %d", tbl_size);
+    } else {
+        sslctx_tbl_size = tbl_size;
+        sslctx_tbl_cnt_hit = sslctx_tbl_cnt_miss = sslctx_tbl_cnt_purge = 0;
+        memset(sslctx_tbl, 0, tbl_size * sizeof(sslctx_cache_struct));
+    }
+}
+
+void sslctx_tbl_cleanup()
+{
+    int idx;
+    for (idx = 0; idx < sslctx_tbl_end; idx++)
+    {
+        free(SSLCTX_TBL_get(idx, cert_name));
+        SSL_CTX_free(SSLCTX_TBL_get(idx, sslctx));
+    }
+}
+
+static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
+{
+    if (!cert_name || !found_idx || !ins_idx) {
+        log_msg(LOG_ERR, "Invalid params. cert_name: %s. found_idx: %d, ins_idx: %d",
+            cert_name, found_idx, ins_idx);
+        return -1;
+    }
+    *found_idx = -1; *ins_idx = -1;
+    int _name_len = strlen(cert_name);
+    int _last_use = process_uptime();
+    int purge_idx = sslctx_tbl_end;
+    int idx;
+    for (idx = 0; idx < sslctx_tbl_end; idx++)
+    {
+        if (SSLCTX_TBL_get(idx, last_use) < _last_use)
+        {
+            _last_use = SSLCTX_TBL_get(idx, last_use);
+            purge_idx = idx;
+        }
+        if (_name_len != SSLCTX_TBL_get(idx, name_len))
+            continue;
+        if (_name_len > 10 && SSLCTX_TBL_get(idx, cert_name)[7] != cert_name[7] &&
+            SSLCTX_TBL_get(idx, cert_name)[10] != cert_name[10])
+            continue;
+        if (memcmp(cert_name, SSLCTX_TBL_get(idx, cert_name), _name_len) == 0)
+        {
+            *found_idx = idx;
+            sslctx_tbl_cnt_hit++;
+            return 0;
+        }
+    }
+    if (sslctx_tbl_end == sslctx_tbl_size)
+    {
+        if (purge_idx == sslctx_tbl_size)
+        {
+            log_msg(LOG_ERR, "Failed to find candiate in sslctx_tbl for purge.");
+            purge_idx = 0; /* decimate the first entry */
+        }
+        *ins_idx = purge_idx;
+    }
+    else
+        *ins_idx = sslctx_tbl_end;
+    sslctx_tbl_cnt_miss++;
+    return 0;
+}
+
+static int sslctx_tbl_cache(char* cert_name, SSL_CTX *sslctx, int ins_idx)
+{
+    if (cert_name == NULL || sslctx == NULL || ins_idx >= sslctx_tbl_size || ins_idx < 0)
+    {
+        log_msg(LOG_ERR, "Invalid params. cert_name: %s. sslctx: %d, ins_idx: %d",
+            cert_name, sslctx, ins_idx);
+        return -1;
+    }
+    if (ins_idx == sslctx_tbl_end && sslctx_tbl_end < sslctx_tbl_size)
+        sslctx_tbl_end++;
+    else {
+        SSL_CTX_free(SSLCTX_TBL_get(ins_idx, sslctx));
+        sslctx_tbl_cnt_purge++;
+    }
+
+    /* add new cache entry */
+    int len = strlen(cert_name);
+    char *str = SSLCTX_TBL_get(ins_idx, cert_name);
+    if (len > SSLCTX_TBL_get(ins_idx, alloc_len))
+    {
+        str = realloc(str, len + 1);
+        SSLCTX_TBL_set(ins_idx, alloc_len, len + 1);
+    }
+    strcpy(str, cert_name);
+    SSLCTX_TBL_set(ins_idx, cert_name, str);
+    SSLCTX_TBL_set(ins_idx, name_len, len);
+    SSLCTX_TBL_set(ins_idx, sslctx, sslctx);
+    SSLCTX_TBL_set(ins_idx, last_use, process_uptime());
+    return 0;
+}
 
 static void ssl_lock_cb(int mode, int type, const char *file, int line)
 {
@@ -265,9 +379,9 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
     char full_pem_path[PIXELSERV_MAX_PATH + 1 + 1]; /* worst case ':\0' */
     int len;
 
+    len = strlen(cbarg->tls_pem);
     full_pem_path[PIXELSERV_MAX_PATH] = '\0';
     strncpy(full_pem_path, cbarg->tls_pem, PIXELSERV_MAX_PATH);
-    len = strlen(cbarg->tls_pem);
     strncat(full_pem_path, "/", PIXELSERV_MAX_PATH - len);
     ++len;
 
@@ -331,53 +445,61 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
         goto quit_cb;
     }
 
-    SSL_CTX *sslctx = SSL_CTX_new(TLSv1_2_server_method());
-#ifdef PIXELSERV_SSL_HAS_ECDH_AUTO
-    SSL_CTX_set_ecdh_auto(sslctx, 1);
-#else
-    EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_secp384r1);
-    if (!ecdh)
-        log_msg(LGG_ERR, "Cannot get ECDH curve");
-    SSL_CTX_set_tmp_ecdh(sslctx, ecdh);
-    EC_KEY_free(ecdh);
-#endif
-    SSL_CTX_set_options(sslctx,
-          SSL_OP_SINGLE_DH_USE |
-          SSL_MODE_RELEASE_BUFFERS |
-          SSL_OP_NO_COMPRESSION |
-          SSL_OP_CIPHER_SERVER_PREFERENCE);
-    SSL_CTX_set_session_cache_mode(sslctx, SSL_SESS_CACHE_OFF);
-    if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
-        log_msg(LGG_DEBUG, "Failed to set cipher list");
-    if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0
-       || SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0)
+    int handle, ins_handle;
+    sslctx_tbl_lookup(pem_file, &handle, &ins_handle);
+    if (handle < 0)
     {
-        SSL_CTX_free(sslctx);
-        cbarg->status = SSL_ERR;
-        log_msg(LGG_ERR, "Cannot use %s\n",full_pem_path);
-        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
-        goto quit_cb;
-    }
-    if (cbarg->cachain) {
-        X509_INFO *inf; int i;
-        for (i=sk_X509_INFO_num(cbarg->cachain)-1; i >= 0; i--) {
-            if ((inf = sk_X509_INFO_value(cbarg->cachain, i)) && inf->x509 &&
-                    !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509))) {
-                SSL_CTX_free(sslctx);
-                log_msg(LGG_ERR, "Cannot add CA cert %d\n", i);  /* X509_ref_up requires >= v1.1 */
-                rv = SSL_TLSEXT_ERR_ALERT_FATAL;
-                goto quit_cb;
+        SSL_CTX *sslctx = SSL_CTX_new(TLSv1_2_server_method());
+#ifdef PIXELSERV_SSL_HAS_ECDH_AUTO
+        SSL_CTX_set_ecdh_auto(sslctx, 1);
+#else
+        EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_secp384r1);
+        if (!ecdh)
+            log_msg(LGG_ERR, "Cannot get ECDH curve");
+        SSL_CTX_set_tmp_ecdh(sslctx, ecdh);
+        EC_KEY_free(ecdh);
+#endif
+        SSL_CTX_set_options(sslctx,
+              SSL_OP_SINGLE_DH_USE |
+              SSL_MODE_RELEASE_BUFFERS |
+              SSL_OP_NO_COMPRESSION |
+              SSL_OP_CIPHER_SERVER_PREFERENCE);
+        SSL_CTX_sess_set_cache_size(sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
+        if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
+            log_msg(LGG_DEBUG, "Failed to set cipher list");
+        if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0
+           || SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0)
+        {
+            SSL_CTX_free(sslctx);
+            cbarg->status = SSL_ERR;
+            log_msg(LGG_ERR, "Cannot use %s\n",full_pem_path);
+            rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+            goto quit_cb;
+        }
+        if (cbarg->cachain) {
+            X509_INFO *inf; int i;
+            for (i=sk_X509_INFO_num(cbarg->cachain)-1; i >= 0; i--) {
+                if ((inf = sk_X509_INFO_value(cbarg->cachain, i)) && inf->x509 &&
+                        !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509))) {
+                    SSL_CTX_free(sslctx);
+                    log_msg(LGG_ERR, "Cannot add CA cert %d\n", i);  /* X509_ref_up requires >= v1.1 */
+                    rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+                    goto quit_cb;
+                }
             }
         }
+        if (sslctx_tbl_cache(pem_file, sslctx, ins_handle) < 0)
+            goto quit_cb;
+        handle = ins_handle;
     }
-    SSL_set_SSL_CTX(ssl, sslctx);
+    SSL_set_SSL_CTX(ssl, SSLCTX_TBL_get(handle, sslctx));
     cbarg->status = SSL_HIT;
-    cbarg->sslctx = (void*)sslctx;
+    cbarg->sslctx = (void*)SSLCTX_TBL_get(handle, sslctx);
 
 quit_cb:
 
 #ifdef DEBUG
-    printf("%s: sslctx %p\n", __FUNCTION__, (void*) sslctx);
+    printf("%s: sslctx %p\n", __FUNCTION__, (void*) SSLCTX_TBL_get(handle, sslctx));
 #endif
     return rv;
 }
@@ -390,7 +512,7 @@ SSL_CTX * create_default_sslctx(const char *pem_dir) {
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
-    SSL_CTX_set_session_cache_mode(sslctx, SSL_SESS_CACHE_OFF);
+    SSL_CTX_sess_set_cache_size(sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
     if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
         log_msg(LGG_DEBUG, "cipher_list cannot be set");
     SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);

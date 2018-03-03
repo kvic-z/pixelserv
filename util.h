@@ -19,17 +19,19 @@
 #include <arpa/inet.h>
 
 // preprocessor defines
-#define VERSION "v2.0.1"
+#define VERSION "v2.1.0-test.1"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
-#define DEFAULT_TIMEOUT 10     // default timeout for select() calls, in seconds
+#define DEFAULT_TIMEOUT 10      // default timeout for select() calls, in seconds
 #define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 12)
                                 // default keep-alive duration for HTTP/1.1 connections, in seconds
                                 // it's the time a connection will stay active
                                 // until another request comes and refreshes the timer
 #define DEFAULT_THREAD_MAX 1200 // maximum number of concurrent service threads
+#define DEFAULT_CERT_CACHE_SIZE 100
+                                // default number of certificates to be cached in memory
 #define SECOND_PORT "443"
 #define MAX_PORTS 10
 #define MAX_TLS_PORTS 9         // PLEASE ENSURE MAX_TLS_PORTS < MAX_PORTS
@@ -122,6 +124,7 @@ struct Global {
 // encapsulation of clock_gettime() to perform one-time degradation of source
 //  when necessary
 void get_time(struct timespec *time);
+unsigned int process_uptime();
 
 // generate version string
 // note that caller is expected to call free()
