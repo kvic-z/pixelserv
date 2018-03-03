@@ -451,6 +451,18 @@ static int write_pipe(int fd, response_struct *pipedata) {
   return rv;
 }
 
+static void get_client_ip(int socket_fd, char *ip_buf, int ip_buf_len)
+{
+  struct sockaddr_storage sin_addr;
+  socklen_t sin_addr_len = sizeof(sin_addr);
+
+  getpeername(socket_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
+  if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len,
+               ip_buf, ip_buf_len,
+               NULL, 0, NI_NUMERICHOST) != 0)
+    log_msg(LOG_ERR, "getnameinfo failed to get client_ip");
+}
+
 void* conn_handler( void *ptr )
 {
   int argc = GLOBAL(g, argc);
@@ -835,17 +847,8 @@ void* conn_handler( void *ptr )
         log_msg(LGG_ERR, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
       }
       if (log_verbose >= LGG_INFO) {
-        struct sockaddr_storage sin_addr;
-        socklen_t sin_addr_len = sizeof(sin_addr);
         char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
-
-        getpeername(new_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
-        if(getnameinfo((struct sockaddr *)&sin_addr,
-                       sin_addr_len,
-                       client_ip,
-                       sizeof client_ip,
-                       NULL, 0, NI_NUMERICHOST) != 0)
-          perror("getnameinfo");
+        get_client_ip(new_fd, client_ip, sizeof client_ip);
         log_xcs(LGG_INFO, client_ip, host, (CONN_TLSTOR(ptr, ssl) != NULL), req_url, post_buf, post_buf_len);
       }
       // free memory allocated by asprintf() if any
