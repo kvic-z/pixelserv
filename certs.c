@@ -20,10 +20,11 @@
 #include "logger.h"
 #include "util.h"
 
+static pthread_mutex_t *locks;
+
 static sslctx_cache_struct *sslctx_tbl;
 static int sslctx_tbl_size, sslctx_tbl_end;
 static int sslctx_tbl_cnt_hit, sslctx_tbl_cnt_miss, sslctx_tbl_cnt_purge;
-static pthread_mutex_t *locks;
 
 #define SSLCTX_TBL_ptr(h)         ((sslctx_cache_struct *)(sslctx_tbl + h))
 #define SSLCTX_TBL_get(h, k)      SSLCTX_TBL_ptr(h)->k
@@ -59,6 +60,26 @@ void sslctx_tbl_cleanup()
     }
 }
 
+void sslctx_tbl_lock(int idx)
+{
+    if (idx < 0 || idx >= sslctx_tbl_size)
+    {
+        log_msg(LOG_DEBUG, "%s: invalid idx %d", __FUNCTION__, idx);
+        return;
+    }
+    pthread_mutex_lock(&SSLCTX_TBL_get(idx, lock));
+}
+
+void sslctx_tbl_unlock(int idx)
+{
+    if (idx < 0 || idx >= sslctx_tbl_size)
+    {
+        log_msg(LOG_DEBUG, "%s: invalid idx %d", __FUNCTION__, idx);
+        return;
+    }
+    pthread_mutex_unlock(&SSLCTX_TBL_get(idx, lock));
+}
+
 static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
 {
     if (!cert_name || !found_idx || !ins_idx) {
@@ -87,6 +108,8 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
         {
             *found_idx = idx;
             sslctx_tbl_cnt_hit++;
+            SSLCTX_TBL_ptr(idx)->reuse_count++;
+            SSLCTX_TBL_set(idx, last_use, process_uptime());
             return 0;
         }
     }
@@ -113,34 +136,52 @@ static int sslctx_tbl_cache(char* cert_name, SSL_CTX *sslctx, int ins_idx)
             cert_name, sslctx, ins_idx);
         return -1;
     }
-    if (ins_idx == sslctx_tbl_end && sslctx_tbl_end < sslctx_tbl_size)
-        sslctx_tbl_end++;
-    else {
-        SSL_CTX_free(SSLCTX_TBL_get(ins_idx, sslctx));
-        sslctx_tbl_cnt_purge++;
-    }
 
     /* add new cache entry */
     int len = strlen(cert_name);
     char *str = SSLCTX_TBL_get(ins_idx, cert_name);
     if (len > SSLCTX_TBL_get(ins_idx, alloc_len))
     {
-        str = realloc(str, len + 1);
-        SSLCTX_TBL_set(ins_idx, alloc_len, len + 1);
+        str = realloc(str, len);
+        SSLCTX_TBL_set(ins_idx, alloc_len, len);
     }
-    strcpy(str, cert_name);
+    strncpy(str, cert_name, len);
     SSLCTX_TBL_set(ins_idx, cert_name, str);
     SSLCTX_TBL_set(ins_idx, name_len, len);
-    SSLCTX_TBL_set(ins_idx, sslctx, sslctx);
     SSLCTX_TBL_set(ins_idx, last_use, process_uptime());
+    if (ins_idx == sslctx_tbl_end && sslctx_tbl_end < sslctx_tbl_size)
+        sslctx_tbl_end++;
+    else {
+#ifdef DEBUG
+        printf("%s: SSL_CTX_free sslctx %p\n", __FUNCTION__, SSLCTX_TBL_get(ins_idx, sslctx));
+#endif
+        sslctx_tbl_lock(ins_idx);
+        SSL_CTX_free(SSLCTX_TBL_get(ins_idx, sslctx));
+        sslctx_tbl_unlock(ins_idx);
+        sslctx_tbl_cnt_purge++;
+    }
+    SSLCTX_TBL_set(ins_idx, sslctx, sslctx);
+    SSL_CTX_set_session_id_context(sslctx, (const unsigned char *)str, len);
     return 0;
 }
 
+#ifdef DEBUG
+static void sslctx_tbl_dump(int idx, const char * func)
+{
+    printf("%s: idx %d now %d\n", func, idx, process_uptime());
+    printf("%s: ** cert_name %p\n", func, sslctx_tbl[idx].cert_name);
+    printf("%s: ** name_len %d\n", func, sslctx_tbl[idx].name_len);
+    printf("%s: ** alloc_len %d\n", func, sslctx_tbl[idx].alloc_len);
+    printf("%s: ** last_use %d\n", func, sslctx_tbl[idx].last_use);
+    printf("%s: ** reuse_count %d\n", func, sslctx_tbl[idx].reuse_count);
+    printf("%s: ** sslctx %p\n", func, sslctx_tbl[idx].sslctx);
+    if (sslctx_tbl[idx].sslctx)
+        printf("%s: ** sslctx ref %d\n", func, sslctx_tbl[idx].sslctx->references);
+}
+#endif
+
 static void ssl_lock_cb(int mode, int type, const char *file, int line)
 {
-#if 0
-    printf("%s: mode = %d, type = %d\n", __FUNCTION__, mode, type);
-#endif
     if (mode & CRYPTO_LOCK)
         pthread_mutex_lock(&(locks[type]));
     else
@@ -149,10 +190,7 @@ static void ssl_lock_cb(int mode, int type, const char *file, int line)
 
 void ssl_thread_id(CRYPTO_THREADID *id)
 {
-    unsigned int tid = (unsigned int) pthread_self();
-#if 0
-    printf("%s: id = %d\n", __FUNCTION__, tid);
-#endif
+    unsigned long tid = (unsigned long) pthread_self();
     CRYPTO_THREADID_set_numeric(id, tid);
 }
 
@@ -163,7 +201,6 @@ void ssl_init_locks()
 #endif
     int i;
     locks = (pthread_mutex_t *)OPENSSL_malloc(CRYPTO_num_locks()*sizeof(pthread_mutex_t));
-
     for (i = 0; i < CRYPTO_num_locks(); i++)
         pthread_mutex_init(&(locks[i]), NULL);
 
@@ -447,6 +484,11 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
 
     int handle, ins_handle;
     sslctx_tbl_lookup(pem_file, &handle, &ins_handle);
+#ifdef DEBUG
+    printf("%s: handle %d ins_handle %d\n", __FUNCTION__, handle, ins_handle);
+    if (handle >=0) sslctx_tbl_dump(handle, __FUNCTION__);
+    if (ins_handle >=0) sslctx_tbl_dump(ins_handle, __FUNCTION__);
+#endif
     if (handle < 0)
     {
         SSL_CTX *sslctx = SSL_CTX_new(TLSv1_2_server_method());
@@ -463,6 +505,7 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
               SSL_OP_SINGLE_DH_USE |
               SSL_MODE_RELEASE_BUFFERS |
               SSL_OP_NO_COMPRESSION |
+              SSL_OP_NO_TICKET |
               SSL_OP_CIPHER_SERVER_PREFERENCE);
         SSL_CTX_sess_set_cache_size(sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
         if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
@@ -492,15 +535,14 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
             goto quit_cb;
         handle = ins_handle;
     }
+    sslctx_tbl_lock(handle);
     SSL_set_SSL_CTX(ssl, SSLCTX_TBL_get(handle, sslctx));
+    sslctx_tbl_unlock(handle);
+    cbarg->sslctx_idx = handle;
     cbarg->status = SSL_HIT;
     cbarg->sslctx = (void*)SSLCTX_TBL_get(handle, sslctx);
 
 quit_cb:
-
-#ifdef DEBUG
-    printf("%s: sslctx %p\n", __FUNCTION__, (void*) SSLCTX_TBL_get(handle, sslctx));
-#endif
     return rv;
 }
 
@@ -511,6 +553,7 @@ SSL_CTX * create_default_sslctx(const char *pem_dir) {
     SSL_CTX_set_options(sslctx,
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
+          SSL_OP_NO_TICKET |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
     SSL_CTX_sess_set_cache_size(sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
     if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)

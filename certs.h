@@ -48,6 +48,7 @@ typedef struct {
     char server_ip[INET6_ADDRSTRLEN];
     ssl_enum status;
     void *sslctx;
+    int sslctx_idx;
 } tlsext_cb_arg_struct;
 
 typedef struct {
@@ -62,7 +63,9 @@ typedef struct {
     int alloc_len;
     char *cert_name;
     unsigned int last_use; /* seconds since process up */
+    int reuse_count;
     SSL_CTX *sslctx;
+    pthread_mutex_t lock;
 } sslctx_cache_struct;
 
 #define CONN_TLSTOR(p, e) ((conn_tlstor_struct*)p)->e
@@ -72,6 +75,8 @@ void ssl_free_locks();
 void *cert_generator(void *ptr);
 void sslctx_tbl_init(int tbl_size);
 void sslctx_tbl_cleanup();
+void sslctx_tbl_lock(int idx);
+void sslctx_tbl_unlock(int idx);
 int sslctx_tbl_get_cnt_total();
 int sslctx_tbl_get_cnt_hit();
 int sslctx_tbl_get_cnt_miss();

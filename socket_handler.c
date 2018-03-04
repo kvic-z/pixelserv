@@ -906,7 +906,9 @@ void* conn_handler( void *ptr )
     printf("%s: sslctx %p\n", __FUNCTION__, (void*) CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx);
 #endif
     SSL_set_shutdown(CONN_TLSTOR(ptr, ssl), SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+    sslctx_tbl_lock(CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx_idx);
     SSL_free(CONN_TLSTOR(ptr, ssl));
+    sslctx_tbl_unlock(CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx_idx);
     free(CONN_TLSTOR(ptr, tlsext_cb_arg));
   }
 

@@ -295,6 +295,7 @@ int main (int argc, char* argv[]) // program start
 
   SSL_library_init();
   ssl_init_locks();
+  sslctx_tbl_init(cert_cache_size);
   mkfifo(PIXEL_CERT_PIPE, 0600);
   pw = getpwnam(user);
   chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid);
@@ -511,7 +512,6 @@ int main (int argc, char* argv[]) // program start
   };
   g = &_g;
 
-  sslctx_tbl_init(cert_cache_size);
   SSL_CTX *sslctx = create_default_sslctx(tls_pem);
 
   // main accept() loop
@@ -676,6 +676,7 @@ int main (int argc, char* argv[]) // program start
         strncpy(t->server_ip, server_ip, INET6_ADDRSTRLEN);
         t->status = SSL_UNKNOWN;
         t->sslctx = NULL;
+        t->sslctx_idx = -1;
 
         const struct timeval timeout = { 0, 500000 };
         setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval));
@@ -692,8 +693,9 @@ int main (int argc, char* argv[]) // program start
                 case SSL_UNKNOWN:    ++slu; break;
                 default:             ;
             }
+            sslctx_tbl_lock(t->sslctx_idx);
             SSL_free(ssl);
-            SSL_CTX_free((SSL_CTX*)t->sslctx);
+            sslctx_tbl_unlock(t->sslctx_idx);
             free(t);
             shutdown(new_fd, SHUT_RDWR);
             close(new_fd);
@@ -715,8 +717,9 @@ int main (int argc, char* argv[]) // program start
       log_msg(LGG_ERR, "Failed to create conn_handler thread. err: %d", err);
       if(conn_tlstor->ssl){
         SSL_set_shutdown(conn_tlstor->ssl, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+        sslctx_tbl_lock(conn_tlstor->tlsext_cb_arg->sslctx_idx);
         SSL_free(conn_tlstor->ssl);
-        SSL_CTX_free((SSL_CTX*)conn_tlstor->tlsext_cb_arg->sslctx);
+        sslctx_tbl_unlock(conn_tlstor->tlsext_cb_arg->sslctx_idx);
         free(conn_tlstor->tlsext_cb_arg);
       }
       shutdown(new_fd, SHUT_RDWR);
