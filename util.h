@@ -17,6 +17,7 @@
 #include <unistd.h>             // close(), setuid(), TEMP_FAILURE_RETRY, fork()
 #include <time.h>               // struct timespec, clock_gettime(), difftime()
 #include <arpa/inet.h>
+#include <linux/version.h>
 
 // preprocessor defines
 #define VERSION "v2.1.0-test.2"
@@ -52,6 +53,14 @@
        while (__result == -1L && errno == EINTR);                             \
        __result; }))
 #endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0) || ENABLE_TCP_FASTOPEN
+    #define FEAT_TFO  " flags: tfo"
+#else
+    #define FEAT_TFO
+#endif
+
+#define FEATURE_FLAGS FEAT_TFO
 
 #ifdef TEST
 # define TESTPRINT printf
