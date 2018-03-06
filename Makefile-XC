@@ -8,7 +8,7 @@ SRCS      := util.c socket_handler.c pixelserv.c certs.c logger.c
 ROOT      := .
 CFLAGS    := -I$(ROOT)/openssl/include
 LDFLAGS    = -L$(ROOT)/openssl/$(ARCH) -L$(ROOT)/openssl/$(ARCH)
-SHAREDLIB := -lssl -lcrypto -ldl -lpthread
+SHAREDLIB := -lssl -lcrypto -lpthread
 STATICLIB  = $(ROOT)/openssl/$(ARCH)/libssl.a $(ROOT)/openssl/$(ARCH)/libcrypto.a
 
 # debug flags
@@ -20,7 +20,7 @@ ifndef BACKTRACE
 CFLAGS_P   = $(CFLAGS) -O3 -s -Wall -ffunction-sections -fdata-sections -fno-strict-aliasing
 LDFLAGS_P  = $(LDFLAGS) -Wl,--gc-sections
 else
-CFLAGS_P   = $(CFLAGS) -O3 -s -Wall -g -funwind-tables -rdynamic -DBACKTRACE
+CFLAGS_P   = $(CFLAGS) -O3 -s -Wall -g -funwind-tables -rdynamic
 LDFLAGS_P  = $(LDFLAGS)
 endif
 
@@ -57,15 +57,15 @@ ARMPREFIX := arm-brcm-linux-uclibcgnueabi-
 ARMCC     := $(ARMPREFIX)$(CC)
 ARMSTRIP  := $(ARMPREFIX)$(STRIP)
 
-# ARMV8(Asuswrt) environment
-ARMV8TOOLS  := /home/yipst/brcm-armv8/usr/bin
+# ARMV8(Entware) environment
+ARMV8TOOLS  := /home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27/bin
 ARMV8PATH   := PATH=$(ARMV8TOOLS):$(PATH)
-ARMV8PREFIX := arm-linux
+ARMV8PREFIX := aarch64-openwrt-linux-
 ARMV8CC     := $(ARMV8PREFIX)$(CC)
 ARMV8STRIP  := $(ARMV8PREFIX)$(STRIP)
 
 # ARM(Entware) environment
-ARMentTOOLS  := ../arm-unknown-linux-gnueabi/bin
+ARMentTOOLS  := /home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/bin
 ARMentPATH   := PATH=$(ARMentTOOLS):$(PATH)
 ARMentPREFIX := arm-openwrt-linux-gnueabi-
 ARMentCC     := $(ARMentPREFIX)$(CC)
@@ -118,15 +118,14 @@ x86: printver dist
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
 amd64: ARCH = amd64
-amd64: LDFLAGS += -lpthread
+amd64: LDFLAGS += -lpthread -ldl
 amd64: printver dist
 	@echo "=== Building amd64 ==="
 	$(CC64) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
 	$(CC64) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB) 
-#	$(CC64) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_D) $(SHAREDLIB)
+	$(CC64) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_D) $(SHAREDLIB)
 	$(CC64) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
 	        $(OPTS) $(SRCS) $(STATICLIB) -static $(LDFLAGS_P) $(SHAREDLIB)
-#	$(STRIP) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
@@ -169,30 +168,24 @@ arm: printver dist
 arm.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-linux.so.3 -lpthread -L/home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/lib
 arm.ent: CFLAGS += -isystem/home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/include
 arm.ent: ARCH = arm.ent
+arm.ent: export STAGING_DIR = /home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi
 arm.ent: printver dist
 	@echo "=== Building ARM (Entware) ==="
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB) 
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
-#	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static \
-#	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_D) 
-#	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
-#	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_P)
-#	$(ARMentPATH) $(ARMentSTRIP) dist/$(DISTNAME).$@.performance.*
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-ng.armv7softfloat.zip $(PFILES)
 
-armv8: ARCH = arm.ent
-armv8: printver dist
+armv8.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-linux-aarch64.so.1 -lpthread -L/home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27/lib
+armv8.ent: CFLAGS += -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -Wno-error=unused-but-set-variable -Wno-error=unused-result -fpic -isystem/home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27/include
+armv8.ent: ARCH = armv8.ent
+armv8.ent: export STAGING_DIR = /home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27
+armv8.ent: printver dist
 	@echo "=== Building ARM ==="
-	$(ARMPATH) $(ARMCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB) 
-	$(ARMPATH) $(ARMCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
-#	$(ARMPATH) $(ARMCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.static \
-#	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_D) 
-#	$(ARMPATH) $(ARMCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.static \
-#	        $(OPTS) $(SRCS) $(STATICLIB) $(SHAREDLIB) -static $(LDFLAGS_P)
-	$(ARMPATH) $(ARMSTRIP) dist/$(DISTNAME).$@.performance.*
+	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
+	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
-	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
+	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-3.x.aarch64softfloat.zip $(PFILES)
 
 tomatoware: printver dist
 	@echo "=== Building tomatoware ==="
