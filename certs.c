@@ -491,6 +491,7 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
 #endif
     if (handle < 0)
     {
+        cbarg->status = SSL_ERR; /* initial status; to be updated upon success */
         SSL_CTX *sslctx = SSL_CTX_new(TLSv1_2_server_method());
 #ifdef PIXELSERV_SSL_HAS_ECDH_AUTO
         SSL_CTX_set_ecdh_auto(sslctx, 1);
@@ -514,7 +515,6 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
            || SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0)
         {
             SSL_CTX_free(sslctx);
-            cbarg->status = SSL_ERR;
             log_msg(LGG_ERR, "Cannot use %s\n",full_pem_path);
             rv = SSL_TLSEXT_ERR_ALERT_FATAL;
             goto quit_cb;
