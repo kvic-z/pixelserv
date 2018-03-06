@@ -4,32 +4,29 @@
 * single pixel http string from http://proxytunnel.sourceforge.net/pixelserv.php
 */
 
-#include "util.h"
-#include "socket_handler.h"
-
-#include <sys/wait.h>   // waitpid()
-
-#ifdef DROP_ROOT
-# include <pwd.h>       // getpwnam()
-#endif
-
-#include <fcntl.h>      // fcntl() and related
-
-#ifdef TEST
-# include <arpa/inet.h> // inet_ntop()
-#endif
-
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/resource.h>
+#include <fcntl.h>
 #include <pthread.h>
+#ifdef DROP_ROOT
+#include <pwd.h>
+#endif
+#ifdef TEST
+#include <arpa/inet.h>
+#endif
 #include <linux/version.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
 #include "certs.h"
 #include "logger.h"
+#include "socket_handler.h"
+#include "util.h"
 
 #define THREAD_STACK_SIZE  32767
+#define TCP_FASTOPEN_QLEN  25
 
 void signal_handler(int sig)
 {
@@ -82,7 +79,6 @@ int main (int argc, char* argv[]) // program start
   int new_fd = 0;  // new connection on new_fd
   struct sockaddr_storage their_addr;  // connector's address information
   socklen_t sin_size;
-  int yes = 1;
   char* version_string;
   time_t select_timeout = DEFAULT_TIMEOUT;
   time_t http_keepalive = DEFAULT_KEEPALIVE;
@@ -234,7 +230,7 @@ int main (int argc, char* argv[]) // program start
   } // for
 
   if (error) {
-    printf("%s: %s compiled: " __DATE__ " " __TIME__ "\n"
+    printf("%s: %s compiled: " __DATE__ " " __TIME__ FEATURE_FLAGS "\n"
            "Usage: pixelserv-tls [OPTION]" "\n"
            "options:" "\n"
            "\t" "ip_addr/hostname\t(default: 0.0.0.0)" "\n"
@@ -382,22 +378,22 @@ int main (int argc, char* argv[]) // program start
     }
 
     if ( ((sockfd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) < 1)
-      || (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)))
-      || (setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &yes, sizeof(int)))  // send short packets straight away
+      || setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int))
+      || setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int))
 #ifdef IF_MODE
-      || (use_if && (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, ifname, strlen(ifname))))  // only use selected i/f
+      || (use_if && (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, ifname, strlen(ifname))))
 #endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)
-      || (setsockopt(sockfd, SOL_TCP, TCP_FASTOPEN, &yes, sizeof(int)))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0) || ENABLE_TCP_FASTOPEN
+      || setsockopt(sockfd, SOL_TCP, TCP_FASTOPEN, &(int){ TCP_FASTOPEN_QLEN }, sizeof(int))
 #endif
-      || (bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen))
-      || (listen(sockfd, BACKLOG))
-      || (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK))  // set non-blocking mode
-       ) {
+      || bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen)
+      || listen(sockfd, BACKLOG)
+      || fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK)
+      ) {
 #ifdef IF_MODE
-      log_msg(LGG_ERR, "Abort: %m - %s:%s:%s", ifname, ip_addr, port);
+      log_msg(LGG_CRIT, "Abort: %m - %s:%s:%s", ifname, ip_addr, port);
 #else
-      log_msg(LOG_ERR, "Abort: %m - %s:%s", ip_addr, port);
+      log_msg(LOG_CRIT, "Abort: %m - %s:%s", ip_addr, port);
 #endif
       exit(EXIT_FAILURE);
     }
@@ -558,7 +554,8 @@ int main (int argc, char* argv[]) // program start
       } else if (rv == 0) {
         log_msg(LGG_WARNING, "pipe read() returned zero");
       } else if (rv != sizeof(pipedata)) {
-        log_msg(LGG_WARNING, "pipe read() got %d bytes, but %u bytes were expected - discarding", rv, (unsigned int)sizeof(pipedata));
+        log_msg(LGG_WARNING, "pipe read() got %d bytes, but %u bytes were expected - discarding",
+          rv, (unsigned int)sizeof(pipedata));
       } else {
         // process response type
         switch (pipedata.status) {
@@ -679,7 +676,14 @@ int main (int argc, char* argv[]) // program start
         t->sslctx_idx = -1;
 
         const struct timeval timeout = { 0, 500000 };
-        setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval));
+
+        if ( /* TCP_NODELAY is not inherited from acceptance */
+             setsockopt(new_fd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int))
+             || setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval)) )
+        {
+            log_msg(LOG_CRIT, "Abort: %m - new_fd setsockopt");
+            exit(EXIT_FAILURE);
+        }
         SSL_CTX_set_tlsext_servername_arg(sslctx, t);
         ssl = SSL_new(sslctx);
         SSL_set_fd(ssl, new_fd);
