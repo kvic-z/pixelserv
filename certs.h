@@ -6,6 +6,7 @@
 #include <openssl/ssl.h>
 
 #define PIXEL_SSL_SESS_CACHE_SIZE 256*20
+#define PIXEL_SSL_SESS_TIMEOUT 7200 /* seconds */
 #define PIXEL_CERT_PIPE "/tmp/pixelcerts"
 #define DEFAULT_PEM_PATH "/opt/var/cache/pixelserv"
 #define PIXELSERV_MAX_PATH 1024
@@ -18,10 +19,10 @@
    ECDHE-RSA-AES128-SHA :
    IE 11 Win 7,8.1; IE 11 Winphone 8.1; Opera >= 17; Safar 7 iOS 7.1 */
 #define PIXELSERV_CIPHER_LIST \
-  "ECDHE-ECDSA-AES128-GCM-SHA256:" \
-  "ECDHE-RSA-AES128-GCM-SHA256:" \
+  "AES128-SHA256:AES128-SHA" \
   "ECDHE-RSA-AES128-SHA:" \
-  "AES128-SHA256:AES128-SHA"
+  "ECDHE-RSA-AES128-GCM-SHA256:" \
+  "ECDHE-ECDSA-AES128-GCM-SHA256:"
 
 #if defined(SSL_CTX_set_ecdh_auto)
 # define PIXELSRV_SSL_HAS_ECDH_AUTO
@@ -64,6 +65,7 @@ typedef struct {
     int alloc_len;
     char *cert_name;
     unsigned int last_use; /* seconds since process up */
+    unsigned int last_flush; /* seconds since process up */
     int reuse_count;
     SSL_CTX *sslctx;
     pthread_mutex_t lock;

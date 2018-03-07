@@ -80,6 +80,30 @@ void sslctx_tbl_unlock(int idx)
     pthread_mutex_unlock(&SSLCTX_TBL_get(idx, lock));
 }
 
+static int sslctx_tbl_check_and_flush(int idx)
+{
+    int pixel_now = process_uptime();
+#ifdef DEBUG
+    printf("%s: %s now %d last_flush %d last_use %d", __FUNCTION__, SSLCTX_TBL_get(idx, cert_name), 
+        pixel_now, SSLCTX_TBL_get(idx, last_flush), SSLCTX_TBL_get(idx, last_use));
+#endif
+    if (SSLCTX_TBL_get(idx, last_flush) > SSLCTX_TBL_get(idx, last_use))
+        return -1;
+
+    int do_flush = pixel_now - SSLCTX_TBL_get(idx, last_use) - PIXEL_SSL_SESS_TIMEOUT;
+    if (do_flush < 0)
+        return -1;
+
+    struct timespec now;
+    get_time(&now);
+    sslctx_tbl_lock(idx);
+    SSL_CTX_flush_sessions(SSLCTX_TBL_get(idx, sslctx), (long)now.tv_sec);
+    sslctx_tbl_unlock(idx);
+    SSLCTX_TBL_set(idx, last_flush, pixel_now);
+    log_msg(LGG_NOTICE, "%s: %s flushed expired sessions.", __FUNCTION__, SSLCTX_TBL_get(idx, cert_name));
+    return 1;
+}
+
 static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
 {
     if (!cert_name || !found_idx || !ins_idx) {
@@ -94,6 +118,7 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
     int idx;
     for (idx = 0; idx < sslctx_tbl_end; idx++)
     {
+        sslctx_tbl_check_and_flush(idx); /* first half */
         if (SSLCTX_TBL_get(idx, last_use) < _last_use)
         {
             _last_use = SSLCTX_TBL_get(idx, last_use);
@@ -110,6 +135,8 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
             sslctx_tbl_cnt_hit++;
             SSLCTX_TBL_ptr(idx)->reuse_count++;
             SSLCTX_TBL_set(idx, last_use, process_uptime());
+            for(idx++; idx < sslctx_tbl_end; idx++)
+                sslctx_tbl_check_and_flush(idx); /* second half */
             return 0;
         }
     }
@@ -140,12 +167,12 @@ static int sslctx_tbl_cache(char* cert_name, SSL_CTX *sslctx, int ins_idx)
     /* add new cache entry */
     int len = strlen(cert_name);
     char *str = SSLCTX_TBL_get(ins_idx, cert_name);
-    if (len > SSLCTX_TBL_get(ins_idx, alloc_len))
+    if ((len + 1) > SSLCTX_TBL_get(ins_idx, alloc_len))
     {
-        str = realloc(str, len);
-        SSLCTX_TBL_set(ins_idx, alloc_len, len);
+        str = realloc(str, len + 1);
+        SSLCTX_TBL_set(ins_idx, alloc_len, len + 1);
     }
-    strncpy(str, cert_name, len);
+    strncpy(str, cert_name, len + 1);
     SSLCTX_TBL_set(ins_idx, cert_name, str);
     SSLCTX_TBL_set(ins_idx, name_len, len);
     SSLCTX_TBL_set(ins_idx, last_use, process_uptime());
@@ -464,23 +491,6 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
         rv = SSL_TLSEXT_ERR_ALERT_FATAL;
         goto quit_cb;
     }
-    struct stat st;
-    if(stat(full_pem_path, &st) != 0){
-        int fd;
-        cbarg->status = SSL_MISS;
-        log_msg(LGG_WARNING, "%s %s missing", srv_name, pem_file);
-        if((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
-            log_msg(LGG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
-        else {
-            /* reuse full_pem_path as scratchpad */
-            strcpy(full_pem_path, pem_file);
-            strcat(full_pem_path, ":");
-            write(fd, full_pem_path, strlen(full_pem_path));
-            close(fd);
-        }
-        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
-        goto quit_cb;
-    }
 
     int handle, ins_handle;
     sslctx_tbl_lookup(pem_file, &handle, &ins_handle);
@@ -489,8 +499,26 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
     if (handle >=0) sslctx_tbl_dump(handle, __FUNCTION__);
     if (ins_handle >=0) sslctx_tbl_dump(ins_handle, __FUNCTION__);
 #endif
-    if (handle < 0)
-    {
+
+    struct stat st;
+    if(handle < 0) {
+        if (stat(full_pem_path, &st) != 0){
+            int fd;
+            cbarg->status = SSL_MISS;
+            log_msg(LGG_WARNING, "%s %s missing", srv_name, pem_file);
+            if((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
+                log_msg(LGG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
+            else {
+                /* reuse full_pem_path as scratchpad */
+                strcpy(full_pem_path, pem_file);
+                strcat(full_pem_path, ":");
+                write(fd, full_pem_path, strlen(full_pem_path));
+                close(fd);
+            }
+            rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+            goto quit_cb;
+        }
+
         cbarg->status = SSL_ERR; /* initial status; to be updated upon success */
         SSL_CTX *sslctx = SSL_CTX_new(TLSv1_2_server_method());
 #ifdef PIXELSERV_SSL_HAS_ECDH_AUTO
@@ -506,8 +534,8 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
               SSL_OP_SINGLE_DH_USE |
               SSL_MODE_RELEASE_BUFFERS |
               SSL_OP_NO_COMPRESSION |
-              SSL_OP_NO_TICKET |
               SSL_OP_CIPHER_SERVER_PREFERENCE);
+        SSL_CTX_set_timeout(sslctx, PIXEL_SSL_SESS_TIMEOUT);
         SSL_CTX_sess_set_cache_size(sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
         if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
             log_msg(LGG_DEBUG, "Failed to set cipher list");
@@ -532,9 +560,13 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
             }
         }
         if (sslctx_tbl_cache(pem_file, sslctx, ins_handle) < 0)
+        {
+            log_msg(LGG_ERR, "%s: fail to cache %s", __FUNCTION__, pem_file);
             goto quit_cb;
+        }
         handle = ins_handle;
-    }
+    } /* handle < 0 */
+
     sslctx_tbl_lock(handle);
     SSL_set_SSL_CTX(ssl, SSLCTX_TBL_get(handle, sslctx));
     sslctx_tbl_unlock(handle);
@@ -553,7 +585,6 @@ SSL_CTX * create_default_sslctx(const char *pem_dir) {
     SSL_CTX_set_options(sslctx,
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
-          SSL_OP_NO_TICKET |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
     SSL_CTX_sess_set_cache_size(sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
     if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
