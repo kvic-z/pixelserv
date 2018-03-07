@@ -358,12 +358,12 @@ int main (int argc, char* argv[])
     hints.ai_flags = AI_PASSIVE;  // use my IP
   }
 
-  if (!admin_port && !num_ports || admin_port && num_ports == 1) {
+  if ((!admin_port && !num_ports) || (admin_port && num_ports == 1)) {
     /* no -p no -k */
     tls_ports[num_tls_ports++] = atoi(SECOND_PORT);
     ports[num_ports++] = SECOND_PORT;
     ports[num_ports++] = DEFAULT_PORT;
-  } else if (!admin_port && !num_tls_ports || admin_port && num_tls_ports == 1) {
+  } else if ((!admin_port && !num_tls_ports) || (admin_port && num_tls_ports == 1)) {
     /* no -k */
     tls_ports[num_tls_ports++] = atoi(SECOND_PORT);
     ports[num_ports++] = SECOND_PORT;
@@ -669,7 +669,7 @@ int main (int argc, char* argv[])
     conn_tlstor->new_fd = new_fd;
     conn_tlstor->ssl = NULL;
     conn_tlstor->tlsext_cb_arg = NULL;
-    conn_tlstor->allow_admin = (admin_port == 0) ? 1 : 0;
+    conn_tlstor->allow_admin = (!admin_port) ? 1 : 0;
     char server_ip[INET6_ADDRSTRLEN] = {'\0'};
     int ssl_port = is_ssl_conn(new_fd, server_ip, INET6_ADDRSTRLEN, tls_ports, num_tls_ports);
     if (ssl_port) {
