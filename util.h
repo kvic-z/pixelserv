@@ -20,7 +20,7 @@
 #include <linux/version.h>
 
 // preprocessor defines
-#define VERSION "v2.1.0-test.2"
+#define VERSION "v2.1.0-test.3"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
