@@ -678,7 +678,7 @@ void* conn_handler( void *ptr )
           if (path == NULL) {
             pipedata.status = SEND_NO_URL;
             log_msg(LGG_DEBUG, "client did not specify URL for GET request");
-          } else if (!strncmp(path, "/log=", strlen("/log="))) {
+          } else if (!strncmp(path, "/log=", strlen("/log=")) && CONN_TLSTOR(ptr, allow_admin)) {
             int v = atoi(path + strlen("/log="));
             if (v > LGG_DEBUG || v < 0)
               pipedata.status = SEND_BAD;
@@ -686,7 +686,7 @@ void* conn_handler( void *ptr )
               pipedata.status = ACTION_LOG_VERB;
               pipedata.verb = v;
             }
-          } else if (!strcmp(path, stats_url)) {
+          } else if (!strcmp(path, stats_url) && CONN_TLSTOR(ptr, allow_admin)) {
             pipedata.status = SEND_STATS;
             version_string = get_version(argc, argv);
             stat_string = get_stats(1, 0);
@@ -702,7 +702,7 @@ void* conn_handler( void *ptr )
             free(version_string);
             free(stat_string);
             response = aspbuf;
-          } else if (!strcmp(path, stats_text_url)) {
+          } else if (!strcmp(path, stats_text_url) && CONN_TLSTOR(ptr, allow_admin)) {
             pipedata.status = SEND_STATSTEXT;
             version_string = get_version(argc, argv);
             stat_string = get_stats(0, 1);

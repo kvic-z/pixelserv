@@ -581,7 +581,7 @@ int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int 
         strncpy(srv_ip, server_ip, srv_ip_len);
     for(i=0; i<num_ssl_ports; i++)
         if(atoi(port) == ssl_ports[i])
-            rv = 1;
+            rv = ssl_ports[i];
 #ifdef DEBUG
     char client_ip[INET6_ADDRSTRLEN]= {'\0'};
     getpeername(fd, (struct sockaddr*)&sin_addr, &sin_addr_len);

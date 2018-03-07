@@ -66,14 +66,15 @@ void signal_handler(int sig)
 }
 
 const char *tls_pem = DEFAULT_PEM_PATH;
-int tls_ports[MAX_TLS_PORTS] = {0};
+int tls_ports[MAX_TLS_PORTS + 1] = {0}; /* one extra port for admin */
 int num_tls_ports = 0;
+int admin_port = 0;
 STACK_OF(X509_INFO) *cachain = NULL;
 struct Global *g;
 cert_tlstor_t cert_tlstor;
 pthread_t certgen_thread;
 
-int main (int argc, char* argv[]) // program start
+int main (int argc, char* argv[])
 {
   int sockfd = 0;  // listen on sock_fd
   int new_fd = 0;  // new connection on new_fd
@@ -89,10 +90,7 @@ int main (int argc, char* argv[]) // program start
   int error = 0;
   int pipefd[2];  // IPC pipe ends (0 = read, 1 = write)
   response_struct pipedata = { FAIL_GENERAL, { 0 }, 0.0, 0 };
-  char* ports[MAX_PORTS];
-  ports[0] = DEFAULT_PORT;
-  ports[1] = SECOND_PORT;
-  tls_ports[0] = atoi(SECOND_PORT);
+  char* ports[MAX_PORTS + 1]; /* one extra port for admin */
   char *port = NULL;
   fd_set readfds;
   fd_set selectfds;
@@ -151,7 +149,7 @@ int main (int argc, char* argv[]) // program start
             if (errno || cert_cache_size <= 0) {
               error = 1;
             }
-            continue;
+          continue;
           case 'l':
             if ((logger_level)atoi(argv[i]) > LGG_DEBUG
                 || (logger_level)atoi(argv[i]) < 0)
@@ -179,6 +177,12 @@ int main (int argc, char* argv[]) // program start
               error = 1;
             }
           continue;
+          case 'A':
+            if (num_tls_ports < MAX_TLS_PORTS)
+              admin_port = atoi(argv[i]);
+            else
+              error = 1;
+              // fall through to case 'k'
           case 'k':
             if (num_tls_ports < MAX_TLS_PORTS)
               tls_ports[num_tls_ports++] = atoi(argv[i]);
@@ -235,6 +239,7 @@ int main (int argc, char* argv[]) // program start
            "options:" "\n"
            "\t" "ip_addr/hostname\t(default: 0.0.0.0)" "\n"
            "\t" "-2\t\t\t(disable HTTP 204 reply to generate_204 URLs)" "\n"
+           "\t" "-A  ADMIN_PORT\t\t(HTTPS only. Default is none)" "\n"
            "\t" "-c  CERT_CACHE_SIZE\t(default: %d)" "\n"
 #ifndef TEST
            "\t" "-f\t\t\t(stay in foreground/don't daemonize)" "\n"
@@ -313,7 +318,6 @@ int main (int argc, char* argv[]) // program start
       log_msg(LGG_ERR, "Failed to open/read ca.crt");
     else {
       EVP_PKEY * pubkey = X509_get_pubkey(cacert);
-      if (X509_verify(cacert, pubkey) <= 0)
       {
         BIO *bioin; int fsz; char *cafile;
 
@@ -354,17 +358,19 @@ int main (int argc, char* argv[]) // program start
     hints.ai_flags = AI_PASSIVE;  // use my IP
   }
 
-  //no -p no -k
-  if (!num_ports) {
-    num_ports = 2;
-    num_tls_ports = 1;
-  } else if (!num_tls_ports) {
-  //no -k
+  if (!admin_port && !num_ports || admin_port && num_ports == 1) {
+    /* no -p no -k */
     tls_ports[num_tls_ports++] = atoi(SECOND_PORT);
-    ports[num_ports++] = SECOND_PORT;  
-  } else if (num_ports == num_tls_ports)
-  //no -p
-    ports[num_ports++] = DEFAULT_PORT;    
+    ports[num_ports++] = SECOND_PORT;
+    ports[num_ports++] = DEFAULT_PORT;
+  } else if (!admin_port && !num_tls_ports || admin_port && num_tls_ports == 1) {
+    /* no -k */
+    tls_ports[num_tls_ports++] = atoi(SECOND_PORT);
+    ports[num_ports++] = SECOND_PORT;
+  } else if (num_ports == num_tls_ports) {
+    /* no -p */
+    ports[num_ports++] = DEFAULT_PORT;
+  }
 
   // clear the set
   FD_ZERO(&readfds);
@@ -663,8 +669,10 @@ int main (int argc, char* argv[]) // program start
     conn_tlstor->new_fd = new_fd;
     conn_tlstor->ssl = NULL;
     conn_tlstor->tlsext_cb_arg = NULL;
+    conn_tlstor->allow_admin = (admin_port == 0) ? 1 : 0;
     char server_ip[INET6_ADDRSTRLEN] = {'\0'};
-    if (is_ssl_conn(new_fd, server_ip, INET6_ADDRSTRLEN, tls_ports, num_tls_ports)) {
+    int ssl_port = is_ssl_conn(new_fd, server_ip, INET6_ADDRSTRLEN, tls_ports, num_tls_ports);
+    if (ssl_port) {
         SSL *ssl = NULL;
         tlsext_cb_arg_struct *t = malloc(sizeof(tlsext_cb_arg_struct));
         t->tls_pem = tls_pem;
@@ -675,11 +683,10 @@ int main (int argc, char* argv[]) // program start
         t->sslctx = NULL;
         t->sslctx_idx = -1;
 
-        const struct timeval timeout = { 0, 500000 };
-
         if ( /* TCP_NODELAY is not inherited from acceptance */
              setsockopt(new_fd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int))
-             || setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval)) )
+             || setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO,
+                  (char*)&(struct timeval){ 0, 500000 }, sizeof(struct timeval)) )
         {
             log_msg(LOG_CRIT, "Abort: %m - new_fd setsockopt");
             exit(EXIT_FAILURE);
@@ -708,6 +715,8 @@ int main (int argc, char* argv[]) // program start
         TESTPRINT("ssl new_fd:%d\n", new_fd);
         conn_tlstor->ssl = ssl;
         conn_tlstor->tlsext_cb_arg = t;
+        if (ssl_port == admin_port)
+            conn_tlstor->allow_admin = 1;
     }
     conn_tlstor->init_time = elapsed_time_msec(init_time);
 

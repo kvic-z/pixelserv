@@ -33,12 +33,12 @@ typedef struct {
 } cert_tlstor_t;
 
 typedef enum {
-  SSL_NOT_TLS,
-  SSL_ERR,
-  SSL_MISS,
-  SSL_HIT,
-  SSL_HIT_CLS,
-  SSL_UNKNOWN
+    SSL_NOT_TLS,
+    SSL_ERR,
+    SSL_MISS,
+    SSL_HIT,
+    SSL_HIT_CLS,
+    SSL_UNKNOWN
 } ssl_enum;
 
 typedef struct {
@@ -56,6 +56,7 @@ typedef struct {
     SSL *ssl;
     double init_time;
     tlsext_cb_arg_struct * tlsext_cb_arg;
+    int allow_admin;
 } conn_tlstor_struct;
 
 typedef struct {
