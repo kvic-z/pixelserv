@@ -151,7 +151,6 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
     }
     else
         *ins_idx = sslctx_tbl_end;
-    sslctx_tbl_cnt_miss++;
     return 0;
 }
 
@@ -163,6 +162,7 @@ static int sslctx_tbl_cache(char* cert_name, SSL_CTX *sslctx, int ins_idx)
             cert_name, sslctx, ins_idx);
         return -1;
     }
+    sslctx_tbl_cnt_miss++;
 
     /* add new cache entry */
     int len = strlen(cert_name);
