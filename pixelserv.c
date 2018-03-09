@@ -28,6 +28,15 @@
 #define THREAD_STACK_SIZE  32767
 #define TCP_FASTOPEN_QLEN  25
 
+const char *tls_pem = DEFAULT_PEM_PATH;
+int tls_ports[MAX_TLS_PORTS + 1] = {0}; /* one extra port for admin */
+int num_tls_ports = 0;
+int admin_port = 0;
+STACK_OF(X509_INFO) *cachain = NULL;
+struct Global *g;
+cert_tlstor_t cert_tlstor;
+pthread_t certgen_thread;
+
 void signal_handler(int sig)
 {
   if (sig != SIGTERM
@@ -55,8 +64,8 @@ void signal_handler(int sig)
     free(stats_string);
 
     if (sig == SIGTERM) {
-      // exit program on SIGTERM
-      log_msg(LOG_NOTICE, "exit on SIGTERM");
+      sslctx_tbl_save(tls_pem);
+      log_msg(LGG_NOTICE, "exit on SIGTERM");
       exit(EXIT_SUCCESS);
     }
 #ifdef DEBUG
@@ -64,15 +73,6 @@ void signal_handler(int sig)
 #endif
   return;
 }
-
-const char *tls_pem = DEFAULT_PEM_PATH;
-int tls_ports[MAX_TLS_PORTS + 1] = {0}; /* one extra port for admin */
-int num_tls_ports = 0;
-int admin_port = 0;
-STACK_OF(X509_INFO) *cachain = NULL;
-struct Global *g;
-cert_tlstor_t cert_tlstor;
-pthread_t certgen_thread;
 
 int main (int argc, char* argv[])
 {
@@ -114,6 +114,8 @@ int main (int argc, char* argv[])
   int do_foreground = 0;
 #endif // !TEST
   int do_redirect = 1;
+  int do_benchmark = 0;
+  char *bm_cert = NULL;
 #ifdef DEBUG
   int warning_time = 0;
 #endif //DEBUG
@@ -143,6 +145,13 @@ int main (int argc, char* argv[])
       if ((i + 1) < argc) {
         // switch on parameter letter and process subsequent argument
         switch (argv[i++][1]) {
+          case 'B':
+            do_benchmark = 1;
+            if (argv[i][0] == '-')
+              error = 1;
+            else
+              bm_cert = argv[i];
+          continue;
           case 'c':
             errno = 0;
             cert_cache_size = strtol(argv[i], NULL, 10);
@@ -234,12 +243,13 @@ int main (int argc, char* argv[])
   } // for
 
   if (error) {
-    printf("%s: %s compiled: " __DATE__ " " __TIME__ FEATURE_FLAGS "\n"
+    printf("pixelserv-tls %s (compiled: " __DATE__ " " __TIME__ FEATURE_FLAGS ")\n"
            "Usage: pixelserv-tls [OPTION]" "\n"
            "options:" "\n"
            "\t" "ip_addr/hostname\t(default: 0.0.0.0)" "\n"
            "\t" "-2\t\t\t(disable HTTP 204 reply to generate_204 URLs)" "\n"
            "\t" "-A  ADMIN_PORT\t\t(HTTPS only. Default is none)" "\n"
+           "\t" "-B  CERT_FILE\t\t(Benchmark disk and quit)" "\n"
            "\t" "-c  CERT_CACHE_SIZE\t(default: %d)" "\n"
 #ifndef TEST
            "\t" "-f\t\t\t(stay in foreground/don't daemonize)" "\n"
@@ -273,13 +283,13 @@ int main (int argc, char* argv[])
            "\t" "-z  CERT_PATH\t\t(default: "
            DEFAULT_PEM_PATH
            ")" "\n"
-           , argv[0], VERSION, DEFAULT_CERT_CACHE_SIZE, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE,
+           , VERSION, DEFAULT_CERT_CACHE_SIZE, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE,
            DEFAULT_THREAD_MAX);
     exit(EXIT_FAILURE);
   }
 
 #ifndef TEST
-  if (!do_foreground && daemon(0, 0)) {
+  if (!do_foreground && !do_benchmark && daemon(0, 0)) {
     log_msg(LGG_ERR, "failed to daemonize, exit: %m");
     exit(EXIT_FAILURE);
   }
@@ -288,7 +298,7 @@ int main (int argc, char* argv[])
   openlog("pixelserv-tls", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
   version_string = get_version(argc, argv);
   if (version_string) {
-    log_msg(LGG_CRIT, "%s", version_string);
+      if (!do_benchmark) log_msg(LGG_CRIT, "%s", version_string);
     free(version_string);
   } else {
     exit(EXIT_FAILURE);
@@ -296,7 +306,7 @@ int main (int argc, char* argv[])
 
   SSL_library_init();
   ssl_init_locks();
-  sslctx_tbl_init(cert_cache_size);
+  SSL_CTX *sslctx = create_default_sslctx(tls_pem);
   mkfifo(PIXEL_CERT_PIPE, 0600);
   pw = getpwnam(user);
   chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid);
@@ -342,13 +352,22 @@ int main (int argc, char* argv[])
       free(fname);
       EVP_PKEY_free(pubkey);
       X509_free(cacert);
-
-      cert_tlstor.pem_dir = tls_pem;
-      pthread_attr_t attr;
-      pthread_attr_init(&attr);
-      pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
-      pthread_create(&certgen_thread, &attr, cert_generator, (void*)&cert_tlstor);
+      if (!do_benchmark) {
+        cert_tlstor.pem_dir = tls_pem;
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
+        pthread_create(&certgen_thread, &attr, cert_generator, (void*)&cert_tlstor);
+      }
     }
+  }
+
+  sslctx_tbl_init(cert_cache_size);
+  sslctx_tbl_load(tls_pem, cachain);
+
+  if (do_benchmark) {
+    benchmark_disk(tls_pem, cachain, bm_cert);
+    exit(EXIT_SUCCESS);
   }
 
   memset(&hints, 0, sizeof hints);
@@ -513,8 +532,6 @@ int main (int argc, char* argv[])
 #endif
   };
   g = &_g;
-
-  SSL_CTX *sslctx = create_default_sslctx(tls_pem);
 
   // main accept() loop
   while(1) {

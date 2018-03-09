@@ -8,7 +8,9 @@
 #define PIXEL_SSL_SESS_CACHE_SIZE 256*20
 #define PIXEL_SSL_SESS_TIMEOUT 7200 /* seconds */
 #define PIXEL_CERT_PIPE "/tmp/pixelcerts"
+#ifndef DEFAULT_PEM_PATH
 #define DEFAULT_PEM_PATH "/opt/var/cache/pixelserv"
+#endif
 #define PIXELSERV_MAX_PATH 1024
 #define PIXELSERV_MAX_PATH 1024
 #define PIXELSERV_MAX_SERVER_NAME 255
@@ -78,6 +80,9 @@ void ssl_free_locks();
 void *cert_generator(void *ptr);
 void sslctx_tbl_init(int tbl_size);
 void sslctx_tbl_cleanup();
+void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain);
+void sslctx_tbl_save(const char* pem_dir);
+void benchmark_disk(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, const char *cert);
 void sslctx_tbl_lock(int idx);
 void sslctx_tbl_unlock(int idx);
 int sslctx_tbl_get_cnt_total();
