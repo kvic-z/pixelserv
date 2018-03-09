@@ -108,8 +108,8 @@ char* get_version(int argc, char* argv[]) {
     optbuf = " <none>";
   }
 
-  if (asprintf(&retbuf, "%s: %s compiled: %s" FEATURE_FLAGS " options:%s",
-          argv[0], VERSION, __DATE__ " " __TIME__, optbuf) < 1) {
+  if (asprintf(&retbuf, "pixelserv-tls %s (compiled: %s" FEATURE_FLAGS ") options:%s",
+          VERSION, __DATE__ " " __TIME__, optbuf) < 1) {
     retbuf = " <asprintf error>";
   }
 
