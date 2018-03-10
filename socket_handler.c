@@ -14,6 +14,16 @@
  
 // private data for socket_handler() use
 
+  static const char httpnulltext[] =
+  "HTTP/1.1 200 OK\r\n"
+  "Content-Type: text/html; charset=UTF-8\r\n"
+  "Access-Control-Allow-Origin: %s\r\n"
+  "Access-Control-Allow-Credentials: true\r\n"
+  "Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept, documentReferer\r\n"
+  "Connection: keep-alive\r\n"
+  "Content-Length: 0\r\n"
+  "\r\n";
+
   // HTTP 204 No Content for Google generate_204 URLs
   static const char http204[] =
   "HTTP/1.1 204 No Content\r\n"
@@ -59,6 +69,9 @@
   "HTTP/1.1 307 Temporary Redirect\r\n"
   "Location: %s\r\n"
   "Content-type: text/plain\r\n"
+  "Access-Control-Allow-Origin: %s\r\n"
+  "Access-Control-Allow-Credentials: true\r\n"
+  "Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept, documentReferer\r\n"
   "Content-length: 0\r\n"
   "Connection: keep-alive\r\n\r\n";
 
@@ -90,14 +103,6 @@
   "D"    // image data
   "\0"  // end of image data
   ";";  // GIF file terminator
-
-  static const char httpnulltext[] =
-  "HTTP/1.1 200 OK\r\n"
-  "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n" //experimental support for HSTS
-  "Content-type: text/html\r\n"
-  "Content-length: 0\r\n"
-  "Connection: keep-alive\r\n"
-  "\r\n";
 
   static const char http501[] =
   "HTTP/1.1 501 Method Not Implemented\r\n"
@@ -485,8 +490,8 @@ void* conn_handler( void *ptr )
   char *buf = NULL, *bufptr = NULL;
   char *url = NULL;
   char* aspbuf = NULL;
-  const char* response = httpnulltext;
-  int rsize = sizeof httpnulltext - 1;
+  const char* response;
+  int rsize;
   char* version_string = NULL;
   char* stat_string = NULL;
   int num_req = 0; // number of requests processed by this thread
@@ -497,6 +502,8 @@ void* conn_handler( void *ptr )
   char *post_buf = NULL;
   int post_buf_len = 0;
   unsigned int total_bytes = 0; /* number of bytes received by this thread */
+  #define CORS_ORIGIN_LEN_MAX 256
+  char *cors_origin = NULL;
 
 #ifdef DEBUG
   int do_warning = (warning_time > 0);
@@ -533,7 +540,7 @@ void* conn_handler( void *ptr )
 
     int log_verbose = log_get_verb();
     response = httpnulltext;
-    rsize = sizeof httpnulltext - 1;
+    rsize = 0;
     post_buf_len = 0;
 
     errno = 0;
@@ -585,6 +592,19 @@ void* conn_handler( void *ptr )
           }
         }
       }
+      /* CORS */
+      char *orig_hdr;
+      orig_hdr = strstr(bufptr, "Origin: ");
+      if (orig_hdr) {
+        cors_origin = malloc(CORS_ORIGIN_LEN_MAX);
+        strncpy(cors_origin, orig_hdr + 8, CORS_ORIGIN_LEN_MAX);
+        strtok(cors_origin, "\r\n");
+        if (strncmp(cors_origin, "null", 4) == 0) { /* some web developers are just ... */
+            cors_origin[0] = '*';
+            cors_origin[1] = '\0';
+        }
+      }
+
       char *method = strtok(req, " ");
 
       if (method == NULL) {
@@ -668,8 +688,7 @@ void* conn_handler( void *ptr )
           end_post:
             post_buf_len = recv_len;
             pipedata.status = SEND_POST;
-            response = http204;
-            rsize = sizeof http204 - 1;
+            /* default httpnulltext response */
         } else if (!strcmp(method, "GET")) {
           // send default from here, no matter what happens
           pipedata.status = DEFAULT_REPLY;
@@ -750,7 +769,7 @@ void* conn_handler( void *ptr )
             }
             if (do_redirect && url) {
               pipedata.status = SEND_REDIRECT;
-              rsize = asprintf(&aspbuf, httpredirect, url);
+              rsize = asprintf(&aspbuf, httpredirect, url, cors_origin ? cors_origin : "*");
               response = aspbuf;
               TESTPRINT("Sending redirect: %s\n", url);
               url = NULL;
@@ -821,6 +840,11 @@ void* conn_handler( void *ptr )
           rsize = sizeof http501 - 1;
         }
       }
+      /* cors */
+      if (response == httpnulltext) {
+        rsize = asprintf(&aspbuf, httpnulltext, cors_origin ? cors_origin : "*");
+        response = aspbuf;
+      }
     }
 #ifdef DEBUG
     if (pipedata.status != FAIL_TIMEOUT)
@@ -854,6 +878,8 @@ void* conn_handler( void *ptr )
       // free memory allocated by asprintf() if any
       free(aspbuf);
       aspbuf = NULL;
+      free(cors_origin);
+      cors_origin = NULL;
     }
 
     /*** NOTE: pipedata.status should not be altered after this point ***/
