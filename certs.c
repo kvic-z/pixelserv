@@ -94,6 +94,7 @@ void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain)
             break;
     }
     fclose(fp);
+    sslctx_tbl_cnt_miss = 0; /* reset */
 quit_load:
     free(line);
 }
