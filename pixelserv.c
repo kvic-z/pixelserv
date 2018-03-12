@@ -128,6 +128,12 @@ int main (int argc, char* argv[])
       // handle arguments that don't require a subsequent argument
       switch (argv[i][1]) {
         case '2': do_204 = 0;                                 continue;
+        case 'B':
+          if ((i + 1) == argc || argv[i + 1][0] == '-') {
+            do_benchmark = 1; bm_cert = NULL;
+            continue;
+          }
+          break;
 #ifndef TEST
         case 'f': do_foreground = 1;                          continue;
 #endif // !TEST
@@ -249,7 +255,7 @@ int main (int argc, char* argv[])
            "\t" "ip_addr/hostname\t(default: 0.0.0.0)" "\n"
            "\t" "-2\t\t\t(disable HTTP 204 reply to generate_204 URLs)" "\n"
            "\t" "-A  ADMIN_PORT\t\t(HTTPS only. Default is none)" "\n"
-           "\t" "-B  CERT_FILE\t\t(Benchmark disk and quit)" "\n"
+           "\t" "-B  [CERT_FILE]\t\t(Benchmark crypto and disk then quit)" "\n"
            "\t" "-c  CERT_CACHE_SIZE\t(default: %d)" "\n"
 #ifndef TEST
            "\t" "-f\t\t\t(stay in foreground/don't daemonize)" "\n"
@@ -366,7 +372,7 @@ int main (int argc, char* argv[])
   sslctx_tbl_load(tls_pem, cachain);
 
   if (do_benchmark) {
-    benchmark_disk(tls_pem, cachain, bm_cert);
+    run_benchmark(tls_pem, cachain, bm_cert);
     exit(EXIT_SUCCESS);
   }
 
