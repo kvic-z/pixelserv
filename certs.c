@@ -12,7 +12,6 @@
 #include <openssl/pem.h>
 #include <openssl/crypto.h> 
 #include <openssl/x509v3.h> 
-
 #include <pthread.h>
 #include <signal.h>
 
@@ -20,6 +19,7 @@
 #include "logger.h"
 #include "util.h"
 
+static SSL_CTX *g_sslctx;
 static pthread_mutex_t *locks;
 
 static sslctx_cache_struct *sslctx_tbl;
@@ -34,6 +34,10 @@ inline int sslctx_tbl_get_cnt_total() { return sslctx_tbl_end; }
 inline int sslctx_tbl_get_cnt_hit() { return sslctx_tbl_cnt_hit; }
 inline int sslctx_tbl_get_cnt_miss() { return sslctx_tbl_cnt_miss; }
 inline int sslctx_tbl_get_cnt_purge() { return sslctx_tbl_cnt_purge; }
+inline int sslctx_tbl_get_sess_cnt() { return SSL_CTX_sess_number(g_sslctx); }
+inline int sslctx_tbl_get_sess_hit() { return SSL_CTX_sess_hits(g_sslctx); }
+inline int sslctx_tbl_get_sess_miss() { return SSL_CTX_sess_misses(g_sslctx); }
+inline int sslctx_tbl_get_sess_purge() { return SSL_CTX_sess_cache_full(g_sslctx); }
 
 static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx);
 static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X509_INFO) *cachain);
@@ -87,7 +91,7 @@ void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain)
             /* Randomize last_flush a bit to avoid avalanche later.
                Don't care about randomness. Hence, no seeding */
             SSLCTX_TBL_set(ins_idx, last_flush, process_uptime() + 300.0 * rand() / RAND_MAX);
-            log_msg(LGG_NOTICE, "%s: %s %d", __FUNCTION__, cert_name, SSLCTX_TBL_get(ins_idx, last_flush));
+            log_msg(LGG_NOTICE, "%s: %s", __FUNCTION__, cert_name);
         }
         free(fname);
         if (sslctx_tbl_end >= sslctx_tbl_size)
@@ -107,6 +111,7 @@ static int cmp_sslctx_reuse_count(const void *p1, const void *p2)
 
 void sslctx_tbl_save(const char* pem_dir)
 {
+    #define RATIO_TO_SAVE (3.0 / 4.0)
     int idx;
     char *fname = NULL;
     asprintf(&fname, "%s/prefetch", pem_dir);
@@ -116,11 +121,9 @@ void sslctx_tbl_save(const char* pem_dir)
         log_msg(LGG_ERR, "%s: Failed to open %s", __FUNCTION__, fname);
         goto quit_save;
     }
-    if (sslctx_tbl_end > (sslctx_tbl_size * 2 / 3))
-    {
-        qsort(SSLCTX_TBL_ptr(0), sslctx_tbl_end, sizeof(sslctx_cache_struct), cmp_sslctx_reuse_count);
-        sslctx_tbl_end = sslctx_tbl_size * 2 / 3;
-    }
+    qsort(SSLCTX_TBL_ptr(0), sslctx_tbl_end, sizeof(sslctx_cache_struct), cmp_sslctx_reuse_count);
+    if (sslctx_tbl_end > (sslctx_tbl_size * RATIO_TO_SAVE))
+        sslctx_tbl_end = sslctx_tbl_size * RATIO_TO_SAVE;
 
     for (idx=0; idx < sslctx_tbl_end; idx++)
         fprintf(fp, "%s\t%d\n", SSLCTX_TBL_get(idx, cert_name), SSLCTX_TBL_get(idx, reuse_count));
@@ -149,6 +152,7 @@ void sslctx_tbl_unlock(int idx)
     pthread_mutex_unlock(&SSLCTX_TBL_get(idx, lock));
 }
 
+/*
 static int sslctx_tbl_check_and_flush(int idx)
 {
     int pixel_now = process_uptime();
@@ -159,7 +163,7 @@ static int sslctx_tbl_check_and_flush(int idx)
     if (SSLCTX_TBL_get(idx, last_flush) > SSLCTX_TBL_get(idx, last_use))
         return -1;
 
-    /* check and flush every 3600s at most */
+    // check and flush every 3600s at most
     int do_flush = pixel_now - SSLCTX_TBL_get(idx, last_flush) - 3600;
     if (do_flush < 0)
         return -1;
@@ -170,9 +174,9 @@ static int sslctx_tbl_check_and_flush(int idx)
     SSL_CTX_flush_sessions(SSLCTX_TBL_get(idx, sslctx), (long)now.tv_sec);
     sslctx_tbl_unlock(idx);
     SSLCTX_TBL_set(idx, last_flush, pixel_now);
-    log_msg(LGG_NOTICE, "%s: expired TLS sessions (%s) flushed.", __FUNCTION__, SSLCTX_TBL_get(idx, cert_name));
+    log_msg(LGG_NOTICE, "flushed expired TLS sessions (%s)", SSLCTX_TBL_get(idx, cert_name));
     return 1;
-}
+}*/
 
 static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
 {
@@ -188,7 +192,6 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
     int idx;
     for (idx = 0; idx < sslctx_tbl_end; idx++)
     {
-        sslctx_tbl_check_and_flush(idx); /* first half */
         if (SSLCTX_TBL_get(idx, last_use) < _last_use)
         {
             _last_use = SSLCTX_TBL_get(idx, last_use);
@@ -205,8 +208,7 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
             sslctx_tbl_cnt_hit++;
             SSLCTX_TBL_ptr(idx)->reuse_count++;
             SSLCTX_TBL_set(idx, last_use, process_uptime());
-            for(idx++; idx < sslctx_tbl_end; idx++)
-                sslctx_tbl_check_and_flush(idx); /* second half */
+
             return 0;
         }
     }
@@ -248,6 +250,10 @@ static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
     SSLCTX_TBL_set(ins_idx, name_len, len);
     SSLCTX_TBL_set(ins_idx, last_use, pixel_now);
     SSLCTX_TBL_set(ins_idx, last_flush, pixel_now);
+    SSLCTX_TBL_set(ins_idx, sst, 0);
+    SSLCTX_TBL_set(ins_idx, ssh, 0);
+    SSLCTX_TBL_set(ins_idx, ssm, 0);
+    SSLCTX_TBL_set(ins_idx, ssp, 0);
     if (ins_idx == sslctx_tbl_end && sslctx_tbl_end < sslctx_tbl_size)
         sslctx_tbl_end++;
     else {
@@ -260,7 +266,6 @@ static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
         sslctx_tbl_cnt_purge++;
     }
     SSLCTX_TBL_set(ins_idx, sslctx, sslctx);
-    SSL_CTX_set_session_id_context(sslctx, (const unsigned char *)str, len);
     return 0;
 }
 
@@ -317,7 +322,7 @@ void ssl_free_locks()
     OPENSSL_free(locks);
 }
 
-static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, EVP_MD_CTX *p_ctx)
+static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, EVP_PKEY *privkey)
 {
     char *fname = NULL;
     EVP_PKEY *key = NULL;
@@ -327,6 +332,11 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     char *san_str = NULL;
     char *tld = NULL, *tld_tmp = NULL;
     int dot_count = 0;
+    EVP_MD_CTX *p_ctx = NULL;
+
+    p_ctx = EVP_MD_CTX_create();
+    if(EVP_DigestSignInit(p_ctx, NULL, EVP_sha256(), NULL, privkey) != 1)
+        log_msg(LGG_ERR, "%s: failed to init sign context", __FUNCTION__);
 
     if(pem_fn[0] == '_') pem_fn[0] = '*';
 
@@ -384,6 +394,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     log_msg(LGG_NOTICE, "cert generated and saved: %s", pem_fn);
 
 free_all:
+    EVP_MD_CTX_destroy(p_ctx);
     EVP_PKEY_free(key);
     X509_EXTENSION_free(ext);
     X509_free(x509);
@@ -395,11 +406,11 @@ free_all:
 static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) { 
     int rv = 0;
     char *fname = NULL; 
-    asprintf(&fname, "%s/ca.key.passphrase", ((cert_tlstor_t*)u)->pem_dir);
+    asprintf(&fname, "%s/ca.key.passphrase", (char*)u);
 
     int fp = open(fname, O_RDONLY);    
     if(fp == -1)
-        log_msg(LGG_ERR, "Failed to open ca.key.passphrase");
+        log_msg(LGG_ERR, "%s: failed to open ca.key.passphrase", __FUNCTION__);
     else {
         rv = read(fp, buf, size);
         close(fp);
@@ -410,26 +421,44 @@ static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) {
     }
     free(fname);
     return --rv; // trim \n at the end
-} 
+}
+
+static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **privkey)
+{
+    X509 *x509;
+    char *cert_file;
+    FILE *fp;
+    asprintf(&cert_file, "%s/ca.crt", pem_dir);
+    fp = fopen(cert_file, "r");
+    x509 = X509_new();
+    if(!fp || !PEM_read_X509(fp, &x509, NULL, NULL))
+       log_msg(LGG_ERR, "%s: failed to load ca.crt", __FUNCTION__);
+    *issuer = X509_NAME_dup(X509_get_subject_name(x509));
+    X509_free(x509);
+    fclose(fp);
+    free(cert_file);
+
+    asprintf(&cert_file, "%s/ca.key", pem_dir);
+    fp = fopen(cert_file, "r");
+    RSA *rsa = NULL;
+    if(!fp || !PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, (void*)pem_dir))
+       log_msg(LGG_ERR, "%s: failed to read ca.key", __FUNCTION__);
+    fclose(fp);
+    free(cert_file);
+
+    *privkey = EVP_PKEY_new();
+    EVP_PKEY_assign_RSA(*privkey, rsa); /* rsa auto freed when key is freed */
+}
 
 void *cert_generator(void *ptr) {
-
 #ifdef DEBUG
     printf("%s: thread up and running\n", __FUNCTION__);
 #endif
     cert_tlstor_t *cert_tlstor = (cert_tlstor_t *) ptr;
-    char *fname = malloc(PIXELSERV_MAX_PATH);
-    strcpy(fname, cert_tlstor->pem_dir);
-    strcat(fname, "/ca.crt");
-    FILE *fp = fopen(fname, "r");
-    X509 *x509 = X509_new();
-    if(fp == NULL || PEM_read_X509(fp, &x509, NULL, NULL) == NULL)
-       log_msg(LGG_ERR, "Failed to read ca.crt");
-    fclose(fp);
-    free(fname);
 
-    X509_NAME *issuer = X509_NAME_dup(X509_get_subject_name(x509));
-    X509_free(x509);
+    X509_NAME *issuer;
+    EVP_PKEY *key;
+    cert_gen_init(cert_tlstor->pem_dir, &issuer, &key);
 
     char *buf = malloc(PIXELSERV_MAX_SERVER_NAME * 4 + 1);
     buf[PIXELSERV_MAX_SERVER_NAME * 4] = '\0';
@@ -464,46 +493,20 @@ void *cert_generator(void *ptr) {
 #ifdef DEBUG
         printf("%s 2: %s\n", __FUNCTION__, buf);
 #endif
-
-        fname = malloc(PIXELSERV_MAX_PATH);
-        EVP_PKEY *key = NULL;
-        EVP_MD_CTX *md_ctx = NULL;
-
-        strcpy(fname, cert_tlstor->pem_dir);
-        strcat(fname, "/ca.key");
-        FILE *fp = fopen(fname, "r");
-        RSA *rsa = NULL;
-        if(fp == NULL || PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, (void*)cert_tlstor) == NULL) {
-            log_msg(LGG_ERR, "Failed to open/read ca.key");
-        }
-        fclose(fp);
-
-        key = EVP_PKEY_new();
-        EVP_PKEY_assign_RSA(key, rsa);
-        md_ctx = EVP_MD_CTX_create();
-
         char *p_buf, *p_buf_sav = NULL;
         p_buf = strtok_r(buf, ":", &p_buf_sav);
         while (p_buf != NULL) {
-            strcpy(fname, ((cert_tlstor_t*)cert_tlstor)->pem_dir);
-            strcat(fname, "/");
-            strcat(fname, p_buf);
+            char *cert_file;
             struct stat st;
-            if(stat(fname, &st) != 0) {// doesn't exists
-                // we don't check disk for cert. Simply re-gen and let it overwrite if exists on disk.
-                if(EVP_DigestSignInit(md_ctx, NULL, EVP_sha256(), NULL, key) != 1)
-                    log_msg(LGG_ERR, "Failed to init signing context");
-                else
-                    generate_cert(p_buf, cert_tlstor->pem_dir, issuer, md_ctx);
-            }
+            asprintf(&cert_file, "%s/%s", ((cert_tlstor_t*)cert_tlstor)->pem_dir, p_buf);
+            if(stat(cert_file, &st) != 0) /* doesn't exist */
+                generate_cert(p_buf, cert_tlstor->pem_dir, issuer, key);
             p_buf = strtok_r(NULL, ":", &p_buf_sav);
+            free(cert_file);
         }
-
-        EVP_PKEY_free(key);
-        EVP_MD_CTX_destroy(md_ctx);
-        free(fname);
     }
     X509_NAME_free(issuer);
+    EVP_PKEY_free(key);
     free(buf);
     return NULL;
 }
@@ -617,6 +620,20 @@ quit_cb:
     return rv;
 }
 
+
+/*
+static int new_session(SSL *ssl, SSL_SESSION *sess) {
+    return 1; // keep internal session
+}
+
+static void remove_session(SSL_CTX *sslctx, SSL_SESSION *sess) {
+}
+
+static SSL_SESSION *get_session(SSL *ssl, unsigned char *id, int idlen, int *do_copy) {
+    return NULL;
+}
+*/
+
 static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X509_INFO) *cachain)
 {
     SSL_CTX *sslctx = SSL_CTX_new(TLSv1_2_server_method());
@@ -633,9 +650,11 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
           SSL_OP_SINGLE_DH_USE |
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
+          SSL_OP_NO_TICKET |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
-    SSL_CTX_set_timeout(sslctx, PIXEL_SSL_SESS_TIMEOUT);
-    SSL_CTX_sess_set_cache_size(sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
+    /* server-side caching */
+    SSL_CTX_set_session_cache_mode(sslctx, SSL_SESS_CACHE_SERVER);
+    SSL_CTX_set_timeout(g_sslctx, PIXEL_SSL_SESS_TIMEOUT);
     if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
         log_msg(LGG_DEBUG, "%s: failed to set cipher list", __FUNCTION__);
     if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0
@@ -661,18 +680,25 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
 
 SSL_CTX* create_default_sslctx(const char *pem_dir) {
 
-    SSL_CTX *sslctx = NULL;
-    sslctx = SSL_CTX_new(TLSv1_2_server_method());
-    SSL_CTX_set_options(sslctx,
+    if (g_sslctx)
+        return g_sslctx;
+
+    g_sslctx = SSL_CTX_new(TLSv1_2_server_method());
+    SSL_CTX_set_options(g_sslctx,
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
-    SSL_CTX_sess_set_cache_size(sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
-    if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
+    SSL_CTX_sess_set_cache_size(g_sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
+    SSL_CTX_set_session_cache_mode(g_sslctx, SSL_SESS_CACHE_SERVER);
+    SSL_CTX_set_timeout(g_sslctx, PIXEL_SSL_SESS_TIMEOUT);
+/*  // cb for server-side caching
+    SSL_CTX_sess_set_new_cb(g_sslctx, new_session);
+    SSL_CTX_sess_set_remove_cb(g_sslctx, remove_session); */
+    if (SSL_CTX_set_cipher_list(g_sslctx, PIXELSERV_CIPHER_LIST) <= 0)
         log_msg(LGG_DEBUG, "cipher_list cannot be set");
-    SSL_CTX_set_tlsext_servername_callback(sslctx, tls_servername_cb);
+    SSL_CTX_set_tlsext_servername_callback(g_sslctx, tls_servername_cb);
 
-    return sslctx;
+    return g_sslctx;
 }
 
 int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int num_ssl_ports) {
@@ -706,33 +732,65 @@ int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int 
     return rv;
 }
 
-void benchmark_disk(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, const char *cert)
+void run_benchmark(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, const char *cert)
 {
-    int c;
-    char *full_pem_path;
+    int c, d;
+    char *cert_file, *domain;
     struct stat st;
-    struct timespec tm0, tm;
-    SSL_CTX *sslctx;
+    struct timespec tm;
+    float r_tm0, g_tm0, tm1;
+    SSL_CTX *sslctx = NULL;
+    X509_NAME *issuer = NULL;
+    EVP_PKEY *key = NULL;
 
     printf("CERT_PATH: %s\n", pem_dir);
-    if (!cachain || !cert)
-        return;
-    printf("CERT_FILE: %s", cert);
-    asprintf(&full_pem_path, "%s/%s", pem_dir, cert);
-    if (stat(full_pem_path, &st) != 0) {
-        printf(" not found\n");
-        return;
-    }
-    printf("\n");
-    get_time(&tm0);
+    if (!cachain) goto quit;
+
+    printf("CERT_FILE: ");
+    if (cert)
+    {
+        asprintf(&cert_file, "%s/%s", pem_dir, cert);
+        if (stat(cert_file, &st) != 0) {
+            printf("%s not found\n", cert);
+            goto quit;
+        }
+    } else
+        cert = "_.bing.com";
+    asprintf(&cert_file, "%s/%s", pem_dir, cert);
+    printf("%s\n", cert);
+
+    cert_gen_init(pem_dir, &issuer, &key);
+    asprintf(&domain, "%s", cert);
+    if (domain[0] == '_') domain[0] = '*';
+
+    r_tm0 = 0; g_tm0 = 0;
     for (c=1; c<=10; c++)
     {
         get_time(&tm);
-        stat(full_pem_path, &st);
-        sslctx = create_child_sslctx(full_pem_path, cachain);
-        sslctx_tbl_cache(cert, sslctx, 0);
-        printf("%2d. load cert from disk: %.3f ms\n", c, elapsed_time_msec(tm));
+        for (d=0; d<5; d++)
+            generate_cert(domain, pem_dir, issuer, key);
+        tm1 = elapsed_time_msec(tm) / 5.0;
+        printf("%2d. generate cert to disk: %.3f ms\t", c, tm1);
+        g_tm0 += tm1;
+
+        get_time(&tm);
+        for (d=0; d<5; d++)
+        {
+            stat(cert_file, &st);
+            sslctx = create_child_sslctx(cert_file, cachain);
+            sslctx_tbl_cache(cert, sslctx, 0);
+        }
+        tm1 = elapsed_time_msec(tm) / 5.0;
+        printf("load from disk: %.3f ms\n", tm1);
+        r_tm0 += tm1;
+
     }
-    printf("average: %.3f ms\n", elapsed_time_msec(tm0) / 10.0);
-    free(full_pem_path);
+    printf("generate to disk average: %.3f ms\n", g_tm0 / 10.0);
+    printf("  load from disk average: %.3f ms\n", r_tm0 / 10.0);
+
+    free(domain);
+    X509_NAME_free(issuer);
+    EVP_PKEY_free(key);
+quit:
+    free(cert_file);
 }
