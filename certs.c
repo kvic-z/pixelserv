@@ -250,10 +250,6 @@ static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
     SSLCTX_TBL_set(ins_idx, name_len, len);
     SSLCTX_TBL_set(ins_idx, last_use, pixel_now);
     SSLCTX_TBL_set(ins_idx, last_flush, pixel_now);
-    SSLCTX_TBL_set(ins_idx, sst, 0);
-    SSLCTX_TBL_set(ins_idx, ssh, 0);
-    SSLCTX_TBL_set(ins_idx, ssm, 0);
-    SSLCTX_TBL_set(ins_idx, ssp, 0);
     if (ins_idx == sslctx_tbl_end && sslctx_tbl_end < sslctx_tbl_size)
         sslctx_tbl_end++;
     else {

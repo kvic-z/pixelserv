@@ -20,13 +20,13 @@
 #include <linux/version.h>
 
 // preprocessor defines
-#define VERSION "2.1.0-test.5"
+#define VERSION "2.1.0-test.6"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
 #define DEFAULT_TIMEOUT 10      // default timeout for select() calls, in seconds
-#define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 12)
+#define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 30)
                                 // default keep-alive duration for HTTP/1.1 connections, in seconds
                                 // it's the time a connection will stay active
                                 // until another request comes and refreshes the timer
