@@ -231,6 +231,10 @@
   "Content-type: text/html\r\n"
   "Content-length: 11\r\n"
   "Allow: GET,OPTIONS\r\n"
+  "Access-Control-Allow-Origin: %s\r\n"
+  "Access-Control-Allow-Credentials: true\r\n"
+  "Access-Control-Allow-Headers: Access-Control-Allow-Origin,cache-control,mola-method\r\n"
+  "Access-Control-Allow-Methods: GET,HEAD,POST\r\n"
   "Connection: keep-alive\r\n"
   "\r\n"
   "GET,OPTIONS";
@@ -613,8 +617,8 @@ void* conn_handler( void *ptr )
         TESTPRINT("method: '%s'\n", method);
         if (!strcmp(method, "OPTIONS")) {
           pipedata.status = SEND_OPTIONS;
-          response = httpoptions;
-          rsize = sizeof httpoptions - 1;
+          rsize = asprintf(&aspbuf, httpoptions, cors_origin);
+          response = aspbuf;
         } else if (!strcmp(method, "POST")) {
             int recv_len = 0;
             int length = 0;
