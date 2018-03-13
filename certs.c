@@ -381,13 +381,13 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     asprintf(&fname, "%s/%s", pem_dir, pem_fn);
     FILE *fp = fopen(fname, "wb");
     if(fp == NULL) {
-        log_msg(LGG_ERR, "Failed to open file for write: %s", fname);
+        log_msg(LGG_ERR, "%s: failed to open file for write: %s", __FUNCTION__, fname);
         goto free_all;
     }
     PEM_write_X509(fp, x509);
     PEM_write_PrivateKey(fp, key, NULL, NULL, 0, NULL, NULL);
     fclose(fp);
-    log_msg(LGG_NOTICE, "cert generated and saved: %s", pem_fn);
+    log_msg(LGG_NOTICE, "cert generated to disk: %s", pem_fn);
 
 free_all:
     EVP_MD_CTX_destroy(p_ctx);
@@ -527,7 +527,7 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
     else if (cbarg->server_ip)
         srv_name = cbarg->server_ip;
     else {
-        log_msg(LGG_WARNING, "SNI failed. server name and server ip empty.");
+        log_msg(LGG_WARNING, "SNI failed. server name and ip empty.");
         rv = SSL_TLSEXT_ERR_ALERT_FATAL;
         goto quit_cb;
     }
@@ -558,7 +558,7 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
     printf("PEM filename: %s\n",full_pem_path);
 #endif
     if (len > PIXELSERV_MAX_PATH) {
-        log_msg(LGG_ERR, "Buffer overflow. %s", full_pem_path);
+        log_msg(LGG_ERR, "%s: buffer overflow. %s", __FUNCTION__, full_pem_path);
         rv = SSL_TLSEXT_ERR_ALERT_FATAL;
         goto quit_cb;
     }
@@ -578,7 +578,7 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
             cbarg->status = SSL_MISS;
             log_msg(LGG_WARNING, "%s %s missing", srv_name, pem_file);
             if((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
-                log_msg(LGG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
+                log_msg(LGG_ERR, "%s: failed to open pipe: %s", __FUNCTION__, strerror(errno));
             else {
                 /* reuse full_pem_path as scratchpad */
                 strcpy(full_pem_path, pem_file);
@@ -589,22 +589,17 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
             rv = SSL_TLSEXT_ERR_ALERT_FATAL;
             goto quit_cb;
         }
-
-        cbarg->status = SSL_ERR; /* initial status; to be updated upon success */
-        SSL_CTX *sslctx = create_child_sslctx(full_pem_path, cbarg->cachain);
-        if (!sslctx)
+        SSL_CTX *sslctx;
+        if (NULL == (sslctx  = create_child_sslctx(full_pem_path, cbarg->cachain))
+            || 0 > sslctx_tbl_cache(pem_file, sslctx, ins_handle))
         {
+            log_msg(LGG_ERR, "%s: fail to create sslctx or cache %s", __FUNCTION__, pem_file);
+            cbarg->status = SSL_ERR;
             rv = SSL_TLSEXT_ERR_ALERT_FATAL;
             goto quit_cb;
         }
-        if (sslctx_tbl_cache(pem_file, sslctx, ins_handle) < 0)
-        {
-            log_msg(LGG_ERR, "%s: fail to cache %s", __FUNCTION__, pem_file);
-            goto quit_cb;
-        }
         handle = ins_handle;
-    } /* handle < 0 */
-
+    }
     sslctx_tbl_lock(handle);
     SSL_set_SSL_CTX(ssl, SSLCTX_TBL_get(handle, sslctx));
     sslctx_tbl_unlock(handle);
