@@ -536,6 +536,7 @@ int main (int argc, char* argv[])
 #ifdef DEBUG
         warning_time,
 #endif
+        tls_pem,
   };
   g = &_g;
 
@@ -696,50 +697,71 @@ int main (int argc, char* argv[])
     char server_ip[INET6_ADDRSTRLEN] = {'\0'};
     int ssl_port = is_ssl_conn(new_fd, server_ip, INET6_ADDRSTRLEN, tls_ports, num_tls_ports);
     if (ssl_port) {
-        SSL *ssl = NULL;
-        tlsext_cb_arg_struct *t = malloc(sizeof(tlsext_cb_arg_struct));
-        t->tls_pem = tls_pem;
-        t->cachain = cachain;
-        t->servername = NULL;
-        strncpy(t->server_ip, server_ip, INET6_ADDRSTRLEN);
-        t->status = SSL_UNKNOWN;
-        t->sslctx = NULL;
-        t->sslctx_idx = -1;
+      SSL *ssl = NULL;
+      tlsext_cb_arg_struct *t = malloc(sizeof(tlsext_cb_arg_struct));
+      t->tls_pem = tls_pem;
+      t->cachain = cachain;
+      t->servername = NULL;
+      strncpy(t->server_ip, server_ip, INET6_ADDRSTRLEN);
+      t->status = SSL_UNKNOWN;
+      t->sslctx = NULL;
+      t->sslctx_idx = -1;
 
-        if ( /* TCP_NODELAY is not inherited from acceptance */
-             setsockopt(new_fd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int))
-             || setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO,
-                  (char*)&(struct timeval){ 0, 500000 }, sizeof(struct timeval)) )
-        {
-            log_msg(LOG_CRIT, "Abort: %m - new_fd setsockopt");
-            exit(EXIT_FAILURE);
+      SSL_CTX_set_tlsext_servername_arg(sslctx, t);
+      ssl = SSL_new(sslctx);
+      SSL_set_fd(ssl, new_fd);
+      int ssl_attempt = 5;
+redo_ssl_accept:
+
+      if ( /* TCP_NODELAY is not inherited from acceptance */
+           setsockopt(new_fd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int))
+           || setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO,
+                (char*)&(struct timeval){ 0, 50000 }, sizeof(struct timeval)) )
+      {
+        log_msg(LOG_CRIT, "Abort: %m - new_fd setsockopt");
+        exit(EXIT_FAILURE);
+      }
+      errno = 0;
+      ERR_clear_error();
+      int sslret = SSL_accept(ssl);
+
+      if (sslret != 1) {
+        int sslerr = SSL_get_error(ssl, sslret);
+        //log_msg(LGG_CRIT, "SSL_accept ret:%d status:%d ssl error:%d", sslret, t->status, sslerr);
+        switch(sslerr) {
+          case SSL_ERROR_WANT_READ:
+            ssl_attempt--;
+            if (ssl_attempt > 0) goto redo_ssl_accept;
+            break;
+          case SSL_ERROR_SSL:
+            //log_msg(LGG_CRIT, "ssl error %d", ERR_peek_last_error());
+            break;
+          case SSL_ERROR_SYSCALL:
+            //log_msg(LGG_CRIT, "SSL_accept errno:%d", errno);
+          default:
+            ;
         }
-        SSL_CTX_set_tlsext_servername_arg(sslctx, t);
-        ssl = SSL_new(sslctx);
-        SSL_set_fd(ssl, new_fd);
-        int ssl_err = SSL_accept(ssl);
-        if (ssl_err != 1) {
-            count++;
-            log_msg(LGG_DEBUG, "SSL_accept error:%d status:%d\n", ssl_err, t->status);
-            switch(t->status) {
-                case SSL_MISS:       ++slm; break;
-                case SSL_ERR:        ++sle; break;
-                case SSL_UNKNOWN:    ++slu; break;
-                default:             ;
-            }
-            sslctx_tbl_lock(t->sslctx_idx);
-            SSL_free(ssl);
-            sslctx_tbl_unlock(t->sslctx_idx);
-            free(t);
-            shutdown(new_fd, SHUT_RDWR);
-            close(new_fd);
-            continue;
+        count++;
+        switch(t->status) {
+          case SSL_ERR:        ++sle; break;
+          case SSL_MISS:       ++slm; break;
+          case SSL_HIT:
+          case SSL_UNKNOWN:    ++slu; break;
+          default:             ;
         }
-        TESTPRINT("ssl new_fd:%d\n", new_fd);
-        conn_tlstor->ssl = ssl;
-        conn_tlstor->tlsext_cb_arg = t;
-        if (ssl_port == admin_port)
-            conn_tlstor->allow_admin = 1;
+        sslctx_tbl_lock(t->sslctx_idx);
+        SSL_free(ssl);
+        sslctx_tbl_unlock(t->sslctx_idx);
+        free(t);
+        shutdown(new_fd, SHUT_RDWR);
+        close(new_fd);
+        continue;
+      }
+      TESTPRINT("ssl new_fd:%d\n", new_fd);
+      conn_tlstor->ssl = ssl;
+      conn_tlstor->tlsext_cb_arg = t;
+      if (ssl_port == admin_port)
+        conn_tlstor->allow_admin = 1;
     }
     conn_tlstor->init_time = elapsed_time_msec(init_time);
 
