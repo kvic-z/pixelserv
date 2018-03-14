@@ -137,9 +137,8 @@ char* get_stats(const int sta_offset, const int stt_offset) {
     int ssm = sslctx_tbl_get_sess_miss();
     int ssp = sslctx_tbl_get_sess_purge();
 
-    asprintf(&uptimeStr, "%dd %02d:%02d", (int)uptime/86400, (int)(uptime%86400)/3600, (int)((uptime%86400)%3600)/60);
-
-    if (asprintf(&retbuf, (sta_offset) ? sta_fmt : stt_fmt,
+    if (asprintf(&uptimeStr, "%dd %02d:%02d", (int)uptime/86400, (int)(uptime%86400)/3600, (int)((uptime%86400)%3600)/60) < 1
+        || asprintf(&retbuf, (sta_offset) ? sta_fmt : stt_fmt,
         (sta_offset) ? (long)uptimeStr : (long)uptime, log_get_verb(), kcc, kmx, kvg, krq, count, avg, rmx, tav, tmx, slh, slm, sle, slc, slu, sct, sch, scm, scp, sst, ssh, ssm, ssp, nfe, gif, ico, txt, jpg, png, swf, sta + sta_offset, stt + stt_offset, ufe, opt, pst, hed, rdr, nou, pth, noc, bad, tmo, cls, cly, clt, err
         ) < 1)
         retbuf = " <asprintf error>";

@@ -69,31 +69,33 @@ void sslctx_tbl_cleanup()
 
 void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain)
 {
-    char *line = malloc(PIXELSERV_MAX_PATH);
-    char *fname = NULL;
-    asprintf(&fname, "%s/prefetch", pem_dir);
-    FILE *fp = fopen(fname, "r");
-    if(fp == NULL) {
+    FILE *fp;
+    char *fname, *line;
+    if ((line = malloc(PIXELSERV_MAX_PATH)) == NULL || (fname = malloc(PIXELSERV_MAX_PATH)) == NULL) {
+        log_msg(LGG_ERR, "%s: failed to allocate memory", __FUNCTION__);
+        goto quit_load;
+    }
+    (void)snprintf(fname, PIXELSERV_MAX_PATH, "%s/prefetch", pem_dir);
+    if((fp = fopen(fname, "r")) == NULL) {
         log_msg(LGG_WARNING, "%s: %s doesn't exist.", __FUNCTION__, fname);
         goto quit_load;
     }
-    free(fname);
     while (getline(&line, &(size_t){ PIXELSERV_MAX_PATH }, fp) != -1) {
         char *cert_name = strtok(line, " \n\t");
-        asprintf(&fname, "%s/%s", pem_dir, cert_name);
+        (void)snprintf(fname, PIXELSERV_MAX_PATH, "%s/%s", pem_dir, cert_name);
         SSL_CTX *sslctx = create_child_sslctx(fname, cachain);
         if (sslctx) {
             int ins_idx = sslctx_tbl_end;
             sslctx_tbl_cache(cert_name, sslctx, ins_idx);
             log_msg(LGG_NOTICE, "%s: %s", __FUNCTION__, cert_name);
         }
-        free(fname);
         if (sslctx_tbl_end >= sslctx_tbl_size)
             break;
     }
     fclose(fp);
     sslctx_tbl_cnt_miss = 0; /* reset */
 quit_load:
+    free(fname);
     free(line);
 }
 
@@ -107,11 +109,17 @@ void sslctx_tbl_save(const char* pem_dir)
 {
     #define RATIO_TO_SAVE (3.0 / 4.0)
     int idx;
-    char *fname = NULL;
-    asprintf(&fname, "%s/prefetch", pem_dir);
-    FILE *fp = fopen(fname, "w");
-    if(fp == NULL) {
-        log_msg(LGG_ERR, "%s: Failed to open %s", __FUNCTION__, fname);
+    char *fname;
+    FILE *fp;
+
+    if ((fname = malloc(PIXELSERV_MAX_PATH)) == NULL) {
+        log_msg(LGG_ERR, "%s: failed to allocate memory", __FUNCTION__);
+        goto quit_save;
+    }
+    (void)snprintf(fname, PIXELSERV_MAX_PATH, "%s/prefetch", pem_dir);
+
+    if ((fp = fopen(fname, "w")) == NULL) {
+        log_msg(LGG_ERR, "%s: failed to open %s", __FUNCTION__, fname);
         goto quit_save;
     }
     qsort(SSLCTX_TBL_ptr(0), sslctx_tbl_end, sizeof(sslctx_cache_struct), cmp_sslctx_reuse_count);
@@ -174,10 +182,8 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
     int _last_use = process_uptime();
     int purge_idx = sslctx_tbl_end;
     int idx;
-    for (idx = 0; idx < sslctx_tbl_end; idx++)
-    {
-        if (SSLCTX_TBL_get(idx, last_use) < _last_use)
-        {
+    for (idx = 0; idx < sslctx_tbl_end; idx++) {
+        if (SSLCTX_TBL_get(idx, last_use) < _last_use) {
             _last_use = SSLCTX_TBL_get(idx, last_use);
             purge_idx = idx;
         }
@@ -186,34 +192,28 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
         if (_name_len > 10 && (SSLCTX_TBL_get(idx, cert_name)[7] != cert_name[7] ||
             SSLCTX_TBL_get(idx, cert_name)[10] != cert_name[10]))
             continue;
-        if (memcmp(cert_name, SSLCTX_TBL_get(idx, cert_name), _name_len) == 0)
-        {
+        if (memcmp(cert_name, SSLCTX_TBL_get(idx, cert_name), _name_len) == 0) {
             *found_idx = idx;
             sslctx_tbl_cnt_hit++;
             SSLCTX_TBL_ptr(idx)->reuse_count++;
             SSLCTX_TBL_set(idx, last_use, process_uptime());
-
             return 0;
         }
     }
-    if (sslctx_tbl_end == sslctx_tbl_size)
-    {
-        if (purge_idx == sslctx_tbl_size)
-        {
+    if (sslctx_tbl_end == sslctx_tbl_size) {
+        if (purge_idx == sslctx_tbl_size) {
             log_msg(LOG_ERR, "Failed to find candiate in sslctx_tbl for purge.");
             purge_idx = 0; /* decimate the first entry */
         }
         *ins_idx = purge_idx;
-    }
-    else
+    } else
         *ins_idx = sslctx_tbl_end;
     return 0;
 }
 
 static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
 {
-    if (cert_name == NULL || sslctx == NULL || ins_idx >= sslctx_tbl_size || ins_idx < 0)
-    {
+    if (cert_name == NULL || sslctx == NULL || ins_idx >= sslctx_tbl_size || ins_idx < 0) {
         log_msg(LOG_ERR, "Invalid params. cert_name: %s. sslctx: %d, ins_idx: %d",
             cert_name, sslctx, ins_idx);
         return -1;
@@ -224,8 +224,7 @@ static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
     unsigned int pixel_now = process_uptime();
     int len = strlen(cert_name);
     char *str = SSLCTX_TBL_get(ins_idx, cert_name);
-    if ((len + 1) > SSLCTX_TBL_get(ins_idx, alloc_len))
-    {
+    if ((len + 1) > SSLCTX_TBL_get(ins_idx, alloc_len)) {
         str = realloc(str, len + 1);
         SSLCTX_TBL_set(ins_idx, alloc_len, len + 1);
     }
@@ -343,13 +342,16 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     X509V3_set_ctx_nodb(&ext_ctx);
 
     tld_tmp = strchr(pem_fn, '.');
-    while(tld_tmp != NULL){
+    while(tld_tmp != NULL) {
         dot_count++;
         tld = tld_tmp + 1;
         tld_tmp = strchr(tld, '.');
     }
     tld_tmp = (dot_count == 3 && (atoi(tld) > 0 || (atoi(tld) == 0 && strlen(tld) == 1))) ? "IP" : "DNS";
-    asprintf(&san_str, "%s:%s", tld_tmp, pem_fn);
+    if (asprintf(&san_str, "%s:%s", tld_tmp, pem_fn) < 0) {
+        san_str = NULL;
+        goto free_all;
+    }
     if ((ext = X509V3_EXT_conf_nid(NULL, &ext_ctx, NID_subject_alt_name, san_str)) == NULL)
         goto free_all;
     X509_add_ext(x509, ext, -1);
@@ -360,8 +362,12 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
 #endif
 
     // -- save cert
-    if(pem_fn[0] == '*') pem_fn[0] = '_';
-    asprintf(&fname, "%s/%s", pem_dir, pem_fn);
+    if(pem_fn[0] == '*')
+        pem_fn[0] = '_';
+    if (asprintf(&fname, "%s/%s", pem_dir, pem_fn) < 0) {
+        fname = NULL;
+        goto free_all;
+    }
     FILE *fp = fopen(fname, "wb");
     if(fp == NULL) {
         log_msg(LGG_ERR, "%s: failed to open file for write: %s", __FUNCTION__, fname);
@@ -383,12 +389,12 @@ free_all:
 
 
 static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) { 
-    int rv = 0;
+    int rv = 0, fp;
     char *fname = NULL; 
-    asprintf(&fname, "%s/ca.key.passphrase", (char*)u);
+    if (asprintf(&fname, "%s/ca.key.passphrase", (char*)u) < 0)
+        goto quit_cb;
 
-    int fp = open(fname, O_RDONLY);    
-    if(fp == -1)
+    if ((fp = open(fname, O_RDONLY)) < 0)
         log_msg(LGG_ERR, "%s: failed to open ca.key.passphrase", __FUNCTION__);
     else {
         rv = read(fp, buf, size);
@@ -398,6 +404,8 @@ static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) {
         printf("%s: %d, %d\n", buf, size, rv);
 #endif
     }
+
+quit_cb:
     free(fname);
     return --rv; // trim \n at the end
 }
@@ -407,6 +415,8 @@ static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **pr
     X509 *x509;
     char *cert_file;
     FILE *fp;
+
+//    (void)asprintf(&cert_file, "%s/ca.crt", pem_dir);
     asprintf(&cert_file, "%s/ca.crt", pem_dir);
     fp = fopen(cert_file, "r");
     x509 = X509_new();
@@ -417,7 +427,7 @@ static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **pr
     fclose(fp);
     free(cert_file);
 
-    asprintf(&cert_file, "%s/ca.key", pem_dir);
+    (void)asprintf(&cert_file, "%s/ca.key", pem_dir);
     fp = fopen(cert_file, "r");
     RSA *rsa = NULL;
     if(!fp || !PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, (void*)pem_dir))
@@ -486,7 +496,7 @@ void *cert_generator(void *ptr) {
         while (p_buf != NULL) {
             char *cert_file;
             struct stat st;
-            asprintf(&cert_file, "%s/%s", ((cert_tlstor_t*)cert_tlstor)->pem_dir, p_buf);
+            (void)asprintf(&cert_file, "%s/%s", ((cert_tlstor_t*)cert_tlstor)->pem_dir, p_buf);
             if(stat(cert_file, &st) != 0) /* doesn't exist */
                 generate_cert(p_buf, cert_tlstor->pem_dir, issuer, key);
             p_buf = strtok_r(NULL, ":", &p_buf_sav);
@@ -652,7 +662,8 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
         X509_INFO *inf; int i;
         for (i=sk_X509_INFO_num(cachain)-1; i >= 0; i--) {
             if ((inf = sk_X509_INFO_value(cachain, i)) && inf->x509 &&
-                    !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509))) {
+                    !SSL_CTX_add_extra_chain_cert(sslctx, X509_dup(inf->x509)))
+            {
                 SSL_CTX_free(sslctx);
                 log_msg(LGG_ERR, "%s: cannot add CA cert %d\n", i, __FUNCTION__);  /* X509_ref_up requires >= v1.1 */
                 return NULL;
@@ -731,25 +742,23 @@ void run_benchmark(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, cons
     if (!cachain) goto quit;
 
     printf("CERT_FILE: ");
-    if (cert)
-    {
-        asprintf(&cert_file, "%s/%s", pem_dir, cert);
+    if (cert) {
+        (void)asprintf(&cert_file, "%s/%s", pem_dir, cert);
         if (stat(cert_file, &st) != 0) {
             printf("%s not found\n", cert);
             goto quit;
         }
     } else
         cert = "_.bing.com";
-    asprintf(&cert_file, "%s/%s", pem_dir, cert);
+    (void)asprintf(&cert_file, "%s/%s", pem_dir, cert);
     printf("%s\n", cert);
 
     cert_gen_init(pem_dir, &issuer, &key);
-    asprintf(&domain, "%s", cert);
+    (void)asprintf(&domain, "%s", cert);
     if (domain[0] == '_') domain[0] = '*';
 
     r_tm0 = 0; g_tm0 = 0;
-    for (c=1; c<=10; c++)
-    {
+    for (c=1; c<=10; c++) {
         get_time(&tm);
         for (d=0; d<5; d++)
             generate_cert(domain, pem_dir, issuer, key);
@@ -758,8 +767,7 @@ void run_benchmark(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, cons
         g_tm0 += tm1;
 
         get_time(&tm);
-        for (d=0; d<5; d++)
-        {
+        for (d=0; d<5; d++) {
             stat(cert_file, &st);
             sslctx = create_child_sslctx(cert_file, cachain);
             sslctx_tbl_cache(cert, sslctx, 0);

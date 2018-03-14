@@ -781,7 +781,7 @@ void* conn_handler( void *ptr )
             rsize = sizeof httpfilenotfound;
             pipedata.status = SEND_BAD_PATH;
 
-            asprintf(&ca_file, "%s%s", GLOBAL(g, pem_dir), "/ca.crt");
+            (void)asprintf(&ca_file, "%s%s", GLOBAL(g, pem_dir), "/ca.crt");
             if(NULL != (fp = fopen(ca_file, "r"))) {
               fseek(fp, 0L, SEEK_END);
               int file_sz = ftell(fp);

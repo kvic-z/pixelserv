@@ -315,7 +315,11 @@ int main (int argc, char* argv[])
   SSL_CTX *sslctx = create_default_sslctx(tls_pem);
   mkfifo(PIXEL_CERT_PIPE, 0600);
   pw = getpwnam(user);
-  chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid);
+  if (chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid) < 0) {
+      log_msg(LGG_CRIT, "chown fails to change %s to %s", PIXEL_CERT_PIPE, user);
+      exit(EXIT_FAILURE);
+  }
+
   {
     struct rlimit l = {THREAD_STACK_SIZE, THREAD_STACK_SIZE * 2};
     if (setrlimit(RLIMIT_STACK, &l) == -1)
@@ -342,7 +346,7 @@ int main (int argc, char* argv[])
         fsz = ftell(fp);
         cafile = malloc(fsz);
         fseek(fp, 0L, SEEK_SET);
-        fread(cafile, 1, fsz, fp);
+        fsz = fread(cafile, 1, fsz, fp);
 
         bioin = BIO_new_mem_buf(cafile, fsz);
         if (!bioin)
