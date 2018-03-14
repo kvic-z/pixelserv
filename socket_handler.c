@@ -239,6 +239,22 @@
   "\r\n"
   "GET,OPTIONS";
 
+  static const char httpcacert[] =
+  "HTTP/1.1 200 OK\r\n"
+  "Content-Type: application/x-x509-ca-cert\r\n"
+  "Accept-Ranges: bytes\r\n"
+  "Content-Length: ";
+  static const char httpcacert2[] =
+  "\r\n"
+  "\r\n";
+
+  static const char httpfilenotfound[] =
+  "HTTP/1.1 404 Not Found\r\n"
+  "Content-Type: text/plain\r\n"
+  "Content-Length: 15\r\n"
+  "\r\n"
+  "404 - Not Found";
+
 
 // private functions for socket_handler() use
 #ifdef HEX_DUMP
@@ -403,6 +419,33 @@ static int peek_socket(int fd, SSL *ssl) {
   return rv;
 }
 
+static int ssl_read(SSL *ssl, char *buf, int len) {
+  int ssl_attempt = 1, ret;
+
+redo_ssl_read:
+
+  ERR_clear_error();
+  ret = SSL_read(ssl, (char *)buf, len);
+  if (ret <= 0) {
+    int sslerr = SSL_get_error(ssl, ret);
+    log_msg(LGG_CRIT, "%s: ret:%d ssl error:%d", __FUNCTION__, ret, sslerr);
+    switch(sslerr) {
+      case SSL_ERROR_WANT_READ:
+        ssl_attempt--;
+        if (ssl_attempt > 0) goto redo_ssl_read;
+        break;
+      case SSL_ERROR_SSL:
+        log_msg(LGG_CRIT, "%s: ssl error %d", __FUNCTION__, ERR_peek_last_error());
+        break;
+      case SSL_ERROR_SYSCALL:
+        log_msg(LGG_CRIT, "%s: errno:%d", __FUNCTION__, errno);
+      default:
+        ;
+    }
+  }
+  return ret;
+}
+
 static int read_socket(int fd, char **msg, SSL *ssl) {
   *msg = realloc(*msg, CHAR_BUF_SIZE + 1);
   if (!(*msg)) {
@@ -414,10 +457,8 @@ static int read_socket(int fd, char **msg, SSL *ssl) {
   for (i=1; i<=MAX_CHAR_BUF_LOTS;) { /* 128K max with CHAR_BUF_SIZE == 4K */
     if (!ssl)
       rv = recv(fd, bufptr, CHAR_BUF_SIZE, 0);
-    else {
-      rv = SSL_read(ssl, (char *)bufptr, CHAR_BUF_SIZE);
-      TESTPRINT("SSL handshake. errno: %d rv: %d\n", SSL_get_error(ssl, rv), rv);
-    }
+    else
+      rv = ssl_read(ssl, (char *)bufptr, CHAR_BUF_SIZE);
     msg_len += rv;
     if (rv < CHAR_BUF_SIZE)
       break;
@@ -435,11 +476,36 @@ static int read_socket(int fd, char **msg, SSL *ssl) {
   return msg_len;
 }
 
+static int ssl_write(SSL *ssl, const char *buf, int len) {
+  int ssl_attempt = 1, ret;
+redo_ssl_write:
+  ERR_clear_error();
+  ret = SSL_write(ssl, (char *)buf, len);
+  if (ret <= 0) {
+    int sslerr = SSL_get_error(ssl, ret);
+    log_msg(LGG_CRIT, "%s: ret:%d ssl error:%d", __FUNCTION__, ret, sslerr);
+    switch(sslerr) {
+      case SSL_ERROR_WANT_WRITE:
+        ssl_attempt--;
+        if (ssl_attempt > 0) goto redo_ssl_write;
+        break;
+      case SSL_ERROR_SSL:
+        log_msg(LGG_CRIT, "%s: ssl error %d", __FUNCTION__, ERR_peek_last_error());
+        break;
+      case SSL_ERROR_SYSCALL:
+        log_msg(LGG_CRIT, "%s: errno:%d", __FUNCTION__, errno);
+      default:
+        ;
+    }
+  }
+  return ret;
+}
+
 static int write_socket(int fd, const char *msg, int msg_len, SSL *ssl) {
   int rv;
-  if (ssl)
-    rv = SSL_write(ssl, msg, msg_len);
-  else
+  if (ssl) {
+    rv = ssl_write(ssl, msg, msg_len);
+  } else
     /* a blocking call, so zero should not be returned */
     rv = send(fd, msg, msg_len, MSG_NOSIGNAL);
   return rv;
@@ -560,7 +626,7 @@ void* conn_handler( void *ptr )
         log_msg(LGG_DEBUG, "recv() error: %m");
         pipedata.status = FAIL_GENERAL;
       }
-      if (CONN_TLSTOR(ptr, ssl))
+      if (rv == 0 && CONN_TLSTOR(ptr, ssl))
         pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
     } else {                    // got some data
       pipedata.ssl = (CONN_TLSTOR(ptr, ssl)) ? SSL_HIT : SSL_NOT_TLS;
@@ -661,8 +727,7 @@ void* conn_handler( void *ptr )
             for (; length > 0 && wait_cnt > 0;) {
               errno = 0;
               if (CONN_TLSTOR(ptr, ssl)) {
-                rv = SSL_read(CONN_TLSTOR(ptr, ssl), (char *)(post_buf + recv_len), post_buf_size);
-                TESTPRINT("SSL handshake. errno: %d rv: %d\n", SSL_get_error(CONN_TLSTOR(ptr, ssl), rv), rv);
+                rv = ssl_read(CONN_TLSTOR(ptr, ssl), (char *)(post_buf + recv_len), post_buf_size);
               }else
                 rv = recv(new_fd, post_buf + recv_len, post_buf_size, MSG_WAITALL);
 
@@ -709,6 +774,29 @@ void* conn_handler( void *ptr )
               pipedata.status = ACTION_LOG_VERB;
               pipedata.verb = v;
             }
+          } else if (!strncmp(path, "/ca.crt", strlen("/ca.crt"))) {
+            FILE *fp;
+            char *ca_file = NULL;
+            response = httpfilenotfound;
+            rsize = sizeof httpfilenotfound;
+            pipedata.status = SEND_BAD_PATH;
+
+            asprintf(&ca_file, "%s%s", GLOBAL(g, pem_dir), "/ca.crt");
+            if(NULL != (fp = fopen(ca_file, "r"))) {
+              fseek(fp, 0L, SEEK_END);
+              int file_sz = ftell(fp);
+              rsize = asprintf(&aspbuf, "%s%d%s", httpcacert, file_sz, httpcacert2);
+              rewind(fp);
+              if ((aspbuf = (char*)realloc(aspbuf, rsize + file_sz + 16)) != NULL &&
+                     fread(aspbuf + rsize, 1, file_sz, fp) == file_sz) {
+                response = aspbuf;
+                rsize += file_sz;
+                pipedata.status = SEND_TXT;
+              }
+              fclose(fp);
+            }
+            free(ca_file);
+            /* aspbuf will be freed at the of the loop */
           } else if (!strcmp(path, stats_url) && CONN_TLSTOR(ptr, allow_admin)) {
             pipedata.status = SEND_STATS;
             version_string = get_version(argc, argv);
@@ -828,8 +916,7 @@ void* conn_handler( void *ptr )
                 }
               }
             }
-          }
-          // end of GET
+          } // end of GET
         } else {
           if (!strcmp(method, "HEAD")) {
             // HEAD (TODO: send header of what the actual response type would be?)
@@ -917,6 +1004,8 @@ void* conn_handler( void *ptr )
          no data in the whole session. further counted as one 'cls'
          run_time is ignorable */
       if (total_bytes == 0) {
+        if (CONN_TLSTOR(ptr, ssl))
+          pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
         pipedata.status = FAIL_CLOSED;
         pipedata.rx_total = 0;
         write_pipe(pipefd, &pipedata);
