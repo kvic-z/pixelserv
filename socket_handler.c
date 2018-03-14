@@ -428,17 +428,17 @@ redo_ssl_read:
   ret = SSL_read(ssl, (char *)buf, len);
   if (ret <= 0) {
     int sslerr = SSL_get_error(ssl, ret);
-    log_msg(LGG_CRIT, "%s: ret:%d ssl error:%d", __FUNCTION__, ret, sslerr);
+    //log_msg(LGG_CRIT, "%s: ret:%d ssl error:%d", __FUNCTION__, ret, sslerr);
     switch(sslerr) {
       case SSL_ERROR_WANT_READ:
         ssl_attempt--;
         if (ssl_attempt > 0) goto redo_ssl_read;
         break;
       case SSL_ERROR_SSL:
-        log_msg(LGG_CRIT, "%s: ssl error %d", __FUNCTION__, ERR_peek_last_error());
+        //log_msg(LGG_CRIT, "%s: ssl error %d", __FUNCTION__, ERR_peek_last_error());
         break;
       case SSL_ERROR_SYSCALL:
-        log_msg(LGG_CRIT, "%s: errno:%d", __FUNCTION__, errno);
+        //log_msg(LGG_CRIT, "%s: errno:%d", __FUNCTION__, errno);
       default:
         ;
     }
@@ -483,17 +483,17 @@ redo_ssl_write:
   ret = SSL_write(ssl, (char *)buf, len);
   if (ret <= 0) {
     int sslerr = SSL_get_error(ssl, ret);
-    log_msg(LGG_CRIT, "%s: ret:%d ssl error:%d", __FUNCTION__, ret, sslerr);
+    //log_msg(LGG_CRIT, "%s: ret:%d ssl error:%d", __FUNCTION__, ret, sslerr);
     switch(sslerr) {
       case SSL_ERROR_WANT_WRITE:
         ssl_attempt--;
         if (ssl_attempt > 0) goto redo_ssl_write;
         break;
       case SSL_ERROR_SSL:
-        log_msg(LGG_CRIT, "%s: ssl error %d", __FUNCTION__, ERR_peek_last_error());
+        //log_msg(LGG_CRIT, "%s: ssl error %d", __FUNCTION__, ERR_peek_last_error());
         break;
       case SSL_ERROR_SYSCALL:
-        log_msg(LGG_CRIT, "%s: errno:%d", __FUNCTION__, errno);
+        //log_msg(LGG_CRIT, "%s: errno:%d", __FUNCTION__, errno);
       default:
         ;
     }
