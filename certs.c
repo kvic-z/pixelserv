@@ -1,19 +1,20 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
+#include <signal.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/crypto.h> 
 #include <openssl/x509v3.h> 
-#include <pthread.h>
-#include <signal.h>
 
 #include "certs.h"
 #include "logger.h"
@@ -25,6 +26,7 @@ static pthread_mutex_t *locks;
 static sslctx_cache_struct *sslctx_tbl;
 static int sslctx_tbl_size, sslctx_tbl_end;
 static int sslctx_tbl_cnt_hit, sslctx_tbl_cnt_miss, sslctx_tbl_cnt_purge;
+static unsigned int  sslctx_tbl_last_flush;
 
 #define SSLCTX_TBL_ptr(h)         ((sslctx_cache_struct *)(sslctx_tbl + h))
 #define SSLCTX_TBL_get(h, k)      SSLCTX_TBL_ptr(h)->k
@@ -46,13 +48,12 @@ void sslctx_tbl_init(int tbl_size)
 {
     sslctx_tbl_end = 0;
     sslctx_tbl = malloc(tbl_size * sizeof(sslctx_cache_struct));
-    if (!sslctx_tbl)
-    {
+    if (!sslctx_tbl) {
         sslctx_tbl_size = 0;
         log_msg(LGG_ERR, "Failed to allocate sslctx_tbl of size %d", tbl_size);
     } else {
         sslctx_tbl_size = tbl_size;
-        sslctx_tbl_cnt_hit = sslctx_tbl_cnt_miss = sslctx_tbl_cnt_purge = 0;
+        sslctx_tbl_cnt_hit = sslctx_tbl_cnt_miss = sslctx_tbl_cnt_purge = sslctx_tbl_last_flush = 0;
         memset(sslctx_tbl, 0, tbl_size * sizeof(sslctx_cache_struct));
     }
 }
@@ -60,8 +61,7 @@ void sslctx_tbl_init(int tbl_size)
 void sslctx_tbl_cleanup()
 {
     int idx;
-    for (idx = 0; idx < sslctx_tbl_end; idx++)
-    {
+    for (idx = 0; idx < sslctx_tbl_end; idx++) {
         free(SSLCTX_TBL_get(idx, cert_name));
         SSL_CTX_free(SSLCTX_TBL_get(idx, sslctx));
     }
@@ -73,24 +73,18 @@ void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain)
     char *fname = NULL;
     asprintf(&fname, "%s/prefetch", pem_dir);
     FILE *fp = fopen(fname, "r");
-    if(fp == NULL)
-    {
+    if(fp == NULL) {
         log_msg(LGG_WARNING, "%s: %s doesn't exist.", __FUNCTION__, fname);
         goto quit_load;
     }
     free(fname);
-    while (getline(&line, &(size_t){ PIXELSERV_MAX_PATH }, fp) != -1)
-    {
+    while (getline(&line, &(size_t){ PIXELSERV_MAX_PATH }, fp) != -1) {
         char *cert_name = strtok(line, " \n\t");
         asprintf(&fname, "%s/%s", pem_dir, cert_name);
         SSL_CTX *sslctx = create_child_sslctx(fname, cachain);
-        if (sslctx)
-        {
+        if (sslctx) {
             int ins_idx = sslctx_tbl_end;
             sslctx_tbl_cache(cert_name, sslctx, ins_idx);
-            /* Randomize last_flush a bit to avoid avalanche later.
-               Don't care about randomness. Hence, no seeding */
-            SSLCTX_TBL_set(ins_idx, last_flush, process_uptime() + 300.0 * rand() / RAND_MAX);
             log_msg(LGG_NOTICE, "%s: %s", __FUNCTION__, cert_name);
         }
         free(fname);
@@ -116,8 +110,7 @@ void sslctx_tbl_save(const char* pem_dir)
     char *fname = NULL;
     asprintf(&fname, "%s/prefetch", pem_dir);
     FILE *fp = fopen(fname, "w");
-    if(fp == NULL)
-    {
+    if(fp == NULL) {
         log_msg(LGG_ERR, "%s: Failed to open %s", __FUNCTION__, fname);
         goto quit_save;
     }
@@ -134,8 +127,7 @@ quit_save:
 
 void sslctx_tbl_lock(int idx)
 {
-    if (idx < 0 || idx >= sslctx_tbl_size)
-    {
+    if (idx < 0 || idx >= sslctx_tbl_size) {
         log_msg(LOG_DEBUG, "%s: invalid idx %d", __FUNCTION__, idx);
         return;
     }
@@ -144,39 +136,31 @@ void sslctx_tbl_lock(int idx)
 
 void sslctx_tbl_unlock(int idx)
 {
-    if (idx < 0 || idx >= sslctx_tbl_size)
-    {
+    if (idx < 0 || idx >= sslctx_tbl_size) {
         log_msg(LOG_DEBUG, "%s: invalid idx %d", __FUNCTION__, idx);
         return;
     }
     pthread_mutex_unlock(&SSLCTX_TBL_get(idx, lock));
 }
 
-/*
-static int sslctx_tbl_check_and_flush(int idx)
+static int sslctx_tbl_check_and_flush(void)
 {
-    int pixel_now = process_uptime();
+    int pixel_now = process_uptime(), rv = -1;
 #ifdef DEBUG
-    printf("%s: %s now %d last_flush %d last_use %d", __FUNCTION__, SSLCTX_TBL_get(idx, cert_name), 
-        pixel_now, SSLCTX_TBL_get(idx, last_flush), SSLCTX_TBL_get(idx, last_use));
+    printf("%s: now %d last_flush %d", __FUNCTION__, pixel_now, sslctx_tbl_last_flush);
 #endif
-    if (SSLCTX_TBL_get(idx, last_flush) > SSLCTX_TBL_get(idx, last_use))
-        return -1;
 
-    // check and flush every 3600s at most
-    int do_flush = pixel_now - SSLCTX_TBL_get(idx, last_flush) - 3600;
-    if (do_flush < 0)
-        return -1;
-
-    struct timespec now;
-    get_time(&now);
-    sslctx_tbl_lock(idx);
-    SSL_CTX_flush_sessions(SSLCTX_TBL_get(idx, sslctx), (long)now.tv_sec);
-    sslctx_tbl_unlock(idx);
-    SSLCTX_TBL_set(idx, last_flush, pixel_now);
-    log_msg(LGG_NOTICE, "flushed expired TLS sessions (%s)", SSLCTX_TBL_get(idx, cert_name));
-    return 1;
-}*/
+    /* flush at most every half of session timeout */
+    int do_flush = pixel_now - sslctx_tbl_last_flush - PIXEL_SSL_SESS_TIMEOUT / 2;
+    if (do_flush < 0) {
+        rv = -1;
+    } else {
+        SSL_CTX_flush_sessions(g_sslctx, time(NULL));
+        sslctx_tbl_last_flush = pixel_now;
+        rv = 1;
+    }
+    return rv;
+}
 
 static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
 {
@@ -249,7 +233,6 @@ static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
     SSLCTX_TBL_set(ins_idx, cert_name, str);
     SSLCTX_TBL_set(ins_idx, name_len, len);
     SSLCTX_TBL_set(ins_idx, last_use, pixel_now);
-    SSLCTX_TBL_set(ins_idx, last_flush, pixel_now);
     if (ins_idx == sslctx_tbl_end && sslctx_tbl_end < sslctx_tbl_size)
         sslctx_tbl_end++;
     else {
@@ -459,22 +442,31 @@ void *cert_generator(void *ptr) {
     char *buf = malloc(PIXELSERV_MAX_SERVER_NAME * 4 + 1);
     buf[PIXELSERV_MAX_SERVER_NAME * 4] = '\0';
     char *half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4;
-    int fd = open(PIXEL_CERT_PIPE, O_RDONLY);
+
+    /* non block required. otherwise blocked until other side opens */
+    int fd = open(PIXEL_CERT_PIPE, O_RDONLY | O_NONBLOCK);
 
     for (;;) {
-        int cnt;
+        int cnt, ret;
         if(fd == -1)
-            log_msg(LGG_ERR, "Failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
+            log_msg(LGG_ERR, "%s: failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
         strcpy(buf, half_token);
 #ifdef DEBUG
         printf("%s 1: %s\n", __FUNCTION__, buf);
 #endif
+        struct pollfd pfd = { fd, POLLIN, POLLIN };
+        ret = poll(&pfd, 1, 1000 * PIXEL_SSL_SESS_TIMEOUT / 2);
+        if (ret <= 0) {
+            /* timeout */
+            sslctx_tbl_check_and_flush();
+            continue;
+        }
         if((cnt = read(fd, buf + strlen(half_token), PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token))) == 0) {
 #ifdef DEBUG
              printf("%s: pipe EOF\n", __FUNCTION__);
 #endif
             close(fd);
-            fd = open(PIXEL_CERT_PIPE, O_RDONLY);
+            fd = open(PIXEL_CERT_PIPE, O_RDONLY | O_NONBLOCK); /* non block required */
             continue;
         }
         if (cnt < PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token)) {
@@ -500,6 +492,8 @@ void *cert_generator(void *ptr) {
             p_buf = strtok_r(NULL, ":", &p_buf_sav);
             free(cert_file);
         }
+        /* quick check and flush if time due */
+        sslctx_tbl_check_and_flush();
     }
     X509_NAME_free(issuer);
     EVP_PKEY_free(key);
@@ -611,7 +605,6 @@ quit_cb:
     return rv;
 }
 
-
 /*
 static int new_session(SSL *ssl, SSL_SESSION *sess) {
     return 1; // keep internal session
@@ -644,7 +637,7 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
           SSL_OP_NO_TICKET |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
     /* server-side caching */
-    SSL_CTX_set_session_cache_mode(sslctx, SSL_SESS_CACHE_SERVER);
+    SSL_CTX_set_session_cache_mode(sslctx, SSL_SESS_CACHE_NO_AUTO_CLEAR | SSL_SESS_CACHE_SERVER);
     SSL_CTX_set_timeout(g_sslctx, PIXEL_SSL_SESS_TIMEOUT);
     if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
         log_msg(LGG_DEBUG, "%s: failed to set cipher list", __FUNCTION__);
@@ -682,7 +675,7 @@ SSL_CTX* create_default_sslctx(const char *pem_dir) {
     SSL_CTX_sess_set_cache_size(g_sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
     SSL_CTX_set_session_cache_mode(g_sslctx, SSL_SESS_CACHE_SERVER);
     SSL_CTX_set_timeout(g_sslctx, PIXEL_SSL_SESS_TIMEOUT);
-/*  // cb for server-side caching
+/*    // cb for server-side caching
     SSL_CTX_sess_set_new_cb(g_sslctx, new_session);
     SSL_CTX_sess_set_remove_cb(g_sslctx, remove_session); */
     if (SSL_CTX_set_cipher_list(g_sslctx, PIXELSERV_CIPHER_LIST) <= 0)

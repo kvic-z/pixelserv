@@ -66,7 +66,6 @@ typedef struct {
     int alloc_len;
     char *cert_name;
     unsigned int last_use; /* seconds since process up */
-    unsigned int last_flush; /* seconds since process up */
     int reuse_count;
     SSL_CTX *sslctx;
     pthread_mutex_t lock;
