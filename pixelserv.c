@@ -714,13 +714,13 @@ int main (int argc, char* argv[])
       SSL_CTX_set_tlsext_servername_arg(sslctx, t);
       ssl = SSL_new(sslctx);
       SSL_set_fd(ssl, new_fd);
-      int ssl_attempt = 5;
+      int ssl_attempt = 3;
 redo_ssl_accept:
 
       if ( /* TCP_NODELAY is not inherited from acceptance */
            setsockopt(new_fd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int))
            || setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO,
-                (char*)&(struct timeval){ 0, 50000 }, sizeof(struct timeval)) )
+                (char*)&(struct timeval){ 0, 100000 }, sizeof(struct timeval)) )
       {
         log_msg(LOG_CRIT, "Abort: %m - new_fd setsockopt");
         exit(EXIT_FAILURE);
@@ -728,20 +728,21 @@ redo_ssl_accept:
       errno = 0;
       ERR_clear_error();
       int sslret = SSL_accept(ssl);
+      //char errstr[1024];
 
       if (sslret != 1) {
         int sslerr = SSL_get_error(ssl, sslret);
-        //log_msg(LGG_CRIT, "SSL_accept ret:%d status:%d ssl error:%d", sslret, t->status, sslerr);
         switch(sslerr) {
+            //log_msg(LGG_ERR, "SSL_accept ret:%d status:%d ssl error:%d", sslret, t->status, sslerr);
           case SSL_ERROR_WANT_READ:
             ssl_attempt--;
             if (ssl_attempt > 0) goto redo_ssl_accept;
             break;
           case SSL_ERROR_SSL:
-            //log_msg(LGG_CRIT, "ssl error %d", ERR_peek_last_error());
+            //log_msg(LGG_ERR, "ssl %s", ERR_error_string(ERR_peek_last_error(), errstr));
             break;
           case SSL_ERROR_SYSCALL:
-            //log_msg(LGG_CRIT, "SSL_accept errno:%d", errno);
+            //log_msg(LGG_ERR, "SSL_accept errno:%d", errno);
           default:
             ;
         }
@@ -761,7 +762,6 @@ redo_ssl_accept:
         close(new_fd);
         continue;
       }
-      TESTPRINT("ssl new_fd:%d\n", new_fd);
       conn_tlstor->ssl = ssl;
       conn_tlstor->tlsext_cb_arg = t;
       if (ssl_port == admin_port)
