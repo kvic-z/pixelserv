@@ -251,7 +251,7 @@ static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
 static void sslctx_tbl_dump(int idx, const char * func)
 {
     printf("%s: idx %d now %d\n", func, idx, process_uptime());
-    printf("%s: ** cert_name %p\n", func, sslctx_tbl[idx].cert_name);
+    printf("%s: ** cert_name %s\n", func, sslctx_tbl[idx].cert_name);
     printf("%s: ** name_len %d\n", func, sslctx_tbl[idx].name_len);
     printf("%s: ** alloc_len %d\n", func, sslctx_tbl[idx].alloc_len);
     printf("%s: ** last_use %d\n", func, sslctx_tbl[idx].last_use);
@@ -630,7 +630,7 @@ static SSL_SESSION *get_session(SSL *ssl, unsigned char *id, int idlen, int *do_
 
 static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X509_INFO) *cachain)
 {
-    SSL_CTX *sslctx = SSL_CTX_new(TLSv1_2_server_method());
+    SSL_CTX *sslctx = SSL_CTX_new(SSLv23_method());
 #ifdef PIXELSERV_SSL_HAS_ECDH_AUTO
     SSL_CTX_set_ecdh_auto(sslctx, 1);
 #else
@@ -644,6 +644,7 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
           SSL_OP_SINGLE_DH_USE |
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
+          SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
           SSL_OP_NO_TICKET |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
     /* server-side caching */
@@ -678,10 +679,11 @@ SSL_CTX* create_default_sslctx(const char *pem_dir) {
     if (g_sslctx)
         return g_sslctx;
 
-    g_sslctx = SSL_CTX_new(TLSv1_2_server_method());
+    g_sslctx = SSL_CTX_new(SSLv23_method());
     SSL_CTX_set_options(g_sslctx,
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
+          SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
     SSL_CTX_sess_set_cache_size(g_sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
     SSL_CTX_set_session_cache_mode(g_sslctx, SSL_SESS_CACHE_SERVER);
@@ -721,7 +723,7 @@ int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int 
     if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
             sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
         perror("getnameinfo");
-    printf("new connection from %s on %s\n", client_ip, port);
+    printf("** NEW CONNECTION ** FROM %s ON %s\n", client_ip, port);
 #endif
 
     return rv;
