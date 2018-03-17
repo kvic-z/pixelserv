@@ -472,7 +472,7 @@ static int read_socket(int fd, char **msg, SSL *ssl) {
       bufptr = *msg + CHAR_BUF_SIZE * (i - 1);
     }
   }
-  TESTPRINT("read_socket. fd:%d msg_len:%d\n", fd, msg_len);
+  TESTPRINT("%s: fd:%d msg_len:%d ssl:%p\n", __FUNCTION__, fd, msg_len, ssl);
   return msg_len;
 }
 
@@ -1032,9 +1032,9 @@ void* conn_handler( void *ptr )
   }
 
   if (shutdown(new_fd, SHUT_RDWR) < 0)
-    log_msg(LGG_DEBUG, "shutdown() socket in thread or child process reported error: %m");
+    log_msg(LGG_DEBUG, "%s shutdown error: %m", __FUNCTION__);
   if (close(new_fd) < 0)
-    log_msg(LGG_DEBUG, "close() socket in thread or child process reported error: %m");
+    log_msg(LGG_DEBUG, "%s close error: %m", __FUNCTION__);
 
   TIME_CHECK("socket close()");
   
