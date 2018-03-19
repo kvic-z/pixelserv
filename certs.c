@@ -416,7 +416,6 @@ static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **pr
     char *cert_file;
     FILE *fp;
 
-//    (void)asprintf(&cert_file, "%s/ca.crt", pem_dir);
     asprintf(&cert_file, "%s/ca.crt", pem_dir);
     fp = fopen(cert_file, "r");
     x509 = X509_new();
@@ -643,9 +642,8 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
     SSL_CTX_set_options(sslctx,
           SSL_OP_SINGLE_DH_USE |
           SSL_MODE_RELEASE_BUFFERS |
-          SSL_OP_NO_COMPRESSION |
-          SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
-          SSL_OP_NO_TICKET |
+          SSL_OP_NO_COMPRESSION | SSL_OP_NO_TICKET |
+          SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1_1 |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
     /* server-side caching */
     SSL_CTX_set_session_cache_mode(sslctx, SSL_SESS_CACHE_NO_AUTO_CLEAR | SSL_SESS_CACHE_SERVER);
@@ -683,7 +681,7 @@ SSL_CTX* create_default_sslctx(const char *pem_dir) {
     SSL_CTX_set_options(g_sslctx,
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |
-          SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
+          SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1_1 |
           SSL_OP_CIPHER_SERVER_PREFERENCE);
     SSL_CTX_sess_set_cache_size(g_sslctx, PIXEL_SSL_SESS_CACHE_SIZE);
     SSL_CTX_set_session_cache_mode(g_sslctx, SSL_SESS_CACHE_SERVER);
