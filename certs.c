@@ -416,12 +416,14 @@ static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **pr
     char *cert_file;
     FILE *fp;
 
+    *issuer = NULL; *privkey = NULL;
     asprintf(&cert_file, "%s/ca.crt", pem_dir);
     fp = fopen(cert_file, "r");
     x509 = X509_new();
     if(!fp || !PEM_read_X509(fp, &x509, NULL, NULL))
        log_msg(LGG_ERR, "%s: failed to load ca.crt", __FUNCTION__);
-    *issuer = X509_NAME_dup(X509_get_subject_name(x509));
+    else
+        *issuer = X509_NAME_dup(X509_get_subject_name(x509));
     X509_free(x509);
     fclose(fp);
     free(cert_file);
@@ -430,12 +432,13 @@ static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **pr
     fp = fopen(cert_file, "r");
     RSA *rsa = NULL;
     if(!fp || !PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, (void*)pem_dir))
-       log_msg(LGG_ERR, "%s: failed to read ca.key", __FUNCTION__);
-    fclose(fp);
+       log_msg(LGG_ERR, "%s: failed to load ca.key", __FUNCTION__);
+    else {
+        *privkey = EVP_PKEY_new();
+        EVP_PKEY_assign_RSA(*privkey, rsa); /* rsa auto freed when key is freed */
+        fclose(fp);
+    }
     free(cert_file);
-
-    *privkey = EVP_PKEY_new();
-    EVP_PKEY_assign_RSA(*privkey, rsa); /* rsa auto freed when key is freed */
 }
 
 void *cert_generator(void *ptr) {
@@ -446,11 +449,11 @@ void *cert_generator(void *ptr) {
 
     X509_NAME *issuer;
     EVP_PKEY *key;
-    cert_gen_init(cert_tlstor->pem_dir, &issuer, &key);
-
     char *buf = malloc(PIXELSERV_MAX_SERVER_NAME * 4 + 1);
-    buf[PIXELSERV_MAX_SERVER_NAME * 4] = '\0';
     char *half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4;
+
+    buf[PIXELSERV_MAX_SERVER_NAME * 4] = '\0';
+    cert_gen_init(cert_tlstor->pem_dir, &issuer, &key);
 
     /* non block required. otherwise blocked until other side opens */
     int fd = open(PIXEL_CERT_PIPE, O_RDONLY | O_NONBLOCK);
@@ -490,6 +493,8 @@ void *cert_generator(void *ptr) {
 #ifdef DEBUG
         printf("%s 2: %s\n", __FUNCTION__, buf);
 #endif
+        if (key == NULL || issuer == NULL)
+            continue;
         char *p_buf, *p_buf_sav = NULL;
         p_buf = strtok_r(buf, ":", &p_buf_sav);
         while (p_buf != NULL) {
