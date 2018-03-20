@@ -526,7 +526,7 @@ static int write_pipe(int fd, response_struct *pipedata) {
   return rv;
 }
 
-static void get_client_ip(int socket_fd, char *ip_buf, int ip_buf_len)
+void get_client_ip(int socket_fd, char *ip_buf, int ip_buf_len)
 {
   struct sockaddr_storage sin_addr;
   socklen_t sin_addr_len = sizeof(sin_addr);
@@ -534,8 +534,10 @@ static void get_client_ip(int socket_fd, char *ip_buf, int ip_buf_len)
   getpeername(socket_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
   if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len,
                ip_buf, ip_buf_len,
-               NULL, 0, NI_NUMERICHOST) != 0)
+               NULL, 0, NI_NUMERICHOST) != 0) {
+    ip_buf[0] = '\0';
     log_msg(LOG_ERR, "getnameinfo failed to get client_ip");
+  }
 }
 
 void* conn_handler( void *ptr )
