@@ -1,3 +1,40 @@
+2018-3-x v2.1.0
+
+* NEW cache frequently used SSL certs in memory.
+* NEW enable SSL session cache and resumptions.
+* NEW prefetch SSL certs from disk on startup
+* NEW save top 3/4 of mostly frequently used SSL certs to disk on exit.
+* NEW counters `sct`, `sch`, `scm` and `scp` to register operations of caching SSL certs.
+* NEW counters `sst`, `ssh`, `ssm` and `ssp` to register operations of cached sessions and resumptions.
+* NEW option `-c` to specify cache size for SSL certs.
+* NEW URI `/ca.crt` to download and import users' Pixelserv CA on client devices.
+* NEW crypto and disk benchmark for gauging performance of most timing sensitve routines in pixelserv-tls.
+* NEW CLI option `-B` with optional argument to run crypto and disk benchmark.
+* NEW preliminary support for Cross-Origin Resource Sharing (CORS).
+* NEW support TLSv1.0 for wider compatibility with old clients.
+* NEW port for administration. Optional but when used, it faciliates setup of firewall rules to restrict access to 'administrative' URIs such as '/log=' and '/servstats'.
+* NEW ARMv8 64-bit build target (aka aarch64) in Makefile-XC. Proven to work in ASUS RT-AC86U.
+* NEW ability to run without CA cert. In this mode pixelserv-tls will act as SNI servers.
+* CHANGED improvement in TLS handshake handling. Added retries for better chance of success from troubled clients.
+* CHANGED reduced socket latency inside service threads.
+* CHANGED default HTTP_KEEPALIVE to 5 mins for boosting chance of reusing service threads and HTTP/1.1 persistent connections.
+* CHANGED default CERT_PATH to /var/cache/pixelserv for non-Entware builds.
+* CHANGED `slu` description to "other TLS handshake errors." Possible causes such as clients without CA cert, mismatch in TLS protocol version or other parameters.
+* CHANGED removal of fork() code. Now pthread only for multiprocessing.
+* CHANGED added support for glibc < 2.17 and OpenSSL 1.0.1
+* FIXED crash on non-FQDN hostname (#9)
+
+2017-12-12 v2.0.1
+
+* FIXED the 'stuck' issue
+* FIXED three crash bugs (#7 & #8)
+* FIXED incorrect logics of select() in the main event loop
+* FIXED a memory leak on failure to create a service thread for HTTPS
+* FIXED OpenSSL 1.1.x compatibility for Autotools (#6)
+* CHANGED more efficient check for next request in a service thread
+* CHANGED '-o SELECT_TIMEOUT' default to 10s
+* NEW backtrace on crash
+
 2017-11-28 v2.0.0
 
 * NEW support for HTTP/1.1 persistent connections
