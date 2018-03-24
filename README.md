@@ -19,21 +19,21 @@ make install
 
 ## Install on Entware
 
-Pre-built binaries are distributed by Entware team. Beta binaries during development cycles are distributed from this GitHub repository.
+Binary packages are distributed by Entware. Beta version binaries during development are distributed from this GitHub repository.
 
 #### Pre-built binaries
 ````
 opkg install pixelserv-tls
 ````
 
-#### Beta binaries
+#### Beta version binaries
 ````
 sh -c "$(wget -qO - https://kazoo.ga/pixelserv-tls/install-beta.sh)"
 ````
 
 ## Install on Arch Linux
 
-Package is available from Arch User Repository (AUR). This package works on all Arch Linux derived distributions such as Manjaro, Antergos and Chakra.
+A package is available from Arch User Repository (AUR). This [package](https://aur.archlinux.org/packages/pixelserv-tls/) works on all Arch Linux derived distributions such as Manjaro, Antergos and Chakra.
 
 #### Pre-built binaries using `yaourt`
 ````
