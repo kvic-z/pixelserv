@@ -7,7 +7,7 @@ _pixelserv-tls_  supports TLSv1.0 and TLSv1.2 and thus could operate with a wide
 
 pixelserv-tls can log access and HTTP/1.1 POST contents to syslog. So it  is  also  a  useful  tool  to  inspect and expose 'wrongly blocked' domains as well as 'rogue' domains invading user privacy.
 
-### Build from source
+## Build from source
 
 This works on all Linux distributions and Linux-like environments such Homebrew for macOS and Cygwin for Windows.
 
@@ -17,25 +17,25 @@ autoreconf -i
 make install
 ````
 
-### Install on Entware
+## Install on Entware
 
 Pre-built binaries are distributed by Entware team. Beta binaries during development cycles are distributed from this GitHub repository.
 
-#### Install pre-built binaries
+#### Pre-built binaries
 ````
 opkg install pixelserv-tls
 ````
 
-#### Install beta binaries
+#### Beta binaries
 ````
 sh -c "$(wget -qO - https://kazoo.ga/pixelserv-tls/install-beta.sh)"
 ````
 
-### Install from AUR on Arch Linux
+## Install on Arch Linux
 
-This also works on all Arch Linux derived distributions such as Manjaro, Antergos and Chakra.
+Package is available from Arch User Repository (AUR). This package works on all Arch Linux derived distributions such as Manjaro, Antergos and Chakra.
 
-#### Install pre-built binaries using `yaourt`
+#### Pre-built binaries using `yaourt`
 ````
 yaourt -S pixelserv-tls
 ````
@@ -46,14 +46,14 @@ cd pixelserv-tls
 makepkg -si
 ````
 
-### Launch pixelserv-tls
+## Launch pixelserv-tls
 ````
 pixelserv-tls <listening ip>
 ````
 
 Check out this [page](https://github.com/kvic-z/pixelserv-tls/wiki/Command-Line-Options) for details of command line options.
 
-### Announcement/discussion
+## Announcement/discussion
 
 * https://kazoo.ga/pixelserv-tls/
 * A pixelserv-tls chit-chat [thread](http://www.snbforums.com/threads/pixelserv-a-better-one-pixel-webserver-for-adblock.26114) on SNBfourms.
