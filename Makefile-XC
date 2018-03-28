@@ -33,7 +33,7 @@ UPX       := upx -9
 
 # packaging macros
 PFILES     = LICENSE README.md dist/$(DISTNAME).$(ARCH).performance.*
-PVERSION  := $(shell grep VERSION util.h | awk -F ' ' '{print $$NF}' | sed 's/"//g')
+PVERSION  := $(shell grep -w VERSION util.h | awk -F ' ' '{print $$NF}' | sed 's/"//g')
 PCMD      := zip
 
 # x86 environment
@@ -58,21 +58,24 @@ ARMCC     := $(ARMPREFIX)$(CC)
 ARMSTRIP  := $(ARMPREFIX)$(STRIP)
 
 # ARMV8(Entware) environment
-ARMV8TOOLS  := /home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27/bin
+ARMV8_entdir := /home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27
+ARMV8TOOLS  := $(ARMV8_entdir)/bin
 ARMV8PATH   := PATH=$(ARMV8TOOLS):$(PATH)
 ARMV8PREFIX := aarch64-openwrt-linux-
 ARMV8CC     := $(ARMV8PREFIX)$(CC)
 ARMV8STRIP  := $(ARMV8PREFIX)$(STRIP)
 
 # ARM(Entware) environment
-ARMentTOOLS  := /home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/bin
+ARM_entdir   := /home/yipst/Entware/staging_dir/toolchain-arm_cortex-a9_gcc-7.3.0_glibc-2.23_eabi
+ARMentTOOLS  := $(ARM_entdir)/bin
 ARMentPATH   := PATH=$(ARMentTOOLS):$(PATH)
 ARMentPREFIX := arm-openwrt-linux-gnueabi-
 ARMentCC     := $(ARMentPREFIX)$(CC)
 ARMentSTRIP  := $(ARMentPREFIX)$(STRIP)
 
 # mipsel(Entware) environment
-MIPSentTOOLS  := /home/yipst/Entware-ng/staging_dir/toolchain-mipsel_mips32r2_gcc-5.4.0_uClibc-1.0.17/bin
+MIPS_entdir   := /home/yipst/Entware-ng/staging_dir/toolchain-mipsel_mips32r2_gcc-5.4.0_uClibc-1.0.17
+MIPSentTOOLS  := $(MIPS_entdir)/bin
 MIPSentPATH   := PATH=$(MIPSentTOOLS):$(PATH)
 MIPSentPREFIX := mipsel-openwrt-linux-uclibc-
 MIPSentCC     := $(MIPSentPREFIX)$(CC)
@@ -87,7 +90,7 @@ MIPSentSTRIP  := $(MIPSentPREFIX)$(STRIP)
 
 .PHONY: all clean distclean printver x86 x86_x64 mips arm tomatoware
 
-all: amd64 arm mips #x86
+all: arm.ent armv8.ent mips.ent
 	@echo "=== Built all x86 and cross-compiler targets ==="
 
 clean:
@@ -142,10 +145,10 @@ mips: printver dist
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
-mips.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-uClibc.so.0 -lpthread -L/home/yipst/Entware-ng/staging_dir/toolchain-mipsel_mips32r2_gcc-5.4.0_uClibc-1.0.17/lib
-mips.ent: CFLAGS += -isystem/home/yipst/Entware-ng/staging_dir/toolchain-mipsel_mips32r2_gcc-5.4.0_uClibc-1.0.17/include
+mips.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-uClibc.so.0 -lpthread -L$(MIPS_entdir)/lib
+mips.ent: CFLAGS += -isystem$(MIPS_entdir)/include
 mips.ent: ARCH = mips.ent
-mips.ent: export STAGING_DIR = /home/yipst/Entware-ng/staging_dir/target-mipsel_mips32r2_uClibc-1.0.17
+mips.ent: export STAGING_DIR = $(MIPS_entdir)
 mips.ent: printver dist
 	@echo "=== Building mipsel Entware-ng  ==="
 	$(MIPSentPATH) $(MIPSentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
@@ -165,10 +168,10 @@ arm: printver dist
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).$@.zip $(PFILES)
 
-arm.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-linux.so.3 -lpthread -L/home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/lib
-arm.ent: CFLAGS += -isystem/home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi/include
+arm.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-linux.so.3 -lpthread -L$(ARM_entdir)/lib
+arm.ent: CFLAGS += -isystem$(ARM_entdir)/include
 arm.ent: ARCH = arm.ent
-arm.ent: export STAGING_DIR = /home/yipst/Entware-ng/staging_dir/toolchain-arm_cortex-a9_gcc-6.3.0_glibc-2.23_eabi
+arm.ent: export STAGING_DIR = $(ARM_entdir)
 arm.ent: printver dist
 	@echo "=== Building ARM (Entware) ==="
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB) 
@@ -176,10 +179,10 @@ arm.ent: printver dist
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-ng.armv7softfloat.zip $(PFILES)
 
-armv8.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-linux-aarch64.so.1 -lpthread -L/home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27/lib
-armv8.ent: CFLAGS += -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -Wno-error=unused-but-set-variable -Wno-error=unused-result -fpic -isystem/home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27/include
+armv8.ent: LDFLAGS += -Wl,-rpath=/opt/lib -Wl,--dynamic-linker=/opt/lib/ld-linux-aarch64.so.1 -lpthread -L$(ARMV8_entdir)/lib
+armv8.ent: CFLAGS += -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -Wno-error=unused-but-set-variable -Wno-error=unused-result -fpic -isystem$(ARMV8_entdir)/include
 armv8.ent: ARCH = armv8.ent
-armv8.ent: export STAGING_DIR = /home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27
+armv8.ent: export STAGING_DIR = $(ARMV8_entdir)
 armv8.ent: printver dist
 	@echo "=== Building ARM ==="
 	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
