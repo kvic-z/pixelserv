@@ -46,6 +46,18 @@ cd pixelserv-tls
 makepkg -si
 ````
 
+## Install on EdgeRouter X
+
+Pre-built binary is available as a Debian package. Source package will be available soon. See this detailed [installation guide](https://kazoo.ga/run-pixelserv-tls-on-erx/). Or simply:
+
+### Pre-built binary
+````
+sudo -i
+cd /tmp
+curl -O https://raw.githubusercontent.com/kvic-z/goodies-edgemax/master/pixelserv-tls_2.0.1-1_mipsel.deb
+dpkg -i pixelserv-tls_2.0.1-1_mipsel.deb
+````
+
 ## Launch pixelserv-tls
 ````
 pixelserv-tls <listening ip>
