@@ -50,7 +50,7 @@ makepkg -si
 
 Pre-built binary is available as a Debian package. Source package will be available soon. See this detailed [installation guide](https://kazoo.ga/run-pixelserv-tls-on-erx/). Or simply:
 
-### Pre-built binary
+#### Pre-built binary
 ````
 sudo -i
 cd /tmp
