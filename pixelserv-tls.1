@@ -1,10 +1,13 @@
 .TH PIXELSERV-TLS 1
 .SH NAME
-pixelserv-tls \- a tiny bespoke HTTP/1.1 webserver with HTTPS support for blocking and logging adverts requests
+pixelserv-tls \- a tiny bespoke HTTP/1.1 server for adblock and accelerating web browsing.
 .SH SYNOPSIS
 .B pixelserv-tls 
 [\fIip_addr\fR | \fIhostname\fR]
 [\fB\-2\fR]
+[\fB\-A\fR \fIPORT\fR]
+[\fB\-B\fR \fI[CERT_FILE]\fR]
+[\fB\-c\fR \fICERT_CACHE_SIZE\fR]
 [\fB\-f\fR]
 [\fB\-k\fR \fIHTTPS_PORT\fR]
 [\fB\-l\fR]
@@ -18,23 +21,21 @@ pixelserv-tls \- a tiny bespoke HTTP/1.1 webserver with HTTPS support for blocki
 [\fB\-t\fR \fISTATS_TXT_URL\fR]
 [\fB\-T\fR \fIMAX_THREADS\fR]
 [\fB\-u\fR \fIUSER\fR]
-[\fB\-z\fR \fIPATH_CERTS\fR]
+[\fB\-z\fR \fICERT_PATH\fR]
 
 .SH DESCRIPTION
 .B pixelserv-tls
-is a tiny bespoke HTTP/1.1 webserver with HTTPS support that acts on behalf of hundreds of thousands of adverts/tracker servers.
-It responds to all requests with nothing and can be configured to capture what ad networks and trackers intend to send them about you.
+is a tiny bespoke HTTP/1.1 webserver with HTTPS and SNI support.
+It acts on behalf of hundreds of thousands of advert/tracker servers and responds to all requests with nothing to speeds up web browsing.
 
 .B pixelserv-tls
-supports TLS1.2 for HTTPS.
-Server certificates for domains are automatically generated on demand and on the first request.
-It can output access log and HTTP POST contents to syslog. 
-.B pixelserv-tls
-is a useful tool to inspect and whitelist domains aggressively adblocked and giving trouble in loading a webpage.
+supports TLSv1.0 and TLSv1.2 and thus could operate with a wide range of browsers and client devices.
+Server certificates for any given advert/tracker domains are generated automatically on first use and saved to disk.
 
-Best of of all 
-.B pixelserv-tls 
-accelerates web browsing!
+.B pixelserv-tls
+can log access and HTTP/1.1 POST contents to syslog.
+So it is also a useful tool to inspect and expose 'wrongly blocked' domains as well as 'rogue' domains invading user privacy.
+
 .SH OPTIONS
 .TP
 .BR \fIip_addr\fR ", " \fIhostname\fR
@@ -44,6 +45,23 @@ If omitted and no '-n IFACE' specified, pixelserv-tls will listen on 0.0.0.0.
 .BR \-2
 Disable HTTP 204 response to '/generate_204' requests.
 In the event that Chrome detects network issues that might be caused by a captive portal, Chrome will make a cookieless request to http://www.gstatic.com/generate_204 and check the response code. If that request is redirected, Chrome will open the redirect target in a new tab on the assumption that it's a login page.
+.TP
+.BR \-A " " \fIPORT\fR
+Specify a port where administrative URIs will be accepted and processed. If specified, URIs '/servstats', '/servstats.txt', '/log=LEVEL' (but not '/ca.crt') are only allowed on this port and over HTTPS. Default is none.
+
+When not specified, these URIs are allowed on any ports and work over both HTTP and HTTPS. An admin port facilitates firewall rules to impose better control over who could access these URIs.
+.TP
+.BR \-B " " \fI[CERT_FILE]\fR
+Conduct crypto and disk benchmark. If optional CERT_FILE is provided, it is looked up in CERT_PATH and used instead.
+
+The benchmark repeats the process of generating certficate to disk and loading certificate from disk. The same time sensitive routines from normal operation are re-used and measured to provide an estimate of performance. The result is mainly good for comparing CPU power. Disk access is a little portion of the total time.
+
+When a new client connects, a certificate lookup is performed in cache and then CERT_PATH. If not found in both, the certificate will be generated asychronously. The generation is time expensive but considered a rare event. If not in cache but on disk, the certificate is loaded into cache. The loading is less expensive but yet consist a sizeable portion of total overhead before the client can actually send its requests.
+
+With SSL cache and session resumption in v2.1.0, load certificates from disk is also considered rare events.
+.TP
+.BR \-c " " \fICERT_CACHE_SIZE\fR
+Specify the maximum number of certificates to be cached in memory. More cache certificates imply higher maximum RAM usage. If omitted, default is 100.
 .TP
 .BR \-f
 Stay in foreground. Do not daemonize the process.
@@ -71,6 +89,9 @@ Set the minimum amount of time in seconds that a HTTP/1.1 persistent connection 
 Specify a port pixelserv-tls shall accept HTTP connections. This option can be set multiple times to specify more than one port.
 If omitted, default is 80.
 .TP
+.BR \-R
+Disable redirection to encoded path in tracker URLs if specified.
+.TP
 .BR \-s " " \fISTATS_HTML_URL\fR
 Customize the path where pixelserv-tls shall respond with the HTML verson of server statistics page. If omitted, default is '/servstats'.
 .TP
@@ -84,7 +105,69 @@ If omitted, default is 1200. Default is more than enough for all SOHO environemn
 .BR \-u " " \fIUSER\fR
 Set the user account pixelserv-tls shall use after dropping root. Default is 'nobody'.
 .TP
-.BR \-z " " \fIDIR_CERTS\fR
-pixelserv-tls will read the CA certificate (ca.crt) and its private key (ca.key) from this directory on startup. Automatically generated certificates will also be saved to this directory. If omitted, default is '/opt/var/cache/pixelserv'.
+.BR \-z " " \fICERT_PATH\fR
+Specify the directory where the CA certificate (ca.crt) and its private key (ca.key) are loaded on startup. Certificates that are automatically generated are also saved to CERT_PATH. If omitted, default is '/var/cache/pixelserv' ('/opt/var/cache/pixelserv' on Entware).
 
-DIR_CERTS shall have read/write permission for 'nobody' or 'USER' if '-u USER' is set.
+\'nobody' or 'USER' if '-u USER' is set should have read/write permission to CERT_PATH.
+
+.SH SUPPORTED URI/API
+.SS \fI/servstats\fR \fI/servstats.txt\fR
+Retrieve the servstats page in HTML and plain text formats respectively.
+.PP
+Example: http://<your pixelserv ip>/servstats.txt
+.PP
+This will retrieve the servstats page in plain text.
+.SS \fI/ca.crt\fR
+Retrieve ca.crt file located in CERT_PATH. On mobile client devices, the OS will prompt you and guide you through the installation of the CA cert.
+.SS \fI/log=LEVEL\fR
+Change the log LEVEL without restarting \fIpixelserv-tls\fR. LEVEL is an integer between 0 and 5 inclusive. The same definition as in command line option `-l LEVEL`. See above.
+
+.SH SERVSTATS COUNTERS
+
+Servstats counters measure various aspect of \fIpixelserv-tls\fR operations. Most counters are self-explanatory on the servstats page, accessible through URI '/servstats'. More subtle counters are described below. 
+
+.SS Service Threads
+A service thread is responsible for one HTTP/1.1 persistent connection. Both a client and the server have to keep it alive. If a client is idle without sending any requests within \fIKEEPALIVE_TIME\fR seconds, the server will close the connection and end the service thread. If a client decides to close a connection, the server will end the service thread. 
+.TP
+.BR \fIkcc\fR
+This is the number of service threads currently active. In other words, number of active connections. On a busy instance, this counter could be in tens or close to a hundred. The longer the KEEPALIVE_TIME the higher this counter would usually appear to be.
+.TP
+.BR \fIkmx\fR
+This registers the largest \fIkcc\fR ever hit.
+.TP
+.BR \fIkvg\fR
+Some service threads will process more requests than others. The number of requests processed in a thread is completely decided by clients. This counter calculates the average number of requests done in one service thread. It's an exponential moving average.
+.TP
+.BR \fIkrq\fR
+This counter registers the largest number of requests ever processed by one service thread.
+
+.SH AUTHOR
+This manpage is authored by kvic (aka kvic-z on GitHub) https://kazoo.ga/pixelserv-tls/
+
+.SH HISTORY
+pixelserv first appeared on Internet around 2003. About 30 lines of code written in PERL,
+it is a minimal webserver that serves a one-pixel GIF over HTTP. mstombs took the idea and
+rewrote in C for lightweight and speed starting from 2009. HunterZ developed further from
+2013 onwards and completed HTTP functionality.
+
+Since 2015, kvic added support for HTTPS, SNI, multi-threading, automatic certificate
+generation, access logging, HTTP/1.1 persistent connections, TLS session cache and
+resumption, build with GNU Autotools and etc. pixelserv was renamed to pixelserv-tls
+to signify HTTPS functionality, and has since undergone extensive optimization for
+speed and lightweight.
+
+.SH COPYRIGHT
+Copyright \(co 2015\-2018 kvic aka kvic-z on GitHub
+.br
+Copyright \(co 2013\-2015 HunterZ on GitHub
+.br
+Copyright \(co 2009\-2013 mstombs on GitHub
+.PP
+This is free software; see the source for copying conditions.  There is NO warranty;  not  even  for  MERCHANTABILITY  or FITNESS FOR A PARTICULAR PURPOSE.
+
+.SH BUGS
+.SS Reporting Bugs
+Please submit a ticket at https://github.com/kvic-z/pixelserv-tls/issues
+.SS Known Bugs
+None at the moment
+

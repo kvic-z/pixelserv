@@ -6,7 +6,7 @@
 #include <openssl/ssl.h>
 
 #define PIXEL_SSL_SESS_CACHE_SIZE 128*20
-#define PIXEL_SSL_SESS_TIMEOUT 3600 /* seconds */
+#define PIXEL_SSL_SESS_TIMEOUT 900 /* seconds */
 #define PIXEL_CERT_PIPE "/tmp/pixelcerts"
 #ifndef DEFAULT_PEM_PATH
 #define DEFAULT_PEM_PATH "/opt/var/cache/pixelserv"
@@ -30,6 +30,7 @@
 typedef struct {
     const char* pem_dir;
     X509 *cacert;
+    void *stk;
 } cert_tlstor_t;
 
 typedef enum {
@@ -55,8 +56,10 @@ typedef struct {
     int new_fd;
     SSL *ssl;
     double init_time;
-    tlsext_cb_arg_struct * tlsext_cb_arg;
+    tlsext_cb_arg_struct *tlsext_cb_arg;
     int allow_admin;
+    void *stk;
+    tlsext_cb_arg_struct v;
 } conn_tlstor_struct;
 
 typedef struct {
@@ -91,4 +94,8 @@ int sslctx_tbl_get_sess_miss();
 int sslctx_tbl_get_sess_purge();
 SSL_CTX * create_default_sslctx(const char *pem_dir);
 int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int num_ssl_ports);
+void conn_stor_init(int slots);
+void conn_stor_relinq(conn_tlstor_struct *p);
+conn_tlstor_struct* conn_stor_acquire();
+void conn_stor_flush();
 #endif

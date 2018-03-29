@@ -531,6 +531,9 @@ void get_client_ip(int socket_fd, char *ip_buf, int ip_buf_len)
   struct sockaddr_storage sin_addr;
   socklen_t sin_addr_len = sizeof(sin_addr);
 
+  if (ip_buf == NULL || ip_buf_len <= 0 || (socket_fd < 0 && (ip_buf[0] = '\0') == '\0'))
+    return;
+
   getpeername(socket_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
   if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len,
                ip_buf, ip_buf_len,
@@ -1030,7 +1033,6 @@ void* conn_handler( void *ptr )
     sslctx_tbl_lock(CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx_idx);
     SSL_free(CONN_TLSTOR(ptr, ssl));
     sslctx_tbl_unlock(CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx_idx);
-    free(CONN_TLSTOR(ptr, tlsext_cb_arg));
   }
 
   if (shutdown(new_fd, SHUT_RDWR) < 0)
@@ -1047,10 +1049,10 @@ void* conn_handler( void *ptr )
   pipedata.krq = num_req;
   rv = write(pipefd, &pipedata, sizeof(pipedata));
 
-  free(ptr);
   free(buf);
   free(req_url);
   free(post_buf);
   free(aspbuf);
+  conn_stor_relinq(ptr);
   return NULL;
 }

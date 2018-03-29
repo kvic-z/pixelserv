@@ -13,6 +13,7 @@
 #include <arpa/inet.h>
 #endif
 #include <linux/version.h>
+#include <malloc.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <sys/resource.h>
@@ -25,8 +26,13 @@
 #include "socket_handler.h"
 #include "util.h"
 
-#define THREAD_STACK_SIZE  32767
+#define PAGE_SIZE 4096
+#define THREAD_STACK_SIZE  9*PAGE_SIZE
 #define TCP_FASTOPEN_QLEN  25
+
+#ifdef __UCLIBC__
+#define M_ARENA_MAX -1 /* no effect but compile on uClibc */
+#endif
 
 const char *tls_pem = DEFAULT_PEM_PATH;
 int tls_ports[MAX_TLS_PORTS + 1] = {0}; /* one extra port for admin */
@@ -57,6 +63,9 @@ void signal_handler(int sig)
       // Ignore this signal while we are quitting
       signal(SIGTERM, SIG_IGN);
     }
+
+    conn_stor_flush();
+    malloc_trim(0);
 
     // log stats
     char* stats_string = get_stats(0, 0);
@@ -122,6 +131,7 @@ int main (int argc, char* argv[])
   int max_num_threads = DEFAULT_THREAD_MAX;
   int cert_cache_size = DEFAULT_CERT_CACHE_SIZE;
 
+  mallopt(M_ARENA_MAX, 1);
   // command line arguments processing
   for (i = 1; i < argc && error == 0; ++i) {
     if (argv[i][0] == '-') {
@@ -335,7 +345,7 @@ int main (int argc, char* argv[])
     FILE *fp = fopen(fname, "r");
     X509 *cacert = X509_new();
     if(fp == NULL || PEM_read_X509(fp, &cacert, NULL, NULL) == NULL)
-      log_msg(LGG_ERR, "Failed to open/read ca.crt");
+      log_msg(LGG_ERR, "Failed to open ca.crt");
     else {
       EVP_PKEY * pubkey = X509_get_pubkey(cacert);
       {
@@ -364,14 +374,17 @@ int main (int argc, char* argv[])
       X509_free(cacert);
       if (!do_benchmark) {
         cert_tlstor.pem_dir = tls_pem;
+        posix_memalign(&cert_tlstor.stk, PAGE_SIZE, THREAD_STACK_SIZE + PAGE_SIZE);
         pthread_attr_t attr;
         pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
+        pthread_attr_setstack(&attr, cert_tlstor.stk, THREAD_STACK_SIZE);
         pthread_create(&certgen_thread, &attr, cert_generator, (void*)&cert_tlstor);
+        pthread_attr_destroy(&attr);
       }
     }
   }
 
+  conn_stor_init(max_num_threads);
   sslctx_tbl_init(cert_cache_size);
   sslctx_tbl_load(tls_pem, cachain);
 
@@ -693,16 +706,27 @@ int main (int argc, char* argv[])
         continue;
     }
 
-    conn_tlstor_struct *conn_tlstor = malloc(sizeof(conn_tlstor_struct));
+
+    conn_tlstor_struct *conn_tlstor = conn_stor_acquire();
+    if (conn_tlstor == NULL) {
+      log_msg(LGG_WARNING, "%s conn_tlstor alloc failed ", __FUNCTION__);
+      continue;
+    }
+    if (conn_tlstor->stk == NULL &&
+        posix_memalign(&conn_tlstor->stk, PAGE_SIZE, THREAD_STACK_SIZE + PAGE_SIZE) != 0) {
+      log_msg(LGG_WARNING, "%s thread stack alloc failed ", __FUNCTION__);
+      conn_stor_relinq(conn_tlstor);
+      continue;
+    }
+
     conn_tlstor->new_fd = new_fd;
     conn_tlstor->ssl = NULL;
-    conn_tlstor->tlsext_cb_arg = NULL;
     conn_tlstor->allow_admin = (!admin_port) ? 1 : 0;
     char server_ip[INET6_ADDRSTRLEN] = {'\0'};
     int ssl_port = is_ssl_conn(new_fd, server_ip, INET6_ADDRSTRLEN, tls_ports, num_tls_ports);
     if (ssl_port) {
+      tlsext_cb_arg_struct *t = conn_tlstor->tlsext_cb_arg;
       SSL *ssl = NULL;
-      tlsext_cb_arg_struct *t = malloc(sizeof(tlsext_cb_arg_struct));
       t->tls_pem = tls_pem;
       t->cachain = cachain;
       t->servername = NULL;
@@ -728,21 +752,21 @@ redo_ssl_accept:
       errno = 0;
       ERR_clear_error();
       int sslret = SSL_accept(ssl);
-      //char errstr[1024];
+      char errstr[60], ip_buf[20];
 
       if (sslret != 1) {
         int sslerr = SSL_get_error(ssl, sslret);
         switch(sslerr) {
-            //log_msg(LGG_ERR, "SSL_accept ret:%d status:%d ssl error:%d", sslret, t->status, sslerr);
           case SSL_ERROR_WANT_READ:
             ssl_attempt--;
             if (ssl_attempt > 0) goto redo_ssl_accept;
             break;
           case SSL_ERROR_SSL:
-            //log_msg(LGG_ERR, "ssl %s", ERR_error_string(ERR_peek_last_error(), errstr));
+            get_client_ip(new_fd, ip_buf, 20);
+            ERR_error_string_n(ERR_peek_last_error(), errstr, 60);
+            log_msg(LGG_WARNING, "client %s ssl %s", ip_buf, errstr);
             break;
           case SSL_ERROR_SYSCALL:
-            //log_msg(LGG_ERR, "SSL_accept errno:%d", errno);
           default:
             ;
         }
@@ -757,13 +781,12 @@ redo_ssl_accept:
         sslctx_tbl_lock(t->sslctx_idx);
         SSL_free(ssl);
         sslctx_tbl_unlock(t->sslctx_idx);
-        free(t);
         shutdown(new_fd, SHUT_RDWR);
         close(new_fd);
+        conn_stor_relinq(conn_tlstor);
         continue;
       }
       conn_tlstor->ssl = ssl;
-      conn_tlstor->tlsext_cb_arg = t;
       if (ssl_port == admin_port)
         conn_tlstor->allow_admin = 1;
     }
@@ -773,7 +796,7 @@ redo_ssl_accept:
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
+    pthread_attr_setstack(&attr, conn_tlstor->stk, THREAD_STACK_SIZE);
     int err;
     if ((err=pthread_create(&conn_thread, &attr, conn_handler, (void*)conn_tlstor))) {
       log_msg(LGG_ERR, "Failed to create conn_handler thread. err: %d", err);
@@ -782,27 +805,22 @@ redo_ssl_accept:
         sslctx_tbl_lock(conn_tlstor->tlsext_cb_arg->sslctx_idx);
         SSL_free(conn_tlstor->ssl);
         sslctx_tbl_unlock(conn_tlstor->tlsext_cb_arg->sslctx_idx);
-        free(conn_tlstor->tlsext_cb_arg);
       }
       shutdown(new_fd, SHUT_RDWR);
       close(new_fd);
+      conn_stor_relinq(conn_tlstor);
       continue;
     }
+    pthread_attr_destroy(&attr);
 
     if (++kcc > kmx)
       kmx = kcc;
-
-    // reap any zombie child processes that have exited
-    // irony note: I wrote this while watching The Walking Dead :p
-    for (errno = 0; waitpid(-1, 0, WNOHANG) > 0 || (errno && errno != ECHILD); errno = 0) {
-      if (errno && errno != ECHILD) {
-        log_msg(LGG_ERR, "waitpid() reported error: %m");
-      }
-    }
   } // end of perpetual accept() loop
 
   pthread_cancel(certgen_thread);
   pthread_join(certgen_thread, NULL);
+  free(cert_tlstor.stk);
+  conn_stor_flush();
   sslctx_tbl_cleanup();
   sk_X509_pop_free(cachain, X509_free);
   SSL_CTX_free(sslctx);

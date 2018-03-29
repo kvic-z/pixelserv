@@ -4,6 +4,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
+#include <malloc.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,13 +21,17 @@
 #include "logger.h"
 #include "util.h"
 
-static SSL_CTX *g_sslctx;
 static pthread_mutex_t *locks;
+static SSL_CTX *g_sslctx;
 
 static sslctx_cache_struct *sslctx_tbl;
 static int sslctx_tbl_size, sslctx_tbl_end;
 static int sslctx_tbl_cnt_hit, sslctx_tbl_cnt_miss, sslctx_tbl_cnt_purge;
 static unsigned int  sslctx_tbl_last_flush;
+
+static void **conn_stor;
+static int conn_stor_last = -1, conn_stor_max = -1;
+static pthread_mutex_t cslock;
 
 #define SSLCTX_TBL_ptr(h)         ((sslctx_cache_struct *)(sslctx_tbl + h))
 #define SSLCTX_TBL_get(h, k)      SSLCTX_TBL_ptr(h)->k
@@ -43,6 +48,60 @@ inline int sslctx_tbl_get_sess_purge() { return SSL_CTX_sess_cache_full(g_sslctx
 
 static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx);
 static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X509_INFO) *cachain);
+
+void conn_stor_init(int slots) {
+    if (slots < 0) {
+        log_msg(LGG_ERR, "%s invalid slots %d", __FUNCTION__, slots);
+        return;
+    }
+    conn_stor = malloc(slots * sizeof(void *));
+    if (!conn_stor)
+        log_msg(LGG_ERR, "Failed to allocate conn_stor of size %d", slots);
+    conn_stor_last = -1;
+    conn_stor_max = slots;
+    pthread_mutex_init(&cslock, NULL);
+}
+
+void conn_stor_flush() {
+    if (conn_stor_max < 0 || conn_stor_last < 0 || conn_stor_last <= conn_stor_max / 2)
+        return;
+    int threshold = conn_stor_max / 2;
+    pthread_mutex_lock(&cslock);
+    for (;conn_stor_last >= threshold && conn_stor[conn_stor_last] != NULL; conn_stor_last--) {
+        free(CONN_TLSTOR(conn_stor[conn_stor_last], stk));
+        free(conn_stor[conn_stor_last]);
+    }
+    pthread_mutex_unlock(&cslock);
+}
+
+void conn_stor_relinq(conn_tlstor_struct *p) {
+    pthread_mutex_lock(&cslock);
+    if (conn_stor_last >= conn_stor_max)
+        log_msg(LGG_CRIT, "%s conn_stor overflow", __FUNCTION__);
+    else
+        conn_stor[++conn_stor_last] = p;
+    pthread_mutex_unlock(&cslock);
+}
+
+conn_tlstor_struct* conn_stor_acquire() {
+    conn_tlstor_struct *ret = NULL;
+
+    pthread_mutex_lock(&cslock);
+    if (conn_stor_last > 0) {
+        ret = conn_stor[conn_stor_last];
+        conn_stor[conn_stor_last--] = NULL;
+    }
+    pthread_mutex_unlock(&cslock);
+
+    if (ret == NULL) {
+        ret = malloc(sizeof(conn_tlstor_struct));
+        if (ret != NULL) {
+            memset(ret, 0, sizeof(conn_tlstor_struct));
+            ret->tlsext_cb_arg = &ret->v;
+        }
+    }
+    return ret;
+}
 
 void sslctx_tbl_init(int tbl_size)
 {
@@ -302,12 +361,13 @@ void ssl_free_locks()
 
 static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, EVP_PKEY *privkey)
 {
-    char *fname = NULL;
+    char fname[PIXELSERV_MAX_PATH];
     EVP_PKEY *key = NULL;
     X509 *x509 = NULL;
     X509_EXTENSION *ext = NULL;
     X509V3_CTX ext_ctx;
-    char *san_str = NULL;
+#define SAN_STR_SIZE PIXELSERV_MAX_SERVER_NAME + 4 /* max("IP:", "DNS:") = 4 */
+    char san_str[SAN_STR_SIZE];
     char *tld = NULL, *tld_tmp = NULL;
     int dot_count = 0;
     EVP_MD_CTX *p_ctx = NULL;
@@ -348,10 +408,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
         tld_tmp = strchr(tld, '.');
     }
     tld_tmp = (dot_count == 3 && (atoi(tld) > 0 || (atoi(tld) == 0 && strlen(tld) == 1))) ? "IP" : "DNS";
-    if (asprintf(&san_str, "%s:%s", tld_tmp, pem_fn) < 0) {
-        san_str = NULL;
-        goto free_all;
-    }
+    snprintf(san_str, SAN_STR_SIZE, "%s:%s", tld_tmp, pem_fn);
     if ((ext = X509V3_EXT_conf_nid(NULL, &ext_ctx, NID_subject_alt_name, san_str)) == NULL)
         goto free_all;
     X509_add_ext(x509, ext, -1);
@@ -364,10 +421,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     // -- save cert
     if(pem_fn[0] == '*')
         pem_fn[0] = '_';
-    if (asprintf(&fname, "%s/%s", pem_dir, pem_fn) < 0) {
-        fname = NULL;
-        goto free_all;
-    }
+    snprintf(fname, PIXELSERV_MAX_PATH, "%s/%s", pem_dir, pem_fn);
     FILE *fp = fopen(fname, "wb");
     if(fp == NULL) {
         log_msg(LGG_ERR, "%s: failed to open file for write: %s", __FUNCTION__, fname);
@@ -383,8 +437,6 @@ free_all:
     EVP_PKEY_free(key);
     X509_EXTENSION_free(ext);
     X509_free(x509);
-    free(fname);
-    free(san_str);
 }
 
 
@@ -412,12 +464,12 @@ quit_cb:
 
 static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **privkey)
 {
+    char cert_file[PIXELSERV_MAX_PATH];
     X509 *x509;
-    char *cert_file;
     FILE *fp;
 
     *issuer = NULL; *privkey = NULL;
-    asprintf(&cert_file, "%s/ca.crt", pem_dir);
+    snprintf(cert_file, PIXELSERV_MAX_PATH, "%s/ca.crt", pem_dir);
     fp = fopen(cert_file, "r");
     x509 = X509_new();
     if(!fp || !PEM_read_X509(fp, &x509, NULL, NULL))
@@ -426,9 +478,8 @@ static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **pr
         *issuer = X509_NAME_dup(X509_get_subject_name(x509));
     X509_free(x509);
     fclose(fp);
-    free(cert_file);
 
-    (void)asprintf(&cert_file, "%s/ca.key", pem_dir);
+    snprintf(cert_file, PIXELSERV_MAX_PATH, "%s/ca.key", pem_dir);
     fp = fopen(cert_file, "r");
     RSA *rsa = NULL;
     if(!fp || !PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, (void*)pem_dir))
@@ -438,18 +489,18 @@ static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **pr
         EVP_PKEY_assign_RSA(*privkey, rsa); /* rsa auto freed when key is freed */
         fclose(fp);
     }
-    free(cert_file);
 }
 
 void *cert_generator(void *ptr) {
 #ifdef DEBUG
     printf("%s: thread up and running\n", __FUNCTION__);
 #endif
+    int idle = 0;
     cert_tlstor_t *cert_tlstor = (cert_tlstor_t *) ptr;
 
     X509_NAME *issuer;
     EVP_PKEY *key;
-    char *buf = malloc(PIXELSERV_MAX_SERVER_NAME * 4 + 1);
+    char buf[PIXELSERV_MAX_SERVER_NAME * 4 + 1];
     char *half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4;
 
     buf[PIXELSERV_MAX_SERVER_NAME * 4] = '\0';
@@ -471,6 +522,14 @@ void *cert_generator(void *ptr) {
         if (ret <= 0) {
             /* timeout */
             sslctx_tbl_check_and_flush();
+            if (kcc == 0) {
+                if (++idle >= (3600 / (PIXEL_SSL_SESS_TIMEOUT / 2))) {
+                    /* flush conn_stor after 3600 seconds */
+                    conn_stor_flush();
+                    idle = 0;
+                }
+                malloc_trim(0);
+            }
             continue;
         }
         if((cnt = read(fd, buf + strlen(half_token), PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token))) == 0) {
@@ -498,20 +557,18 @@ void *cert_generator(void *ptr) {
         char *p_buf, *p_buf_sav = NULL;
         p_buf = strtok_r(buf, ":", &p_buf_sav);
         while (p_buf != NULL) {
-            char *cert_file;
+            char cert_file[PIXELSERV_MAX_PATH];
             struct stat st;
-            (void)asprintf(&cert_file, "%s/%s", ((cert_tlstor_t*)cert_tlstor)->pem_dir, p_buf);
+            snprintf(cert_file, PIXELSERV_MAX_PATH, "%s/%s", ((cert_tlstor_t*)cert_tlstor)->pem_dir, p_buf);
             if(stat(cert_file, &st) != 0) /* doesn't exist */
                 generate_cert(p_buf, cert_tlstor->pem_dir, issuer, key);
             p_buf = strtok_r(NULL, ":", &p_buf_sav);
-            free(cert_file);
         }
         /* quick check and flush if time due */
         sslctx_tbl_check_and_flush();
     }
     X509_NAME_free(issuer);
     EVP_PKEY_free(key);
-    free(buf);
     return NULL;
 }
 
@@ -652,7 +709,8 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
           SSL_OP_CIPHER_SERVER_PREFERENCE);
     /* server-side caching */
     SSL_CTX_set_session_cache_mode(sslctx, SSL_SESS_CACHE_NO_AUTO_CLEAR | SSL_SESS_CACHE_SERVER);
-    SSL_CTX_set_timeout(g_sslctx, PIXEL_SSL_SESS_TIMEOUT);
+    SSL_CTX_set_timeout(sslctx, PIXEL_SSL_SESS_TIMEOUT);
+    SSL_CTX_sess_set_cache_size(sslctx, 1);
     if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
         log_msg(LGG_DEBUG, "%s: failed to set cipher list", __FUNCTION__);
     if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0
