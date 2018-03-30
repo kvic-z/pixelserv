@@ -691,23 +691,24 @@ void* conn_handler( void *ptr )
           rsize = asprintf(&aspbuf, httpoptions, cors_origin);
           response = aspbuf;
         } else if (!strcmp(method, "POST")) {
-            int recv_len = 0;
-            int length = 0;
-            int post_buf_size = 0;
-            int wait_cnt = 0;
-            char *h = strstr(bufptr, "Content-Length:");
+          int recv_len = 0;
+          int length = 0;
+          int post_buf_size = 0;
+          int wait_cnt = 0;
+          char *h = strstr(bufptr, "Content-Length:");
 
-            if (!h)
-              goto end_post;
-            h += strlen("Content-Length:");
-            length = atoi(strtok(h, "\r\n"));
+          wait_cnt = MAX_HTTP_POST_WAIT / GLOBAL(g, select_timeout);
+          if (wait_cnt < 1) wait_cnt = 1;
 
+          if (!h)
+            goto end_post;
+          h += strlen("Content-Length:");
+          length = atoi(strtok(h, "\r\n"));
+
+          if (log_verbose >= LGG_INFO) {
             log_msg(LGG_DEBUG, "POST socket: %d Content-Length: %d", new_fd, length);
 
-            if (length < MAX_HTTP_POST_LEN)
-              post_buf_size = length;
-            else
-              post_buf_size = MAX_HTTP_POST_LEN;
+            post_buf_size = (length < MAX_HTTP_POST_LEN) ? length : MAX_HTTP_POST_LEN;
             post_buf = realloc(post_buf, post_buf_size + 1);
             if (!post_buf) {
               log_msg(LGG_ERR, "Out of memory. Cannot malloc receiver buffer.");
@@ -722,18 +723,13 @@ void* conn_handler( void *ptr )
               length -= recv_len;
               post_buf_size -= recv_len;
             }
-
-            log_msg(LGG_DEBUG, "POST socket: %d expect length: %d\n", new_fd, length);
-
-            wait_cnt = MAX_HTTP_POST_WAIT / GLOBAL(g, select_timeout);
-            if (wait_cnt < 1) wait_cnt = 1;
+            log_msg(LGG_DEBUG, "POST socket: %d expect length: %d", new_fd, length);
 
             /* caputre POST content */
             for (; length > 0 && wait_cnt > 0;) {
-              errno = 0;
-              if (CONN_TLSTOR(ptr, ssl)) {
-                rv = ssl_read(CONN_TLSTOR(ptr, ssl), (char *)(post_buf + recv_len), post_buf_size);
-              }else
+              if (CONN_TLSTOR(ptr, ssl))
+                rv = ssl_read(CONN_TLSTOR(ptr, ssl), post_buf + recv_len, post_buf_size);
+              else
                 rv = recv(new_fd, post_buf + recv_len, post_buf_size, MSG_WAITALL);
 
               log_msg(LGG_DEBUG, "POST socket:%d recv length:%d; errno:%d", new_fd, rv, errno);
@@ -751,18 +747,39 @@ void* conn_handler( void *ptr )
                     recv_len += rv - CHAR_BUF_SIZE;
                     post_buf_size = CHAR_BUF_SIZE;
                   } else {
-                      recv_len += rv - length;
-                      post_buf_size = length;
+                    recv_len += rv - length;
+                    post_buf_size = length;
                   }
                 }
               } else
                 --wait_cnt;
             }
+          } else {
+            if (post_buf == NULL)
+              post_buf = malloc(CHAR_BUF_SIZE + 1);
+            /* body points to "\r\n\r\n" */
+            if (body && body_len > 4)
+              length -= body_len - 4;
+            /* caputre POST content */
+            for (; length > 0 && wait_cnt > 0;) {
+              if (CONN_TLSTOR(ptr, ssl))
+                rv = ssl_read(CONN_TLSTOR(ptr, ssl), post_buf, CHAR_BUF_SIZE);
+              else
+                rv = recv(new_fd, post_buf, CHAR_BUF_SIZE, 0);
 
-          end_post:
-            post_buf_len = recv_len;
-            pipedata.status = SEND_POST;
-            /* default httpnulltext response */
+              if (rv > 0) {
+                pipedata.rx_total += rv;
+                length -= rv;
+              } else
+                --wait_cnt;
+            }
+            /* drained data */
+            recv_len = 0;
+          }
+end_post:
+          post_buf_len = recv_len;
+          pipedata.status = SEND_POST;
+          /* default httpnulltext response */
         } else if (!strcmp(method, "GET")) {
           // send default from here, no matter what happens
           pipedata.status = DEFAULT_REPLY;
