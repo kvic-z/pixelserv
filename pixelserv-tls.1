@@ -141,6 +141,27 @@ Some service threads will process more requests than others. The number of reque
 .BR \fIkrq\fR
 This counter registers the largest number of requests ever processed by one service thread.
 
+.SS TLS Handshake
+A new client connecting to pixelserv-tls over HTTPS has to pass TLS protocol handshakes. If successful, then the client could make one or more requestst that will register in \fIslh\fR. Otherwise, one of the \fIslm\fR, \fIsle\fR, and \fIslu\fR will be incremented by one. Counts in \fIslu\fR is broken down further to assist users in diagnosing issues and inspecting privacy breaches.
+.TP
+.BR \fIslh\fR
+Incremented by one when a requested is received over HTTPS and successfully processed.
+.TP
+.BR \fIslm\fR
+If a server cert does not exist on disk, this counter is incremented by one. The new cert will be asynchronouslly generated and saved to disk.
+.TP
+.BR \fIsle\fR
+If a server cert exists on disk but results in error when loaded for use, this counter is incremented by one. Unless your disk is corrupted or certs are damaged on disk, \fIsle\fR is very rare.
+.TP
+.BR \fIslu\fR
+If TLS handshakes fail other than above reasons, this counter is incremented by one. \fIslu\fR is further classified into two common types, \fIuca\fR and \fIuce\fR. Note that \fIslu\fR includes more than these two types.
+.TP
+.BR \fIuca\fR
+When a TLS handshake fails due to the client not recognise your Pixelserv CA cert, this counter is incremented by one. If your clients do not have Pixelserv CA imported, then the error is legitimate. If your clients have Pixelserv CA imported already, it is worth further check. Often a client could be purposely coded not to honour user root CAs for dubious reasons. Users are recommended to turn on log LEVEL 2. Try to catch the client ip and server name in syslog. Check server name against reputable online sources. Check client ip and port to catch the provoking apps on client devices.
+.TP
+.BR \fIuce\fR
+When a TLS handshake fails due to the client not recognise the server cert, this counter is incremented by one. Very likely such cases are of dubious nature. A client may be purposedly coded to check the server cert against stored fingerprint. If mismatch, the client refuses to proceed. This is alarming and often indicates a client attempts to connect to a rogue server. Users should turn on log LEVEL 2. Catch the client ip and server name in syslog and proceed with similar investigation steps as in \fIuca\R.. 
+
 .SH AUTHOR
 This manpage is authored by kvic (aka kvic-z on GitHub) https://kazoo.ga/pixelserv-tls/
 
