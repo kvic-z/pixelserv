@@ -49,5 +49,5 @@ typedef struct {
 } response_struct;
 
 void* conn_handler(void *ptr);
-void get_client_ip(int socket_fd, char *ip_buf, int ip_buf_len);
+void get_client_ip(int socket_fd, char *ip, int ip_len, char *port, int port_len);
 #endif // SOCKET_HANDLER_H

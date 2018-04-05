@@ -6,7 +6,7 @@
 #include <openssl/ssl.h>
 
 #define PIXEL_SSL_SESS_CACHE_SIZE 128*20
-#define PIXEL_SSL_SESS_TIMEOUT 900 /* seconds */
+#define PIXEL_SSL_SESS_TIMEOUT 3600 /* seconds */
 #define PIXEL_CERT_PIPE "/tmp/pixelcerts"
 #ifndef DEFAULT_PEM_PATH
 #define DEFAULT_PEM_PATH "/opt/var/cache/pixelserv"
@@ -48,7 +48,6 @@ typedef struct {
     const char *servername;
     char server_ip[INET6_ADDRSTRLEN];
     ssl_enum status;
-    void *sslctx;
     int sslctx_idx;
 } tlsext_cb_arg_struct;
 
@@ -58,12 +57,10 @@ typedef struct {
     double init_time;
     tlsext_cb_arg_struct *tlsext_cb_arg;
     int allow_admin;
-    void *stk;
     tlsext_cb_arg_struct v;
 } conn_tlstor_struct;
 
 typedef struct {
-    int name_len;
     int alloc_len;
     char *cert_name;
     unsigned int last_use; /* seconds since process up */

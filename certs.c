@@ -46,7 +46,7 @@ inline int sslctx_tbl_get_sess_hit() { return SSL_CTX_sess_hits(g_sslctx); }
 inline int sslctx_tbl_get_sess_miss() { return SSL_CTX_sess_misses(g_sslctx); }
 inline int sslctx_tbl_get_sess_purge() { return SSL_CTX_sess_cache_full(g_sslctx); }
 
-static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx);
+static int sslctx_tbl_insert(const char *cert_name, SSL_CTX *sslctx, int ins_idx);
 static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X509_INFO) *cachain);
 
 void conn_stor_init(int slots) {
@@ -68,7 +68,6 @@ void conn_stor_flush() {
     int threshold = conn_stor_max / 2;
     pthread_mutex_lock(&cslock);
     for (;conn_stor_last >= threshold && conn_stor[conn_stor_last] != NULL; conn_stor_last--) {
-        free(CONN_TLSTOR(conn_stor[conn_stor_last], stk));
         free(conn_stor[conn_stor_last]);
     }
     pthread_mutex_unlock(&cslock);
@@ -105,6 +104,8 @@ conn_tlstor_struct* conn_stor_acquire() {
 
 void sslctx_tbl_init(int tbl_size)
 {
+    if (tbl_size <= 0)
+        return;
     sslctx_tbl_end = 0;
     sslctx_tbl = malloc(tbl_size * sizeof(sslctx_cache_struct));
     if (!sslctx_tbl) {
@@ -126,6 +127,17 @@ void sslctx_tbl_cleanup()
     }
 }
 
+static int cmp_sslctx_reuse_count(const void *p1, const void *p2)
+{
+    /* reverse order */
+    return ((sslctx_cache_struct *)p2)->reuse_count - ((sslctx_cache_struct *)p1)->reuse_count;
+}
+
+static int cmp_sslctx_certname(const void *k, const void *p)
+{
+    return strcmp(((sslctx_cache_struct *)k)->cert_name, ((sslctx_cache_struct *)p)->cert_name);
+}
+
 void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain)
 {
     FILE *fp;
@@ -134,18 +146,21 @@ void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain)
         log_msg(LGG_ERR, "%s: failed to allocate memory", __FUNCTION__);
         goto quit_load;
     }
+
     (void)snprintf(fname, PIXELSERV_MAX_PATH, "%s/prefetch", pem_dir);
     if((fp = fopen(fname, "r")) == NULL) {
         log_msg(LGG_WARNING, "%s: %s doesn't exist.", __FUNCTION__, fname);
         goto quit_load;
     }
+
     while (getline(&line, &(size_t){ PIXELSERV_MAX_PATH }, fp) != -1) {
         char *cert_name = strtok(line, " \n\t");
         (void)snprintf(fname, PIXELSERV_MAX_PATH, "%s/%s", pem_dir, cert_name);
+
         SSL_CTX *sslctx = create_child_sslctx(fname, cachain);
         if (sslctx) {
             int ins_idx = sslctx_tbl_end;
-            sslctx_tbl_cache(cert_name, sslctx, ins_idx);
+            sslctx_tbl_insert(cert_name, sslctx, ins_idx);
             log_msg(LGG_NOTICE, "%s: %s", __FUNCTION__, cert_name);
         }
         if (sslctx_tbl_end >= sslctx_tbl_size)
@@ -153,15 +168,10 @@ void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain)
     }
     fclose(fp);
     sslctx_tbl_cnt_miss = 0; /* reset */
+    qsort(SSLCTX_TBL_ptr(0), sslctx_tbl_end, sizeof(sslctx_cache_struct), cmp_sslctx_certname);
 quit_load:
     free(fname);
     free(line);
-}
-
-static int cmp_sslctx_reuse_count(const void *p1, const void *p2)
-{
-    /* reverse order */
-    return ((sslctx_cache_struct *)p2)->reuse_count - ((sslctx_cache_struct *)p1)->reuse_count;
 }
 
 void sslctx_tbl_save(const char* pem_dir)
@@ -231,46 +241,40 @@ static int sslctx_tbl_check_and_flush(void)
 
 static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
 {
+    *found_idx = -1; *ins_idx = -1;
     if (!cert_name || !found_idx || !ins_idx) {
         log_msg(LOG_ERR, "Invalid params. cert_name: %s. found_idx: %d, ins_idx: %d",
             cert_name, found_idx, ins_idx);
         return -1;
     }
-    *found_idx = -1; *ins_idx = -1;
-    int _name_len = strlen(cert_name);
-    int _last_use = process_uptime();
-    int purge_idx = sslctx_tbl_end;
-    int idx;
-    for (idx = 0; idx < sslctx_tbl_end; idx++) {
-        if (SSLCTX_TBL_get(idx, last_use) < _last_use) {
-            _last_use = SSLCTX_TBL_get(idx, last_use);
-            purge_idx = idx;
-        }
-        if (_name_len != SSLCTX_TBL_get(idx, name_len))
-            continue;
-        if (_name_len > 10 && (SSLCTX_TBL_get(idx, cert_name)[7] != cert_name[7] ||
-            SSLCTX_TBL_get(idx, cert_name)[10] != cert_name[10]))
-            continue;
-        if (memcmp(cert_name, SSLCTX_TBL_get(idx, cert_name), _name_len) == 0) {
-            *found_idx = idx;
-            sslctx_tbl_cnt_hit++;
-            SSLCTX_TBL_ptr(idx)->reuse_count++;
-            SSLCTX_TBL_set(idx, last_use, process_uptime());
-            return 0;
-        }
-    }
-    if (sslctx_tbl_end == sslctx_tbl_size) {
-        if (purge_idx == sslctx_tbl_size) {
-            log_msg(LOG_ERR, "Failed to find candiate in sslctx_tbl for purge.");
-            purge_idx = 0; /* decimate the first entry */
+
+    sslctx_cache_struct key, *found;
+    key.cert_name = cert_name;
+    found = bsearch(&key, SSLCTX_TBL_ptr(0), sslctx_tbl_end, sizeof(sslctx_cache_struct), cmp_sslctx_certname);
+
+    if (found != NULL) {
+        sslctx_tbl_cnt_hit++;
+        found->reuse_count++;
+        found->last_use = process_uptime();
+        *found_idx = (found - SSLCTX_TBL_ptr(0));
+    } else if (sslctx_tbl_end < sslctx_tbl_size) {
+        *ins_idx = sslctx_tbl_end;
+    } else {
+        int idx, purge_idx = 0; // decimate the first entry if no suitable candiate
+        int _last_use = process_uptime();
+
+        for (idx = 0; idx < sslctx_tbl_end; idx++) {
+            if (SSLCTX_TBL_get(idx, last_use) < _last_use) {
+                _last_use = SSLCTX_TBL_get(idx, last_use);
+                purge_idx = idx;
+            }
         }
         *ins_idx = purge_idx;
-    } else
-        *ins_idx = sslctx_tbl_end;
+    }
     return 0;
 }
 
-static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
+static int sslctx_tbl_insert(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
 {
     if (cert_name == NULL || sslctx == NULL || ins_idx >= sslctx_tbl_size || ins_idx < 0) {
         log_msg(LOG_ERR, "Invalid params. cert_name: %s. sslctx: %d, ins_idx: %d",
@@ -289,35 +293,39 @@ static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
     }
     strncpy(str, cert_name, len + 1);
     SSLCTX_TBL_set(ins_idx, cert_name, str);
-    SSLCTX_TBL_set(ins_idx, name_len, len);
     SSLCTX_TBL_set(ins_idx, last_use, pixel_now);
-    if (ins_idx == sslctx_tbl_end && sslctx_tbl_end < sslctx_tbl_size)
+    SSLCTX_TBL_set(ins_idx, reuse_count, 0);
+    if (ins_idx == sslctx_tbl_end && sslctx_tbl_end < sslctx_tbl_size) {
         sslctx_tbl_end++;
-    else {
+    } else {
 #ifdef DEBUG
-        printf("%s: SSL_CTX_free sslctx %p\n", __FUNCTION__, SSLCTX_TBL_get(ins_idx, sslctx));
+        printf("%s: SSL_CTX_free %p sslctx_tbl_end %d\n", __FUNCTION__, SSLCTX_TBL_get(ins_idx, sslctx), sslctx_tbl_end);
 #endif
-        sslctx_tbl_lock(ins_idx);
         SSL_CTX_free(SSLCTX_TBL_get(ins_idx, sslctx));
-        sslctx_tbl_unlock(ins_idx);
         sslctx_tbl_cnt_purge++;
     }
     SSLCTX_TBL_set(ins_idx, sslctx, sslctx);
     return 0;
 }
 
+static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
+{   int ret = -1;
+    if (sslctx_tbl_insert(cert_name, sslctx, ins_idx) == 0) {
+        qsort(SSLCTX_TBL_ptr(0), sslctx_tbl_end, sizeof(sslctx_cache_struct), cmp_sslctx_certname);
+        ret = 0;
+    }
+    return ret;
+}
+
 #ifdef DEBUG
 static void sslctx_tbl_dump(int idx, const char * func)
 {
     printf("%s: idx %d now %d\n", func, idx, process_uptime());
-    printf("%s: ** cert_name %s\n", func, sslctx_tbl[idx].cert_name);
-    printf("%s: ** name_len %d\n", func, sslctx_tbl[idx].name_len);
-    printf("%s: ** alloc_len %d\n", func, sslctx_tbl[idx].alloc_len);
-    printf("%s: ** last_use %d\n", func, sslctx_tbl[idx].last_use);
-    printf("%s: ** reuse_count %d\n", func, sslctx_tbl[idx].reuse_count);
-    printf("%s: ** sslctx %p\n", func, sslctx_tbl[idx].sslctx);
-    if (sslctx_tbl[idx].sslctx)
-        printf("%s: ** sslctx ref %d\n", func, sslctx_tbl[idx].sslctx->references);
+    printf("** cert_name %s\n", sslctx_tbl[idx].cert_name);
+    printf("** alloc_len %d\n", sslctx_tbl[idx].alloc_len);
+    printf("** last_use %d\n", sslctx_tbl[idx].last_use);
+    printf("** reuse_count %d\n", sslctx_tbl[idx].reuse_count);
+    printf("** sslctx %p\n", sslctx_tbl[idx].sslctx);
 }
 #endif
 
@@ -518,12 +526,12 @@ void *cert_generator(void *ptr) {
         printf("%s 1: %s\n", __FUNCTION__, buf);
 #endif
         struct pollfd pfd = { fd, POLLIN, POLLIN };
-        ret = poll(&pfd, 1, 1000 * PIXEL_SSL_SESS_TIMEOUT / 2);
+        ret = poll(&pfd, 1, 1000 * PIXEL_SSL_SESS_TIMEOUT / 4);
         if (ret <= 0) {
             /* timeout */
             sslctx_tbl_check_and_flush();
             if (kcc == 0) {
-                if (++idle >= (3600 / (PIXEL_SSL_SESS_TIMEOUT / 2))) {
+                if (++idle >= (3600 / (PIXEL_SSL_SESS_TIMEOUT / 4))) {
                     /* flush conn_stor after 3600 seconds */
                     conn_stor_flush();
                     idle = 0;
@@ -573,7 +581,6 @@ void *cert_generator(void *ptr) {
 }
 
 static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
-
     int rv = SSL_TLSEXT_ERR_OK;
     tlsext_cb_arg_struct *cbarg = (tlsext_cb_arg_struct *)arg;
     char full_pem_path[PIXELSERV_MAX_PATH + 1 + 1]; /* worst case ':\0' */
@@ -628,17 +635,21 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
         goto quit_cb;
     }
 
+    SSL_CTX *sslctx;
     int handle, ins_handle;
     sslctx_tbl_lookup(pem_file, &handle, &ins_handle);
 #ifdef DEBUG
     printf("%s: handle %d ins_handle %d\n", __FUNCTION__, handle, ins_handle);
-    if (handle >=0) sslctx_tbl_dump(handle, __FUNCTION__);
+    if (handle >=0) {
+        sslctx_tbl_dump(handle, __FUNCTION__);
+        printf("%s: sslctx %p references: %d\n", __FUNCTION__, SSLCTX_TBL_get(handle, sslctx),
+            SSLCTX_TBL_get(handle, sslctx)->references);
+    }
     if (ins_handle >=0) sslctx_tbl_dump(ins_handle, __FUNCTION__);
 #endif
-
-    if(handle < 0) {
+    if (handle < 0) {
         struct stat st;
-        if (stat(full_pem_path, &st) != 0){
+        if (stat(full_pem_path, &st) != 0) {
             int fd;
             cbarg->status = SSL_MISS;
             log_msg(LGG_WARNING, "%s %s missing", srv_name, pem_file);
@@ -654,24 +665,21 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
             rv = SSL_TLSEXT_ERR_ALERT_FATAL;
             goto quit_cb;
         }
-        SSL_CTX *sslctx;
         if (NULL == (sslctx  = create_child_sslctx(full_pem_path, cbarg->cachain))
-            || 0 > sslctx_tbl_cache(pem_file, sslctx, ins_handle))
-        {
+            || 0 > sslctx_tbl_cache(pem_file, sslctx, ins_handle)) {
             log_msg(LGG_ERR, "%s: fail to create sslctx or cache %s", __FUNCTION__, pem_file);
             cbarg->status = SSL_ERR;
             rv = SSL_TLSEXT_ERR_ALERT_FATAL;
             goto quit_cb;
         }
-        handle = ins_handle;
-    }
-    sslctx_tbl_lock(handle);
-    SSL_set_SSL_CTX(ssl, SSLCTX_TBL_get(handle, sslctx));
-    sslctx_tbl_unlock(handle);
-    cbarg->sslctx_idx = handle;
-    cbarg->status = SSL_HIT;
-    cbarg->sslctx = (void*)SSLCTX_TBL_get(handle, sslctx);
+    } else
+        sslctx = SSLCTX_TBL_get(handle, sslctx);
 
+    SSL_set_SSL_CTX(ssl, sslctx);
+    cbarg->status = SSL_HIT;
+#ifdef DEBUG
+    printf("%s: SSL_set_SSL_CTX sslctx %p references: %d\n", __FUNCTION__, sslctx, sslctx->references);
+#endif
 quit_cb:
     return rv;
 }
@@ -691,7 +699,7 @@ static SSL_SESSION *get_session(SSL *ssl, unsigned char *id, int idlen, int *do_
 
 static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X509_INFO) *cachain)
 {
-    SSL_CTX *sslctx = SSL_CTX_new(SSLv23_method());
+    SSL_CTX *sslctx = SSL_CTX_new(SSLv23_server_method());
 #ifdef PIXELSERV_SSL_HAS_ECDH_AUTO
     SSL_CTX_set_ecdh_auto(sslctx, 1);
 #else
@@ -740,7 +748,7 @@ SSL_CTX* create_default_sslctx(const char *pem_dir) {
     if (g_sslctx)
         return g_sslctx;
 
-    g_sslctx = SSL_CTX_new(SSLv23_method());
+    g_sslctx = SSL_CTX_new(SSLv23_server_method());
     SSL_CTX_set_options(g_sslctx,
           SSL_MODE_RELEASE_BUFFERS |
           SSL_OP_NO_COMPRESSION |

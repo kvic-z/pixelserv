@@ -374,10 +374,9 @@ int main (int argc, char* argv[])
       X509_free(cacert);
       if (!do_benchmark) {
         cert_tlstor.pem_dir = tls_pem;
-        posix_memalign(&cert_tlstor.stk, PAGE_SIZE, THREAD_STACK_SIZE + PAGE_SIZE);
         pthread_attr_t attr;
         pthread_attr_init(&attr);
-        pthread_attr_setstack(&attr, cert_tlstor.stk, THREAD_STACK_SIZE);
+        pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
         pthread_create(&certgen_thread, &attr, cert_generator, (void*)&cert_tlstor);
         pthread_attr_destroy(&attr);
       }
@@ -706,16 +705,9 @@ int main (int argc, char* argv[])
         continue;
     }
 
-
     conn_tlstor_struct *conn_tlstor = conn_stor_acquire();
     if (conn_tlstor == NULL) {
       log_msg(LGG_WARNING, "%s conn_tlstor alloc failed ", __FUNCTION__);
-      continue;
-    }
-    if (conn_tlstor->stk == NULL &&
-        posix_memalign(&conn_tlstor->stk, PAGE_SIZE, THREAD_STACK_SIZE + PAGE_SIZE) != 0) {
-      log_msg(LGG_WARNING, "%s thread stack alloc failed ", __FUNCTION__);
-      conn_stor_relinq(conn_tlstor);
       continue;
     }
 
@@ -732,29 +724,28 @@ int main (int argc, char* argv[])
       t->servername = NULL;
       strncpy(t->server_ip, server_ip, INET6_ADDRSTRLEN);
       t->status = SSL_UNKNOWN;
-      t->sslctx = NULL;
       t->sslctx_idx = -1;
 
       SSL_CTX_set_tlsext_servername_arg(sslctx, t);
       ssl = SSL_new(sslctx);
       SSL_set_fd(ssl, new_fd);
       int ssl_attempt = 3;
+
 redo_ssl_accept:
 
-      if ( /* TCP_NODELAY is not inherited from acceptance */
-           setsockopt(new_fd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int))
-           || setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO,
-                (char*)&(struct timeval){ 0, 100000 }, sizeof(struct timeval)) )
-      {
+      /* TCP_NODELAY is not inherited from acceptance */
+      if (setsockopt(new_fd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int)) ||
+            setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&(struct timeval){ 0, 60000 },
+              sizeof(struct timeval))) {
         log_msg(LOG_CRIT, "Abort: %m - new_fd setsockopt");
         exit(EXIT_FAILURE);
       }
+
       errno = 0;
-      ERR_clear_error();
       int sslret = SSL_accept(ssl);
-      char errstr[60], ip_buf[20];
 
       if (sslret != 1) {
+        char ip_buf[NI_MAXHOST], port_buf[NI_MAXSERV];
         int sslerr = SSL_get_error(ssl, sslret);
         switch(sslerr) {
           case SSL_ERROR_WANT_READ:
@@ -762,9 +753,25 @@ redo_ssl_accept:
             if (ssl_attempt > 0) goto redo_ssl_accept;
             break;
           case SSL_ERROR_SSL:
-            get_client_ip(new_fd, ip_buf, 20);
-            ERR_error_string_n(ERR_peek_last_error(), errstr, 60);
-            log_msg(LGG_WARNING, "client %s ssl %s", ip_buf, errstr);
+            if (log_get_verb() >= LGG_WARNING)
+                get_client_ip(new_fd, ip_buf, sizeof ip_buf, port_buf, sizeof port_buf);
+            switch(ERR_GET_REASON(ERR_peek_last_error())) {
+                case SSL_R_TLSV1_ALERT_UNKNOWN_CA:
+                    uca++;
+                    log_msg(LGG_WARNING, "handshake failed: unknown CA. client %s:%s server %s",
+                        ip_buf, port_buf, t->servername);
+                    break;
+                case SSL_R_SSLV3_ALERT_CERTIFICATE_UNKNOWN:
+                    uce++;
+                    log_msg(LGG_WARNING, "handshake failed: unknown cert. client %s:%s server %s",
+                        ip_buf, port_buf, t->servername);
+                    break;
+                default:
+                    log_msg(LGG_DEBUG, "handshake failed: client %s:%s server %s. Lib(%d) Func(%d) Reason(%d)",
+                        ip_buf, port_buf, t->servername,
+                            ERR_GET_LIB(ERR_peek_last_error()), ERR_GET_FUNC(ERR_peek_last_error()),
+                                ERR_GET_REASON(ERR_peek_last_error()));
+            }
             break;
           case SSL_ERROR_SYSCALL:
           default:
@@ -778,9 +785,8 @@ redo_ssl_accept:
           case SSL_UNKNOWN:    ++slu; break;
           default:             ;
         }
-        sslctx_tbl_lock(t->sslctx_idx);
+        SSL_set_shutdown(ssl, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
         SSL_free(ssl);
-        sslctx_tbl_unlock(t->sslctx_idx);
         shutdown(new_fd, SHUT_RDWR);
         close(new_fd);
         conn_stor_relinq(conn_tlstor);
@@ -791,20 +797,17 @@ redo_ssl_accept:
         conn_tlstor->allow_admin = 1;
     }
     conn_tlstor->init_time = elapsed_time_msec(init_time);
-
     pthread_t conn_thread;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_attr_setstack(&attr, conn_tlstor->stk, THREAD_STACK_SIZE);
+    pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
     int err;
     if ((err=pthread_create(&conn_thread, &attr, conn_handler, (void*)conn_tlstor))) {
       log_msg(LGG_ERR, "Failed to create conn_handler thread. err: %d", err);
       if(conn_tlstor->ssl){
         SSL_set_shutdown(conn_tlstor->ssl, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
-        sslctx_tbl_lock(conn_tlstor->tlsext_cb_arg->sslctx_idx);
         SSL_free(conn_tlstor->ssl);
-        sslctx_tbl_unlock(conn_tlstor->tlsext_cb_arg->sslctx_idx);
       }
       shutdown(new_fd, SHUT_RDWR);
       close(new_fd);

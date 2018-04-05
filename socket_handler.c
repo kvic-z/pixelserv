@@ -526,19 +526,18 @@ static int write_pipe(int fd, response_struct *pipedata) {
   return rv;
 }
 
-void get_client_ip(int socket_fd, char *ip_buf, int ip_buf_len)
+void get_client_ip(int socket_fd, char *ip, int ip_len, char *port, int port_len)
 {
   struct sockaddr_storage sin_addr;
   socklen_t sin_addr_len = sizeof(sin_addr);
 
-  if (ip_buf == NULL || ip_buf_len <= 0 || (socket_fd < 0 && (ip_buf[0] = '\0') == '\0'))
+  if (ip == NULL || ip_len <= 0 || (socket_fd < 0 && (ip[0] = '\0') == '\0'))
     return;
 
   getpeername(socket_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
   if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len,
-               ip_buf, ip_buf_len,
-               NULL, 0, NI_NUMERICHOST) != 0) {
-    ip_buf[0] = '\0';
+               ip, ip_len, port, port_len, NI_NUMERICHOST | NI_NUMERICSERV ) != 0) {
+    ip[0] = '\0';
     log_msg(LOG_ERR, "getnameinfo failed to get client_ip");
   }
 }
@@ -985,7 +984,7 @@ end_post:
       }
       if (log_verbose >= LGG_INFO) {
         char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
-        get_client_ip(new_fd, client_ip, sizeof client_ip);
+        get_client_ip(new_fd, client_ip, sizeof client_ip, NULL, 0);
         log_xcs(LGG_INFO, client_ip, host, (CONN_TLSTOR(ptr, ssl) != NULL), req_url, post_buf, post_buf_len);
       }
       // free memory allocated by asprintf() if any
@@ -1043,13 +1042,8 @@ end_post:
 
   // signal the socket connection that we're done read-write
   if(CONN_TLSTOR(ptr, ssl)){
-#ifdef DEBUG
-    printf("%s: sslctx %p\n", __FUNCTION__, (void*) CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx);
-#endif
     SSL_set_shutdown(CONN_TLSTOR(ptr, ssl), SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
-    sslctx_tbl_lock(CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx_idx);
     SSL_free(CONN_TLSTOR(ptr, ssl));
-    sslctx_tbl_unlock(CONN_TLSTOR(ptr, tlsext_cb_arg)->sslctx_idx);
   }
 
   if (shutdown(new_fd, SHUT_RDWR) < 0)

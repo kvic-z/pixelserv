@@ -20,7 +20,7 @@
 #include <linux/version.h>
 
 // preprocessor defines
-#define VERSION "2.1.0-rc.3"
+#define VERSION "2.1.0-rc.4"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
@@ -31,7 +31,7 @@
                                 // it's the time a connection will stay active
                                 // until another request comes and refreshes the timer
 #define DEFAULT_THREAD_MAX 1200 // maximum number of concurrent service threads
-#define DEFAULT_CERT_CACHE_SIZE 100
+#define DEFAULT_CERT_CACHE_SIZE 50
                                 // default number of certificates to be cached in memory
 #define SECOND_PORT "443"
 #define MAX_PORTS 10
@@ -104,6 +104,8 @@ extern volatile sig_atomic_t slm;
 extern volatile sig_atomic_t sle;
 extern volatile sig_atomic_t slc;
 extern volatile sig_atomic_t slu;
+extern volatile sig_atomic_t uca;
+extern volatile sig_atomic_t uce;
 extern volatile sig_atomic_t kcc;
 extern volatile sig_atomic_t kmx;
 extern volatile sig_atomic_t kct;
