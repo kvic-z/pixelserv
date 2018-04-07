@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
+#include <pthread.h>
 
 #define PIXEL_SSL_SESS_CACHE_SIZE 128*20
 #define PIXEL_SSL_SESS_TIMEOUT 3600 /* seconds */
@@ -31,6 +32,8 @@ typedef struct {
     const char* pem_dir;
     X509 *cacert;
     void *stk;
+    pthread_mutex_t mutex;
+    pthread_cond_t cv;
 } cert_tlstor_t;
 
 typedef enum {

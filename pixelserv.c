@@ -374,6 +374,9 @@ int main (int argc, char* argv[])
       X509_free(cacert);
       if (!do_benchmark) {
         cert_tlstor.pem_dir = tls_pem;
+        pthread_mutex_init(&cert_tlstor.mutex, NULL);
+        pthread_cond_init(&cert_tlstor.cv, NULL);
+
         pthread_attr_t attr;
         pthread_attr_init(&attr);
         pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
@@ -502,6 +505,11 @@ int main (int argc, char* argv[])
   }
 
 #ifdef DROP_ROOT // no longer fatal error if doesn't work
+  // Wait for the private key to be loaded
+  pthread_mutex_lock(&cert_tlstor.mutex);
+  pthread_cond_wait(&cert_tlstor.cv, &cert_tlstor.mutex);
+  pthread_mutex_unlock(&cert_tlstor.mutex);
+
   if ( (pw = getpwnam(user)) == NULL ) {
     log_msg(LGG_WARNING, "Unknown user \"%s\"", user);
   }
