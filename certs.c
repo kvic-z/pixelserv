@@ -513,6 +513,9 @@ void *cert_generator(void *ptr) {
 
     buf[PIXELSERV_MAX_SERVER_NAME * 4] = '\0';
     cert_gen_init(cert_tlstor->pem_dir, &issuer, &key);
+    pthread_mutex_lock(&cert_tlstor->mutex);
+    pthread_cond_signal(&cert_tlstor->cv);
+    pthread_mutex_unlock(&cert_tlstor->mutex);
 
     /* non block required. otherwise blocked until other side opens */
     int fd = open(PIXEL_CERT_PIPE, O_RDONLY | O_NONBLOCK);
