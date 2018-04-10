@@ -1,4 +1,4 @@
-2018-3-x v2.1.0
+2018-4-x v2.1.0
 
 * NEW cache frequently used SSL certs in memory.
 * NEW enable SSL session cache and resumptions.
@@ -7,6 +7,8 @@
 * NEW counters `sct`, `sch`, `scm` and `scp` to register operations of caching SSL certs.
 * NEW counters `sst`, `ssh`, `ssm` and `ssp` to register operations of cached sessions and resumptions.
 * NEW option `-c` to specify cache size for SSL certs.
+* NEW counters `uca` and `uce` to better classify TLS handshake failures
+* NEW logging client ip and port and server name for `uca` and `uce` failures
 * NEW URI `/ca.crt` to download and import users' Pixelserv CA on client devices.
 * NEW crypto and disk benchmark for gauging performance of most timing sensitve routines in pixelserv-tls.
 * NEW CLI option `-B` with optional argument to run crypto and disk benchmark.
@@ -22,6 +24,7 @@
 * CHANGED `slu` description to "other TLS handshake errors." Possible causes such as clients without CA cert, mismatch in TLS protocol version or other parameters.
 * CHANGED removal of fork() code. Now pthread only for multiprocessing.
 * CHANGED added support for glibc < 2.17 and OpenSSL 1.0.1
+* FIXED race condition between reading CA's private key and dropping root
 * FIXED crash on non-FQDN hostname (#9)
 
 2017-12-12 v2.0.1
