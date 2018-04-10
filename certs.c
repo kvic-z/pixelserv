@@ -470,33 +470,68 @@ quit_cb:
     return --rv; // trim \n at the end
 }
 
-static void cert_gen_init(const char* pem_dir, X509_NAME **issuer, EVP_PKEY **privkey)
+void cert_tlstor_init(const char *pem_dir, cert_tlstor_t *ct)
 {
-    char cert_file[PIXELSERV_MAX_PATH];
-    X509 *x509;
     FILE *fp;
+    char cert_file[PIXELSERV_MAX_PATH];
+    X509 *x509 = X509_new();
 
-    *issuer = NULL; *privkey = NULL;
+    memset(ct, 0, sizeof(cert_tlstor_t));
     snprintf(cert_file, PIXELSERV_MAX_PATH, "%s/ca.crt", pem_dir);
     fp = fopen(cert_file, "r");
-    x509 = X509_new();
+
     if(!fp || !PEM_read_X509(fp, &x509, NULL, NULL))
        log_msg(LGG_ERR, "%s: failed to load ca.crt", __FUNCTION__);
-    else
-        *issuer = X509_NAME_dup(X509_get_subject_name(x509));
+    else {
+        char *cafile;
+        int fsz;
+        BIO *bioin;
+        EVP_PKEY *pubkey = X509_get_pubkey(x509);
+
+        if (fseek(fp, 0L, SEEK_END) < 0)
+            log_msg(LGG_ERR, "%s: failed to seek ca.crt", __FUNCTION__);
+
+        fsz = ftell(fp);
+        cafile = malloc(fsz);
+        fseek(fp, 0L, SEEK_SET);
+        fsz = fread(cafile, 1, fsz, fp);
+
+        bioin = BIO_new_mem_buf(cafile, fsz);
+        if (!bioin)
+            log_msg(LGG_ERR, "%s: failed to create BIO mem buffer", __FUNCTION__);
+
+        ct->pem_dir = pem_dir;
+        ct->cachain = PEM_X509_INFO_read_bio(bioin, NULL, NULL, NULL);
+        ct->issuer = X509_NAME_dup(X509_get_subject_name(x509));
+
+        if (ct->cachain == NULL)
+            log_msg(LGG_ERR, "%s: failed to read CA chains", __FUNCTION__);
+
+        BIO_free(bioin);
+        EVP_PKEY_free(pubkey);
+        free(cafile);
+        fclose(fp);
+    }
     X509_free(x509);
-    fclose(fp);
 
     snprintf(cert_file, PIXELSERV_MAX_PATH, "%s/ca.key", pem_dir);
     fp = fopen(cert_file, "r");
     RSA *rsa = NULL;
+
     if(!fp || !PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, (void*)pem_dir))
-       log_msg(LGG_ERR, "%s: failed to load ca.key", __FUNCTION__);
+        log_msg(LGG_ERR, "%s: failed to load ca.key", __FUNCTION__);
     else {
-        *privkey = EVP_PKEY_new();
-        EVP_PKEY_assign_RSA(*privkey, rsa); /* rsa auto freed when key is freed */
+        ct->privkey = EVP_PKEY_new();
+        EVP_PKEY_assign_RSA(ct->privkey, rsa); /* rsa auto freed when key is freed */
         fclose(fp);
     }
+}
+
+void cert_tlstor_cleanup(cert_tlstor_t *c)
+{
+    sk_X509_pop_free(c->cachain, X509_free);
+    X509_NAME_free(c->issuer);
+    EVP_PKEY_free(c->privkey);
 }
 
 void *cert_generator(void *ptr) {
@@ -504,15 +539,11 @@ void *cert_generator(void *ptr) {
     printf("%s: thread up and running\n", __FUNCTION__);
 #endif
     int idle = 0;
-    cert_tlstor_t *cert_tlstor = (cert_tlstor_t *) ptr;
+    cert_tlstor_t *ct = (cert_tlstor_t *) ptr;
 
-    X509_NAME *issuer;
-    EVP_PKEY *key;
     char buf[PIXELSERV_MAX_SERVER_NAME * 4 + 1];
     char *half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4;
-
     buf[PIXELSERV_MAX_SERVER_NAME * 4] = '\0';
-    cert_gen_init(cert_tlstor->pem_dir, &issuer, &key);
 
     /* non block required. otherwise blocked until other side opens */
     int fd = open(PIXEL_CERT_PIPE, O_RDONLY | O_NONBLOCK);
@@ -560,23 +591,21 @@ void *cert_generator(void *ptr) {
 #ifdef DEBUG
         printf("%s 2: %s\n", __FUNCTION__, buf);
 #endif
-        if (key == NULL || issuer == NULL)
+        if (ct->privkey == NULL || ct->issuer == NULL)
             continue;
         char *p_buf, *p_buf_sav = NULL;
         p_buf = strtok_r(buf, ":", &p_buf_sav);
         while (p_buf != NULL) {
             char cert_file[PIXELSERV_MAX_PATH];
             struct stat st;
-            snprintf(cert_file, PIXELSERV_MAX_PATH, "%s/%s", ((cert_tlstor_t*)cert_tlstor)->pem_dir, p_buf);
+            snprintf(cert_file, PIXELSERV_MAX_PATH, "%s/%s", ((cert_tlstor_t*)ct)->pem_dir, p_buf);
             if(stat(cert_file, &st) != 0) /* doesn't exist */
-                generate_cert(p_buf, cert_tlstor->pem_dir, issuer, key);
+                generate_cert(p_buf, ct->pem_dir, ct->issuer, ct->privkey);
             p_buf = strtok_r(NULL, ":", &p_buf_sav);
         }
         /* quick check and flush if time due */
         sslctx_tbl_check_and_flush();
     }
-    X509_NAME_free(issuer);
-    EVP_PKEY_free(key);
     return NULL;
 }
 
@@ -798,7 +827,7 @@ int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int 
     return rv;
 }
 
-void run_benchmark(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, const char *cert)
+void run_benchmark(const cert_tlstor_t *ct, const char *cert)
 {
     int c, d;
     char *cert_file, *domain;
@@ -806,25 +835,23 @@ void run_benchmark(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, cons
     struct timespec tm;
     float r_tm0, g_tm0, tm1;
     SSL_CTX *sslctx = NULL;
-    X509_NAME *issuer = NULL;
-    EVP_PKEY *key = NULL;
 
-    printf("CERT_PATH: %s\n", pem_dir);
-    if (!cachain) goto quit;
+    printf("CERT_PATH: %s\n", ct->pem_dir);
+    if (ct->cachain == NULL)
+        goto quit;
 
     printf("CERT_FILE: ");
     if (cert) {
-        (void)asprintf(&cert_file, "%s/%s", pem_dir, cert);
+        (void)asprintf(&cert_file, "%s/%s", ct->pem_dir, cert);
         if (stat(cert_file, &st) != 0) {
             printf("%s not found\n", cert);
             goto quit;
         }
     } else
         cert = "_.bing.com";
-    (void)asprintf(&cert_file, "%s/%s", pem_dir, cert);
+    (void)asprintf(&cert_file, "%s/%s", ct->pem_dir, cert);
     printf("%s\n", cert);
 
-    cert_gen_init(pem_dir, &issuer, &key);
     (void)asprintf(&domain, "%s", cert);
     if (domain[0] == '_') domain[0] = '*';
 
@@ -832,7 +859,7 @@ void run_benchmark(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, cons
     for (c=1; c<=10; c++) {
         get_time(&tm);
         for (d=0; d<5; d++)
-            generate_cert(domain, pem_dir, issuer, key);
+            generate_cert(domain, ct->pem_dir, ct->issuer, ct->privkey);
         tm1 = elapsed_time_msec(tm) / 5.0;
         printf("%2d. generate cert to disk: %.3f ms\t", c, tm1);
         g_tm0 += tm1;
@@ -840,7 +867,7 @@ void run_benchmark(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, cons
         get_time(&tm);
         for (d=0; d<5; d++) {
             stat(cert_file, &st);
-            sslctx = create_child_sslctx(cert_file, cachain);
+            sslctx = create_child_sslctx(cert_file, ct->cachain);
             sslctx_tbl_cache(cert, sslctx, 0);
         }
         tm1 = elapsed_time_msec(tm) / 5.0;
@@ -852,8 +879,6 @@ void run_benchmark(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, cons
     printf("  load from disk average: %.3f ms\n", r_tm0 / 10.0);
 
     free(domain);
-    X509_NAME_free(issuer);
-    EVP_PKEY_free(key);
 quit:
     free(cert_file);
 }

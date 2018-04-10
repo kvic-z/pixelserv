@@ -38,7 +38,6 @@ const char *tls_pem = DEFAULT_PEM_PATH;
 int tls_ports[MAX_TLS_PORTS + 1] = {0}; /* one extra port for admin */
 int num_tls_ports = 0;
 int admin_port = 0;
-STACK_OF(X509_INFO) *cachain = NULL;
 struct Global *g;
 cert_tlstor_t cert_tlstor;
 pthread_t certgen_thread;
@@ -132,6 +131,16 @@ int main (int argc, char* argv[])
   int cert_cache_size = DEFAULT_CERT_CACHE_SIZE;
 
   mallopt(M_ARENA_MAX, 1);
+  struct rlimit l = {THREAD_STACK_SIZE, THREAD_STACK_SIZE * 2};
+  if (setrlimit(RLIMIT_STACK, &l) == -1)
+    log_msg(LGG_ERR, "setrlimit STACK failed: %d %d errno:%d", l.rlim_cur, l.rlim_max, errno);
+
+  l.rlim_cur = max_num_threads + 50;
+  l.rlim_max = max_num_threads * 2;
+
+  if (setrlimit(RLIMIT_NOFILE, &l) == -1)
+    log_msg(LGG_ERR, "setrlimit NOFILE failed: %d %d errno:%d", l.rlim_cur, l.rlim_max, errno);
+
   // command line arguments processing
   for (i = 1; i < argc && error == 0; ++i) {
     if (argv[i][0] == '-') {
@@ -320,76 +329,31 @@ int main (int argc, char* argv[])
     exit(EXIT_FAILURE);
   }
 
-  SSL_library_init();
-  ssl_init_locks();
-  SSL_CTX *sslctx = create_default_sslctx(tls_pem);
   mkfifo(PIXEL_CERT_PIPE, 0600);
   pw = getpwnam(user);
   if (chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid) < 0) {
-      log_msg(LGG_CRIT, "chown fails to change %s to %s", PIXEL_CERT_PIPE, user);
+      log_msg(LGG_CRIT, "chown failed to set owner of %s to %s", PIXEL_CERT_PIPE, user);
       exit(EXIT_FAILURE);
   }
 
-  {
-    struct rlimit l = {THREAD_STACK_SIZE, THREAD_STACK_SIZE * 2};
-    if (setrlimit(RLIMIT_STACK, &l) == -1)
-      log_msg(LGG_ERR, "setrlimit STACK failed: %d %d errno:%d", l.rlim_cur, l.rlim_max, errno);
-    l.rlim_cur = max_num_threads + 50;
-    l.rlim_max = max_num_threads * 2;
-    if (setrlimit(RLIMIT_NOFILE, &l) == -1)
-      log_msg(LGG_ERR, "setrlimit NOFILE failed: %d %d errno:%d", l.rlim_cur, l.rlim_max, errno);
-
-    char *fname = malloc(PIXELSERV_MAX_PATH);
-    strcpy(fname, tls_pem);
-    strcat(fname, "/ca.crt");
-    FILE *fp = fopen(fname, "r");
-    X509 *cacert = X509_new();
-    if(fp == NULL || PEM_read_X509(fp, &cacert, NULL, NULL) == NULL)
-      log_msg(LGG_ERR, "Failed to open ca.crt");
-    else {
-      EVP_PKEY * pubkey = X509_get_pubkey(cacert);
-      {
-        BIO *bioin; int fsz; char *cafile;
-
-        if (fseek(fp, 0L, SEEK_END) < 0)
-          log_msg(LGG_ERR, "Failed to seek ca.crt");
-        fsz = ftell(fp);
-        cafile = malloc(fsz);
-        fseek(fp, 0L, SEEK_SET);
-        fsz = fread(cafile, 1, fsz, fp);
-
-        bioin = BIO_new_mem_buf(cafile, fsz);
-        if (!bioin)
-          log_msg(LGG_ERR, "Failed to create new BIO mem buffer");
-
-        cachain = PEM_X509_INFO_read_bio(bioin, NULL, NULL, NULL);
-        if (!cachain)
-          log_msg(LGG_ERR, "Failed to read CA chain from ca.crt");
-        BIO_free(bioin);
-        free(cafile);
-      }
-      fclose(fp);
-      free(fname);
-      EVP_PKEY_free(pubkey);
-      X509_free(cacert);
-      if (!do_benchmark) {
-        cert_tlstor.pem_dir = tls_pem;
-        pthread_attr_t attr;
-        pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
-        pthread_create(&certgen_thread, &attr, cert_generator, (void*)&cert_tlstor);
-        pthread_attr_destroy(&attr);
-      }
-    }
-  }
-
-  conn_stor_init(max_num_threads);
+  SSL_library_init();
+  ssl_init_locks();
+  cert_tlstor_init(tls_pem, &cert_tlstor);
   sslctx_tbl_init(cert_cache_size);
-  sslctx_tbl_load(tls_pem, cachain);
+  conn_stor_init(max_num_threads);
+
+  sslctx_tbl_load(tls_pem, cert_tlstor.cachain);
+  SSL_CTX *sslctx = create_default_sslctx(tls_pem);
 
   if (do_benchmark) {
-    run_benchmark(tls_pem, cachain, bm_cert);
-    exit(EXIT_SUCCESS);
+    run_benchmark(&cert_tlstor, bm_cert);
+    goto quit_main;
+  } else {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
+    pthread_create(&certgen_thread, &attr, cert_generator, (void*)&cert_tlstor);
+    pthread_attr_destroy(&attr);
   }
 
   memset(&hints, 0, sizeof hints);
@@ -552,7 +516,6 @@ int main (int argc, char* argv[])
 #ifdef DEBUG
         warning_time,
 #endif
-        tls_pem,
   };
   g = &_g;
 
@@ -720,7 +683,7 @@ int main (int argc, char* argv[])
       tlsext_cb_arg_struct *t = conn_tlstor->tlsext_cb_arg;
       SSL *ssl = NULL;
       t->tls_pem = tls_pem;
-      t->cachain = cachain;
+      t->cachain = cert_tlstor.cachain;
       t->servername = NULL;
       strncpy(t->server_ip, server_ip, INET6_ADDRSTRLEN);
       t->status = SSL_UNKNOWN;
@@ -822,11 +785,12 @@ redo_ssl_accept:
 
   pthread_cancel(certgen_thread);
   pthread_join(certgen_thread, NULL);
-  free(cert_tlstor.stk);
+
+quit_main:
+  SSL_CTX_free(sslctx);
   conn_stor_flush();
   sslctx_tbl_cleanup();
-  sk_X509_pop_free(cachain, X509_free);
-  SSL_CTX_free(sslctx);
+  cert_tlstor_cleanup(&cert_tlstor);
   ssl_free_locks();
   return (EXIT_SUCCESS);
 }

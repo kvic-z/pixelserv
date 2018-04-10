@@ -29,8 +29,9 @@
 
 typedef struct {
     const char* pem_dir;
-    X509 *cacert;
-    void *stk;
+    STACK_OF(X509_INFO) *cachain;
+    X509_NAME *issuer;
+    EVP_PKEY *privkey;
 } cert_tlstor_t;
 
 typedef enum {
@@ -73,12 +74,14 @@ typedef struct {
 
 void ssl_init_locks();
 void ssl_free_locks();
+void cert_tlstor_init(const char *pem_dir, cert_tlstor_t *c);
+void cert_tlstor_cleanup(cert_tlstor_t *c);
 void *cert_generator(void *ptr);
 void sslctx_tbl_init(int tbl_size);
 void sslctx_tbl_cleanup();
 void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain);
 void sslctx_tbl_save(const char* pem_dir);
-void run_benchmark(const char *pem_dir, const STACK_OF(X509_INFO) *cachain, const char *cert);
+void run_benchmark(const cert_tlstor_t *ct, const char *cert);
 void sslctx_tbl_lock(int idx);
 void sslctx_tbl_unlock(int idx);
 int sslctx_tbl_get_cnt_total();
