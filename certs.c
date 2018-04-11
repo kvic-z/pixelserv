@@ -529,7 +529,7 @@ void cert_tlstor_init(const char *pem_dir, cert_tlstor_t *ct)
 
 void cert_tlstor_cleanup(cert_tlstor_t *c)
 {
-    sk_X509_pop_free(c->cachain, X509_free);
+    sk_X509_INFO_pop_free(c->cachain, X509_INFO_free);
     X509_NAME_free(c->issuer);
     EVP_PKEY_free(c->privkey);
 }
