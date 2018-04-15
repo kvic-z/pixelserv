@@ -516,6 +516,7 @@ int main (int argc, char* argv[])
 #ifdef DEBUG
         warning_time,
 #endif
+        tls_pem,
   };
   g = &_g;
 
