@@ -717,8 +717,12 @@ redo_ssl_accept:
             if (ssl_attempt > 0) goto redo_ssl_accept;
             break;
           case SSL_ERROR_SSL:
-            if (log_get_verb() >= LGG_WARNING)
-                get_client_ip(new_fd, ip_buf, sizeof ip_buf, port_buf, sizeof port_buf);
+            if (log_get_verb() >= LGG_WARNING && getnameinfo((struct sockaddr *)&their_addr, sin_size,
+                  ip_buf, sizeof ip_buf, port_buf, sizeof port_buf, NI_NUMERICHOST | NI_NUMERICSERV ) != 0) {
+              ip_buf[0] = '\0';
+              port_buf[0] = '\0';
+              log_msg(LOG_ERR, "getnameinfo failed to get client_ip");
+            }
             switch(ERR_GET_REASON(ERR_peek_last_error())) {
                 case SSL_R_TLSV1_ALERT_UNKNOWN_CA:
                     uca++;
@@ -731,7 +735,7 @@ redo_ssl_accept:
                         ip_buf, port_buf, t->servername);
                     break;
                 default:
-                    log_msg(LGG_DEBUG, "handshake failed: client %s:%s server %s. Lib(%d) Func(%d) Reason(%d)",
+                    log_msg(LGG_WARNING, "handshake failed: client %s:%s server %s. Lib(%d) Func(%d) Reason(%d)",
                         ip_buf, port_buf, t->servername,
                             ERR_GET_LIB(ERR_peek_last_error()), ERR_GET_FUNC(ERR_peek_last_error()),
                                 ERR_GET_REASON(ERR_peek_last_error()));
