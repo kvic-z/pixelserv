@@ -3,7 +3,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <pthread.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
