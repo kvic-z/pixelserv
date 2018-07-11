@@ -571,7 +571,7 @@ int main (int argc, char* argv[])
       } else {
         // process response type
         switch (pipedata.status) {
-          case FAIL_GENERAL:   ++err; break;
+          case FAIL_GENERAL:   ++ers; break;
           case FAIL_TIMEOUT:   ++tmo; break;
           case FAIL_CLOSED:    ++cls; break;
           case FAIL_REPLY:     ++cly; break;
