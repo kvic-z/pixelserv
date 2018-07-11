@@ -60,7 +60,9 @@ void signal_handler(int sig)
     }
 
     conn_stor_flush();
+#ifdef __GLIBC__
     malloc_trim(0);
+#endif
 
     // log stats
     char* stats_string = get_stats(0, 0);

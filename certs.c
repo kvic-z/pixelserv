@@ -567,7 +567,9 @@ void *cert_generator(void *ptr) {
                     conn_stor_flush();
                     idle = 0;
                 }
+#ifdef __GLIBC__
                 malloc_trim(0);
+#endif
             }
             continue;
         }
