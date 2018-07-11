@@ -30,10 +30,6 @@
 #define THREAD_STACK_SIZE  9*PAGE_SIZE
 #define TCP_FASTOPEN_QLEN  25
 
-#ifdef __UCLIBC__
-#define M_ARENA_MAX -1 /* no effect but compile on uClibc */
-#endif
-
 const char *tls_pem = DEFAULT_PEM_PATH;
 int tls_ports[MAX_TLS_PORTS + 1] = {0}; /* one extra port for admin */
 int num_tls_ports = 0;
@@ -130,7 +126,9 @@ int main (int argc, char* argv[])
   int max_num_threads = DEFAULT_THREAD_MAX;
   int cert_cache_size = DEFAULT_CERT_CACHE_SIZE;
 
+#if defined(__GLIBC__)
   mallopt(M_ARENA_MAX, 1);
+#endif
   struct rlimit l = {THREAD_STACK_SIZE, THREAD_STACK_SIZE * 2};
   if (setrlimit(RLIMIT_STACK, &l) == -1)
     log_msg(LGG_ERR, "setrlimit STACK failed: %d %d errno:%d", l.rlim_cur, l.rlim_max, errno);
