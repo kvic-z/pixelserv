@@ -330,11 +330,13 @@ int main (int argc, char* argv[])
   }
 
   mkfifo(PIXEL_CERT_PIPE, 0600);
+#ifdef DROP_ROOT
   pw = getpwnam(user);
   if (chown(PIXEL_CERT_PIPE, pw->pw_uid, pw->pw_gid) < 0) {
       log_msg(LGG_CRIT, "chown failed to set owner of %s to %s", PIXEL_CERT_PIPE, user);
       exit(EXIT_FAILURE);
   }
+#endif
 
   SSL_library_init();
   ssl_init_locks();
