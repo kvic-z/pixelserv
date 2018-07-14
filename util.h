@@ -76,7 +76,7 @@ extern volatile sig_atomic_t rmx; // maximum encountered request size
 extern volatile sig_atomic_t _tct; // time count
 extern volatile sig_atomic_t tav; // cumulative moving average time in msec
 extern volatile sig_atomic_t tmx; // max time in msec
-extern volatile sig_atomic_t err;
+extern volatile sig_atomic_t ers;
 extern volatile sig_atomic_t tmo;
 extern volatile sig_atomic_t cls;
 extern volatile sig_atomic_t nou;
