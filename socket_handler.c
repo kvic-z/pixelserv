@@ -446,7 +446,14 @@ redo_ssl_read:
   return ret;
 }
 
-static int read_socket(int fd, char **msg, SSL *ssl) {
+static int read_socket(int fd, char **msg, SSL *ssl, char *early_data)
+{
+  if (early_data) {
+    log_msg(LGG_DEBUG, "%s: early data\n", __FUNCTION__);
+    *msg = early_data;
+    return strlen(early_data);
+  }
+
   *msg = realloc(*msg, CHAR_BUF_SIZE + 1);
   if (!(*msg)) {
     log_msg(LGG_ERR, "Out of memory. Cannot malloc receiver buffer.");
@@ -501,13 +508,23 @@ redo_ssl_write:
   return ret;
 }
 
-static int write_socket(int fd, const char *msg, int msg_len, SSL *ssl) {
+static int write_socket(int fd, const char *msg, int msg_len, SSL *ssl, char **early_data)
+{
   int rv;
   if (ssl) {
-    rv = ssl_write(ssl, msg, msg_len);
-  } else
+#ifdef TLS1_3_VERSION
+    if (*early_data) {
+      log_msg(LGG_DEBUG, "%s: early data\n", __FUNCTION__);
+      SSL_write_early_data(ssl, msg, msg_len, (size_t*)&rv);
+      SSL_accept(ssl); /* finish the handskae. assume it'll simply succeed */
+      *early_data = NULL; /* job done. reset to NULL. memory freed when 'buf' in conn_hanlder freed */
+    } else
+#endif
+      rv = ssl_write(ssl, msg, msg_len);
+  } else {
     /* a blocking call, so zero should not be returned */
     rv = send(fd, msg, msg_len, MSG_NOSIGNAL);
+  }
   return rv;
 }
 
@@ -618,7 +635,7 @@ void* conn_handler( void *ptr )
     post_buf_len = 0;
 
     errno = 0;
-    rv = read_socket(new_fd, &buf, CONN_TLSTOR(ptr, ssl));
+    rv = read_socket(new_fd, &buf, CONN_TLSTOR(ptr, ssl), CONN_TLSTOR(ptr, early_data));
     if (rv <= 0) {
       if (errno == ECONNRESET || rv == 0) {
         log_msg(LGG_DEBUG, "recv() ECONNRESET: %m");
@@ -633,7 +650,13 @@ void* conn_handler( void *ptr )
       if (rv == 0 && CONN_TLSTOR(ptr, ssl))
         pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
     } else {                    // got some data
-      pipedata.ssl = (CONN_TLSTOR(ptr, ssl)) ? SSL_HIT : SSL_NOT_TLS;
+      if (CONN_TLSTOR(ptr, ssl)) {
+        pipedata.ssl = SSL_HIT;
+        pipedata.ssl_ver = SSL_version(CONN_TLSTOR(ptr, ssl));
+      } else {
+        pipedata.ssl = SSL_NOT_TLS;
+        pipedata.ssl_ver = 0;
+      }
 
       TIME_CHECK("initial recv()");
       buf[rv] = '\0';
@@ -802,8 +825,9 @@ end_post:
             rsize = sizeof httpfilenotfound;
             pipedata.status = SEND_BAD_PATH;
 
-            (void)asprintf(&ca_file, "%s%s", GLOBAL(g, pem_dir), "/ca.crt");
-            if(NULL != (fp = fopen(ca_file, "r"))) {
+            if (asprintf(&ca_file, "%s%s", GLOBAL(g, pem_dir), "/ca.crt") > 0 &&
+               NULL != (fp = fopen(ca_file, "r")))
+            {
               fseek(fp, 0L, SEEK_END);
               int file_sz = ftell(fp);
               rsize = asprintf(&aspbuf, "%s%d%s", httpcacert, file_sz, httpcacert2);
@@ -967,8 +991,9 @@ end_post:
     if (pipedata.status == FAIL_GENERAL) {
       log_msg(LGG_DEBUG, "Client request processing completed with FAIL_GENERAL status");
     } else if (pipedata.status != FAIL_TIMEOUT && pipedata.status != FAIL_CLOSED) {
+
       // only attempt to send response if we've chosen a valid response type
-      rv = write_socket(new_fd, response, rsize, CONN_TLSTOR(ptr, ssl));
+      rv = write_socket(new_fd, response, rsize, CONN_TLSTOR(ptr, ssl), &CONN_TLSTOR(ptr, early_data));
       if (rv < 0) { // check for error message, but don't bother checking that all bytes sent
         if (errno == EPIPE || errno == ECONNRESET) {
           // client closed socket sometime after initial check
@@ -1025,8 +1050,10 @@ end_post:
          no data in the whole session. further counted as one 'cls'
          run_time is ignorable */
       if (total_bytes == 0) {
-        if (CONN_TLSTOR(ptr, ssl))
+        if (CONN_TLSTOR(ptr, ssl)) {
           pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
+          pipedata.ssl_ver = SSL_version(CONN_TLSTOR(ptr, ssl));
+        }
         pipedata.status = FAIL_CLOSED;
         pipedata.rx_total = 0;
         write_pipe(pipefd, &pipedata);

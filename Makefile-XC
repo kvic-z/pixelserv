@@ -20,7 +20,7 @@ ifndef BACKTRACE
 CFLAGS_P   = $(CFLAGS) -O3 -s -Wall -ffunction-sections -fdata-sections -fno-strict-aliasing
 LDFLAGS_P  = $(LDFLAGS) -Wl,--gc-sections
 else
-CFLAGS_P   = $(CFLAGS) -O3 -s -Wall -g -funwind-tables -rdynamic
+CFLAGS_P   = $(CFLAGS) -O3 -s -Wall -g -funwind-tables -rdynamic -DBACKTRACE
 LDFLAGS_P  = $(LDFLAGS)
 endif
 
@@ -155,6 +155,16 @@ mips.ent: printver dist
 	$(MIPSentPATH) $(MIPSentSTRIP) dist/$(DISTNAME).$@.performance.*
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-ng.mipsel.zip $(PFILES)
 
+mips.owrt: LDFLAGS += -Wl,--dynamic-linker=/lib/ld-musl-mipsel.so.1 -lpthread -L$(MIPS_entdir)/lib
+mips.owrt: CFLAGS += -isystem$(MIPS_entdir)/include
+mips.owrt: ARCH = mips.ent
+mips.owrt: export STAGING_DIR = $(MIPS_entdir)
+mips.owrt: printver dist
+	@echo "=== Building mipsel Entware-ng  ==="
+	$(MIPSentPATH) $(MIPSentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
+	$(MIPSentPATH) $(MIPSentSTRIP) dist/$(DISTNAME).$@.performance.*
+	$(PCMD) dist/$(DISTNAME).$(PVERSION).OpenWRT.mipsel.zip $(PFILES)
+
 arm: ARCH = arm
 arm: printver dist
 	@echo "=== Building ARM ==="
@@ -176,6 +186,10 @@ arm.ent: printver dist
 	@echo "=== Building ARM (Entware) ==="
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB) 
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
+	$(ARMentPATH) $(ARMentCC) -isystem$(ARM_entdir)/include -I../openssl/openssl-1.1.1/include $(CFLAGS_P) \
+		-o dist/$(DISTNAME).$@.performance.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
+	$(ARMentPATH) $(ARMentCC) -isystem$(ARM_entdir)/include -I../openssl/openssl-1.1.1/include $(CFLAGS_D) \
+		-o dist/$(DISTNAME).$@.debug.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-ng.armv7softfloat.zip $(PFILES)
 
@@ -184,11 +198,20 @@ armv8.ent: CFLAGS += -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts 
 armv8.ent: ARCH = armv8.ent
 armv8.ent: export STAGING_DIR = $(ARMV8_entdir)
 armv8.ent: printver dist
-	@echo "=== Building ARM ==="
+	@echo "=== Building aarch64 (Entware) ==="
 	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
 	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
+	$(ARMV8PATH) $(ARMV8CC) -isystem$(ARMV8_entdir)/include -I../openssl/openssl-1.1.1/include \
+		-o dist/$(DISTNAME).$@.performance.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-3.x.aarch64softfloat.zip $(PFILES)
+
+mips.erx: ARCH=mips.erx
+mips.erx: dist
+	@echo "=== Packaging ER-X ==="
+	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
+	sudo cp /mnt/qemu-wheezy-mipsel/root/pixelserv-tls/pixelserv-tls dist/$(DISTNAME).$(ARCH).performance.dynamic 
+	$(PCMD) dist/$(DISTNAME).$(PVERSION).EdgeRouterX.zip $(PFILES)
 
 tomatoware: printver dist
 	@echo "=== Building tomatoware ==="

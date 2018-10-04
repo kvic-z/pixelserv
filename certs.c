@@ -12,8 +12,10 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
-#include <openssl/rsa.h>
+#include <openssl/bn.h>
+#include <openssl/err.h>
 #include <openssl/pem.h>
+#include <openssl/rsa.h>
 #include <openssl/crypto.h> 
 #include <openssl/x509v3.h> 
 
@@ -329,6 +331,7 @@ static void sslctx_tbl_dump(int idx, const char * func)
 }
 #endif
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 static void ssl_lock_cb(int mode, int type, const char *file, int line)
 {
     if (mode & CRYPTO_LOCK)
@@ -336,11 +339,11 @@ static void ssl_lock_cb(int mode, int type, const char *file, int line)
     else
         pthread_mutex_unlock(&(locks[type]));
 }
+#endif
 
 void ssl_thread_id(CRYPTO_THREADID *id)
 {
-    unsigned long tid = (unsigned long) pthread_self();
-    CRYPTO_THREADID_set_numeric(id, tid);
+    CRYPTO_THREADID_set_numeric(id, (unsigned long) pthread_self());
 }
 
 void ssl_init_locks()
@@ -353,8 +356,10 @@ void ssl_init_locks()
     for (i = 0; i < CRYPTO_num_locks(); i++)
         pthread_mutex_init(&(locks[i]), NULL);
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     CRYPTO_THREADID_set_callback((void (*)(CRYPTO_THREADID *)) ssl_thread_id);
     CRYPTO_set_locking_callback((void (*)(int, int, const char *, int)) ssl_lock_cb);
+#endif
 }
 
 void ssl_free_locks()
@@ -387,8 +392,10 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     if(pem_fn[0] == '_') pem_fn[0] = '*';
 
     // -- generate cert
-    RSA *rsa = RSA_generate_key(1024, RSA_F4, NULL, NULL);
-    if(rsa == NULL)
+    RSA *rsa = RSA_new();
+    BIGNUM *e = BN_new();
+    BN_set_word(e, RSA_F4); 
+    if (RSA_generate_key_ex(rsa, 1024, e, NULL) < 0)
         goto free_all;
 #ifdef DEBUG
     printf("%s: rsa key generated for [%s]\n", __FUNCTION__, pem_fn);
@@ -400,7 +407,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
 #endif
     if((x509 = X509_new()) == NULL)
         goto free_all;
-    ASN1_INTEGER_set(X509_get_serialNumber(x509),(unsigned)time(NULL));
+    ASN1_INTEGER_set(X509_get_serialNumber(x509),rand());
     X509_set_version(x509,2); // X509 v3
     X509_gmtime_adj(X509_get_notBefore(x509), 0);
     X509_gmtime_adj(X509_get_notAfter(x509), 315360000L); // cert valid for 10yrs
@@ -441,6 +448,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     log_msg(LGG_NOTICE, "cert generated to disk: %s", pem_fn);
 
 free_all:
+    BN_free(e);
     EVP_MD_CTX_destroy(p_ctx);
     EVP_PKEY_free(key);
     X509_EXTENSION_free(ext);
@@ -547,6 +555,7 @@ void *cert_generator(void *ptr) {
 
     /* non block required. otherwise blocked until other side opens */
     int fd = open(PIXEL_CERT_PIPE, O_RDONLY | O_NONBLOCK);
+    srand((unsigned int)time(NULL));
 
     for (;;) {
         int cnt, ret;
@@ -567,7 +576,7 @@ void *cert_generator(void *ptr) {
                     conn_stor_flush();
                     idle = 0;
                 }
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !defined(__UCLIBC__)
                 malloc_trim(0);
 #endif
             }
@@ -611,8 +620,52 @@ void *cert_generator(void *ptr) {
     return NULL;
 }
 
+#ifdef TLS1_3_VERSION
+static char* get_server_name(SSL *s)
+{
+    const unsigned char *p;
+    size_t len, remaining;
+
+    /*
+     * The server_name extension was given too much extensibility when it
+     * was written, so parsing the normal case is a bit complex.
+     */
+    if (!SSL_client_hello_get0_ext(s, TLSEXT_TYPE_server_name, &p,
+                                   &remaining) ||
+        remaining <= 2)
+        return NULL;
+    /* Extract the length of the supplied list of names. */
+    len = (*(p++) << 8);
+    len += *(p++);
+    if (len + 2 != remaining)
+        return NULL;
+    remaining = len;
+    /*
+     * The list in practice only has a single element, so we only consider
+     * the first one.
+     */
+    if (remaining == 0 || *p++ != TLSEXT_NAMETYPE_host_name)
+        return NULL;
+    remaining--;
+    /* Now we can finally pull out the byte array with the actual hostname. */
+    if (remaining <= 2)
+        return NULL;
+    len = (*(p++) << 8);
+    len += *(p++);
+    if (len + 2 > remaining)
+        return NULL;
+    return (char *)p;
+}
+
+int tls_clienthello_cb(SSL *ssl, int *ad, void *arg) {
+# define    CB_OK   1
+# define    CB_ERR  0
+#else
 static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
-    int rv = SSL_TLSEXT_ERR_OK;
+# define    CB_OK   0
+# define    CB_ERR  SSL_TLSEXT_ERR_ALERT_FATAL
+#endif
+    int rv = CB_OK;
     tlsext_cb_arg_struct *cbarg = (tlsext_cb_arg_struct *)arg;
     char full_pem_path[PIXELSERV_MAX_PATH + 1 + 1]; /* worst case ':\0' */
     int len;
@@ -624,14 +677,18 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
     ++len;
 
     char *srv_name = NULL;
-    cbarg->servername = (char*)SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
-    if (cbarg->servername)
-        srv_name = (char *)cbarg->servername;
-    else if (cbarg->server_ip)
-        srv_name = cbarg->server_ip;
+#ifdef TLS1_3_VERSION
+    srv_name = (char*)get_server_name(ssl);
+#else
+    srv_name = (char*)(char*)SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+#endif
+    if (srv_name)
+        strncpy(cbarg->servername, srv_name, sizeof(cbarg->servername) - 1);
+    else if (strlen(cbarg->servername))
+        srv_name = cbarg->servername;
     else {
         log_msg(LGG_WARNING, "SNI failed. server name and ip empty.");
-        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+        rv = CB_ERR;
         goto quit_cb;
     }
 #ifdef DEBUG
@@ -662,7 +719,7 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
 #endif
     if (len > PIXELSERV_MAX_PATH) {
         log_msg(LGG_ERR, "%s: buffer overflow. %s", __FUNCTION__, full_pem_path);
-        rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+        rv = CB_ERR;
         goto quit_cb;
     }
 
@@ -671,11 +728,8 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
     sslctx_tbl_lookup(pem_file, &handle, &ins_handle);
 #ifdef DEBUG
     printf("%s: handle %d ins_handle %d\n", __FUNCTION__, handle, ins_handle);
-    if (handle >=0) {
+    if (handle >=0)
         sslctx_tbl_dump(handle, __FUNCTION__);
-        printf("%s: sslctx %p references: %d\n", __FUNCTION__, SSLCTX_TBL_get(handle, sslctx),
-            SSLCTX_TBL_get(handle, sslctx)->references);
-    }
     if (ins_handle >=0) sslctx_tbl_dump(ins_handle, __FUNCTION__);
 #endif
     if (handle < 0) {
@@ -684,23 +738,24 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
             int fd;
             cbarg->status = SSL_MISS;
             log_msg(LGG_WARNING, "%s %s missing", srv_name, pem_file);
-            if((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
+            if ((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
                 log_msg(LGG_ERR, "%s: failed to open pipe: %s", __FUNCTION__, strerror(errno));
             else {
                 /* reuse full_pem_path as scratchpad */
                 strcpy(full_pem_path, pem_file);
                 strcat(full_pem_path, ":");
-                write(fd, full_pem_path, strlen(full_pem_path));
+                if (write(fd, full_pem_path, strlen(full_pem_path)) < 0)
+                  log_msg(LGG_ERR, "%s: failed to write pipe: %s", __FUNCTION__, strerror(errno));
                 close(fd);
             }
-            rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+            rv = CB_ERR;
             goto quit_cb;
         }
         if (NULL == (sslctx  = create_child_sslctx(full_pem_path, cbarg->cachain))
             || 0 > sslctx_tbl_cache(pem_file, sslctx, ins_handle)) {
             log_msg(LGG_ERR, "%s: fail to create sslctx or cache %s", __FUNCTION__, pem_file);
             cbarg->status = SSL_ERR;
-            rv = SSL_TLSEXT_ERR_ALERT_FATAL;
+            rv = CB_ERR;
             goto quit_cb;
         }
     } else
@@ -708,9 +763,6 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
 
     SSL_set_SSL_CTX(ssl, sslctx);
     cbarg->status = SSL_HIT;
-#ifdef DEBUG
-    printf("%s: SSL_set_SSL_CTX sslctx %p references: %d\n", __FUNCTION__, sslctx, sslctx->references);
-#endif
 quit_cb:
     return rv;
 }
@@ -734,7 +786,7 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
 #ifdef PIXELSERV_SSL_HAS_ECDH_AUTO
     SSL_CTX_set_ecdh_auto(sslctx, 1);
 #else
-    EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_secp384r1);
+    EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
     if (!ecdh)
         log_msg(LGG_ERR, "%s: cannot get ECDH curve", __FUNCTION__);
     SSL_CTX_set_tmp_ecdh(sslctx, ecdh);
@@ -752,6 +804,13 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
     SSL_CTX_sess_set_cache_size(sslctx, 1);
     if (SSL_CTX_set_cipher_list(sslctx, PIXELSERV_CIPHER_LIST) <= 0)
         log_msg(LGG_DEBUG, "%s: failed to set cipher list", __FUNCTION__);
+#ifdef TLS1_3_VERSION
+    SSL_CTX_set1_groups_list(sslctx, "X25519:P-256");
+    SSL_CTX_set_min_proto_version(sslctx, TLS1_VERSION);
+    SSL_CTX_set_max_proto_version(sslctx, TLS1_3_VERSION);
+    if (SSL_CTX_set_ciphersuites(sslctx, "TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256") <= 0)
+        log_msg(LGG_DEBUG, "%s: failed to set TLSv1.3 ciphersuites", __FUNCTION__);
+#endif
     if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0
        || SSL_CTX_use_PrivateKey_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0)
     {
@@ -774,8 +833,8 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
     return sslctx;
 }
 
-SSL_CTX* create_default_sslctx(const char *pem_dir) {
-
+SSL_CTX* create_default_sslctx(const char *pem_dir)
+{
     if (g_sslctx)
         return g_sslctx;
 
@@ -793,8 +852,11 @@ SSL_CTX* create_default_sslctx(const char *pem_dir) {
     SSL_CTX_sess_set_remove_cb(g_sslctx, remove_session); */
     if (SSL_CTX_set_cipher_list(g_sslctx, PIXELSERV_CIPHER_LIST) <= 0)
         log_msg(LGG_DEBUG, "cipher_list cannot be set");
+#ifndef TLS1_3_VERSION
     SSL_CTX_set_tlsext_servername_callback(g_sslctx, tls_servername_cb);
-
+#else
+    SSL_CTX_set_max_early_data(g_sslctx, PIXEL_TLS_EARLYDATA_SIZE);
+#endif
     return g_sslctx;
 }
 
@@ -829,6 +891,65 @@ int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int 
     return rv;
 }
 
+#ifdef TLS1_3_VERSION
+char* read_tls_early_data(SSL *ssl)
+{
+    size_t buf_siz = PIXEL_TLS_EARLYDATA_SIZE;
+    char *buf, *pbuf;
+    int count = 0;
+
+    buf = malloc(PIXEL_TLS_EARLYDATA_SIZE + 1);
+    if (!buf) {
+        log_msg(LGG_DEBUG, "%s out of memory\n", __FUNCTION__);
+        goto err_quit;
+    }
+    pbuf = buf;
+    for (;;) {
+        size_t readbytes = 0;
+        ERR_clear_error();
+        int rv = SSL_read_early_data(ssl, pbuf, buf_siz, &readbytes);
+        if (rv == SSL_READ_EARLY_DATA_FINISH) {
+            if (buf == pbuf && readbytes == 0)
+                goto err_quit;
+            else {
+                pbuf += readbytes;
+                *pbuf = '\0';
+            }
+            break;
+        } else if (rv == SSL_READ_EARLY_DATA_SUCCESS) {
+            pbuf += readbytes;
+            buf_siz -= readbytes;
+            if (buf_siz < 0) {
+                log_msg(LGG_DEBUG, "%s API error\n", __FUNCTION__);
+                goto err_quit;
+            }
+            continue;
+        }
+        /* SSL_READ_EARLY_DATA_ERROR */
+        switch (SSL_get_error(ssl, 0)) {
+        case SSL_ERROR_WANT_WRITE:
+        case SSL_ERROR_WANT_READ:
+        case SSL_ERROR_WANT_ASYNC:
+            if (count++ < 10) /* 600ms total */
+              continue;
+              /* fall through */
+        default:
+            log_msg(LGG_DEBUG, "%s error read: %d count: %d\n", __FUNCTION__, SSL_get_error(ssl, 0), count);
+            goto err_quit;
+        }
+    }
+#ifdef DEBUG
+    printf("%s buf: %s\n", __FUNCTION__, buf);
+#endif
+
+    return buf;
+
+err_quit:
+    free(buf);
+    return NULL;
+}
+#endif
+
 void run_benchmark(const cert_tlstor_t *ct, const char *cert)
 {
     int c, d;
@@ -844,18 +965,19 @@ void run_benchmark(const cert_tlstor_t *ct, const char *cert)
 
     printf("CERT_FILE: ");
     if (cert) {
-        (void)asprintf(&cert_file, "%s/%s", ct->pem_dir, cert);
-        if (stat(cert_file, &st) != 0) {
+        if (asprintf(&cert_file, "%s/%s", ct->pem_dir, cert) < 0 \
+            || stat(cert_file, &st) != 0)
+        {
             printf("%s not found\n", cert);
             goto quit;
         }
     } else
         cert = "_.bing.com";
-    (void)asprintf(&cert_file, "%s/%s", ct->pem_dir, cert);
-    printf("%s\n", cert);
+    if (asprintf(&cert_file, "%s/%s", ct->pem_dir, cert) > 0)
+      printf("%s\n", cert);
 
-    (void)asprintf(&domain, "%s", cert);
-    if (domain[0] == '_') domain[0] = '*';
+    if (asprintf(&domain, "%s", cert) > 0 && domain[0] == '_') 
+      domain[0] = '*';
 
     r_tm0 = 0; g_tm0 = 0;
     for (c=1; c<=10; c++) {

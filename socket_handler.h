@@ -46,6 +46,7 @@ typedef struct {
     };
     double run_time;
     ssl_enum ssl;
+    int ssl_ver;
 } response_struct;
 
 void* conn_handler(void *ptr);

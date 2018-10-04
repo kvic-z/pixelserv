@@ -60,7 +60,7 @@ void signal_handler(int sig)
     }
 
     conn_stor_flush();
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !defined(__UCLIBC__)
     malloc_trim(0);
 #endif
 
@@ -128,7 +128,7 @@ int main (int argc, char* argv[])
   int max_num_threads = DEFAULT_THREAD_MAX;
   int cert_cache_size = DEFAULT_CERT_CACHE_SIZE;
 
-#if defined(__GLIBC__)
+#if defined(__GLIBC__) && !defined(__UCLIBC__)
   mallopt(M_ARENA_MAX, 1);
 #endif
   struct rlimit l = {THREAD_STACK_SIZE, THREAD_STACK_SIZE * 2};
@@ -320,7 +320,7 @@ int main (int argc, char* argv[])
   }
 #endif
 
-  openlog("pixelserv-tls", LOG_PID | LOG_CONS | LOG_PERROR, LOG_DAEMON);
+  openlog("pixelserv-tls", LOG_PID, LOG_DAEMON);
   version_string = get_version(argc, argv);
   if (version_string) {
       if (!do_benchmark) log_msg(LGG_CRIT, "%s", version_string);
@@ -455,6 +455,12 @@ int main (int argc, char* argv[])
       log_msg(LOG_ERR, "SIGSEGV %m");
     if (sigaction(SIGABRT, &sa, NULL))
       log_msg(LOG_ERR, "SIGABRT %m");
+    if (sigaction(SIGILL, &sa, NULL))
+      log_msg(LOG_ERR, "SIGILL %m");
+    if (sigaction(SIGFPE, &sa, NULL))
+      log_msg(LOG_ERR, "SIGFPE %m");
+    if (sigaction(SIGBUS, &sa, NULL))
+      log_msg(LOG_ERR, "SIGBUS %m");
 #endif
 
 #ifdef DEBUG
@@ -603,6 +609,16 @@ int main (int argc, char* argv[])
           case SSL_HIT_CLS:    ++slc; break;
           default:             ;
         }
+        if (pipedata.ssl == SSL_HIT || pipedata.ssl == SSL_HIT_CLS) {
+          switch (pipedata.ssl_ver) {
+#ifdef TLS1_3_VERSION
+            case TLS1_3_VERSION: ++v13; break;
+#endif
+            case TLS1_2_VERSION: ++v12; break;
+            case TLS1_VERSION:   ++v10; break;
+            default:             ;
+          }
+        }
         if (pipedata.status < ACTION_LOG_VERB) {
           count++;
           // count only positive receive sizes
@@ -680,24 +696,23 @@ int main (int argc, char* argv[])
     conn_tlstor->new_fd = new_fd;
     conn_tlstor->ssl = NULL;
     conn_tlstor->allow_admin = (!admin_port) ? 1 : 0;
-    char server_ip[INET6_ADDRSTRLEN] = {'\0'};
+    char *server_ip = conn_tlstor->tlsext_cb_arg->servername;
     int ssl_port = is_ssl_conn(new_fd, server_ip, INET6_ADDRSTRLEN, tls_ports, num_tls_ports);
     if (ssl_port) {
       tlsext_cb_arg_struct *t = conn_tlstor->tlsext_cb_arg;
       SSL *ssl = NULL;
       t->tls_pem = tls_pem;
       t->cachain = cert_tlstor.cachain;
-      t->servername = NULL;
-      strncpy(t->server_ip, server_ip, INET6_ADDRSTRLEN);
       t->status = SSL_UNKNOWN;
       t->sslctx_idx = -1;
 
-      SSL_CTX_set_tlsext_servername_arg(sslctx, t);
       ssl = SSL_new(sslctx);
       SSL_set_fd(ssl, new_fd);
-      int ssl_attempt = 3;
-
-redo_ssl_accept:
+      int ssl_attempt = 6;
+      conn_tlstor->init_time = elapsed_time_msec(init_time);
+      conn_tlstor->ssl = ssl;
+      if (ssl_port == admin_port)
+        conn_tlstor->allow_admin = 1;
 
       /* TCP_NODELAY is not inherited from acceptance */
       if (setsockopt(new_fd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int)) ||
@@ -707,66 +722,115 @@ redo_ssl_accept:
         exit(EXIT_FAILURE);
       }
 
-      errno = 0;
-      int sslret = SSL_accept(ssl);
+#ifdef TLS1_3_VERSION
+      SSL_CTX_set_client_hello_cb(sslctx, tls_clienthello_cb, t);
+      conn_tlstor->early_data = read_tls_early_data(ssl);
+      if (conn_tlstor->early_data)
+        goto start_service_thread;
+#else
+      SSL_CTX_set_tlsext_servername_arg(sslctx, t);
+      conn_tlstor->early_data = NULL;
+#endif
 
-      if (sslret != 1) {
-        char ip_buf[NI_MAXHOST], port_buf[NI_MAXSERV];
-        int sslerr = SSL_get_error(ssl, sslret);
-        switch(sslerr) {
-          case SSL_ERROR_WANT_READ:
-            ssl_attempt--;
-            if (ssl_attempt > 0) goto redo_ssl_accept;
-            break;
-          case SSL_ERROR_SSL:
-            if (log_get_verb() >= LGG_WARNING && getnameinfo((struct sockaddr *)&their_addr, sin_size,
-                  ip_buf, sizeof ip_buf, port_buf, sizeof port_buf, NI_NUMERICHOST | NI_NUMERICSERV ) != 0) {
-              ip_buf[0] = '\0';
-              port_buf[0] = '\0';
-              log_msg(LOG_ERR, "getnameinfo failed to get client_ip");
-            }
-            switch(ERR_GET_REASON(ERR_peek_last_error())) {
-                case SSL_R_TLSV1_ALERT_UNKNOWN_CA:
-                    uca++;
-                    log_msg(LGG_WARNING, "handshake failed: unknown CA. client %s:%s server %s",
-                        ip_buf, port_buf, t->servername);
-                    break;
-                case SSL_R_SSLV3_ALERT_CERTIFICATE_UNKNOWN:
-                    uce++;
-                    log_msg(LGG_WARNING, "handshake failed: unknown cert. client %s:%s server %s",
-                        ip_buf, port_buf, t->servername);
-                    break;
-                default:
-                    log_msg(LGG_WARNING, "handshake failed: client %s:%s server %s. Lib(%d) Func(%d) Reason(%d)",
-                        ip_buf, port_buf, t->servername,
-                            ERR_GET_LIB(ERR_peek_last_error()), ERR_GET_FUNC(ERR_peek_last_error()),
-                                ERR_GET_REASON(ERR_peek_last_error()));
-            }
-            break;
-          case SSL_ERROR_SYSCALL:
-          default:
-            ;
-        }
-        count++;
-        switch(t->status) {
-          case SSL_ERR:        ++sle; break;
-          case SSL_MISS:       ++slm; break;
-          case SSL_HIT:
-          case SSL_UNKNOWN:    ++slu; break;
-          default:             ;
-        }
-        SSL_set_shutdown(ssl, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
-        SSL_free(ssl);
-        shutdown(new_fd, SHUT_RDWR);
-        close(new_fd);
-        conn_stor_relinq(conn_tlstor);
-        continue;
+redo_ssl_accept:
+
+      errno = 0;
+      ERR_clear_error();
+      int sslret = SSL_accept(ssl);
+      if (sslret == 1)
+        goto start_service_thread;
+
+      char ip_buf[NI_MAXHOST], port_buf[NI_MAXSERV];
+      int sslerr = SSL_get_error(ssl, sslret);
+      if (log_get_verb() >= LGG_WARNING && getnameinfo((struct sockaddr *)&their_addr, sin_size,
+            ip_buf, sizeof ip_buf, port_buf, sizeof port_buf, NI_NUMERICHOST | NI_NUMERICSERV ) != 0) {
+        ip_buf[0] = '\0';
+        port_buf[0] = '\0';
+        log_msg(LOG_ERR, "failed to get client_ip: %s", strerror(errno));
       }
-      conn_tlstor->ssl = ssl;
-      if (ssl_port == admin_port)
-        conn_tlstor->allow_admin = 1;
+      switch(sslerr) {
+        case SSL_ERROR_WANT_READ:
+          ssl_attempt--;
+          if (ssl_attempt > 0) {
+            get_time(&init_time);
+            goto redo_ssl_accept;
+          }
+          log_msg(LGG_WARNING, "handshake failed: reached max retries. client %s:%s server %s",
+              ip_buf, port_buf, t->servername);
+          break;
+        case SSL_ERROR_SSL:
+          switch(ERR_GET_REASON(ERR_peek_last_error())) {
+              case SSL_R_SSLV3_ALERT_BAD_CERTIFICATE:
+                  ucb++;
+                  log_msg(LGG_WARNING, "handshake failed: bad cert. client %s:%s server %s",
+                      ip_buf, port_buf, t->servername);
+                  break;
+              case SSL_R_TLSV1_ALERT_UNKNOWN_CA:
+                  uca++;
+                  log_msg(LGG_WARNING, "handshake failed: unknown CA. client %s:%s server %s",
+                      ip_buf, port_buf, t->servername);
+                  break;
+              case SSL_R_SSLV3_ALERT_CERTIFICATE_UNKNOWN:
+                  uce++;
+                  log_msg(LGG_WARNING, "handshake failed: unknown cert. client %s:%s server %s",
+                      ip_buf, port_buf, t->servername);
+                  break;
+              case SSL_R_INAPPROPRIATE_FALLBACK:
+                  if (t->servername == NULL) {
+                    t->status = SSL_MISS;
+                    break;
+                  }
+              case SSL_R_PARSE_TLSEXT:
+                  if (t->status == SSL_MISS)
+                    break;
+                  /* fall through */
+              default:
+                  log_msg(LGG_WARNING, "handshake failed: client %s:%s server %s. Lib(%d) Func(%d) Reason(%d)",
+                      ip_buf, port_buf, t->servername,
+                          ERR_GET_LIB(ERR_peek_last_error()), ERR_GET_FUNC(ERR_peek_last_error()),
+                              ERR_GET_REASON(ERR_peek_last_error()));
+          }
+          break;
+        case SSL_ERROR_SYSCALL:
+             /* OpenSSL 1.1.x clienthello will reach here
+                but we want to skip if it's known error such as missing certs */
+            if (t->status == SSL_MISS)
+              break;
+
+            if (errno == 0 || errno == 104) {
+              char m[2];
+              int rv = recv(new_fd, m, 2, MSG_PEEK);
+              if (rv == 0) {
+                ush++;
+                log_msg(LGG_WARNING, "handshake failed: shutdown after ServerHello. client %s:%s server %s",
+                  ip_buf, port_buf, t->servername);
+                break;
+              }
+            }
+            log_msg(LGG_WARNING, "handshake failed: socket I/O error. client %s:%s server %s. errno: %d",
+                ip_buf, port_buf, t->servername, errno);
+        default:
+          ;
+      }
+      count++;
+      switch(t->status) {
+        case SSL_ERR:        ++sle; break;
+        case SSL_MISS:       ++slm; break;
+        case SSL_HIT:
+        case SSL_UNKNOWN:    ++slu; break;
+        default:             ;
+      }
+      SSL_set_shutdown(ssl, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+      SSL_free(ssl);
+      shutdown(new_fd, SHUT_RDWR);
+      close(new_fd);
+      conn_stor_relinq(conn_tlstor);
+      continue;
     }
-    conn_tlstor->init_time = elapsed_time_msec(init_time);
+
+start_service_thread:
+
+    conn_tlstor->init_time += elapsed_time_msec(init_time);
     pthread_t conn_thread;
     pthread_attr_t attr;
     pthread_attr_init(&attr);

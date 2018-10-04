@@ -8,6 +8,7 @@
 #define PIXEL_SSL_SESS_CACHE_SIZE 128*20
 #define PIXEL_SSL_SESS_TIMEOUT 3600 /* seconds */
 #define PIXEL_CERT_PIPE "/tmp/pixelcerts"
+#define PIXEL_TLS_EARLYDATA_SIZE 16384
 #ifndef DEFAULT_PEM_PATH
 #define DEFAULT_PEM_PATH "/opt/var/cache/pixelserv"
 #endif
@@ -46,7 +47,7 @@ typedef enum {
 typedef struct {
     const char *tls_pem;
     const STACK_OF(X509_INFO) *cachain;
-    const char *servername;
+    char servername[65]; /* max legal domain name 63 chars; INET6_ADDRSTRLEN 46 bytes */
     char server_ip[INET6_ADDRSTRLEN];
     ssl_enum status;
     int sslctx_idx;
@@ -58,6 +59,7 @@ typedef struct {
     double init_time;
     tlsext_cb_arg_struct *tlsext_cb_arg;
     int allow_admin;
+    char *early_data;
     tlsext_cb_arg_struct v;
 } conn_tlstor_struct;
 
@@ -98,4 +100,8 @@ void conn_stor_init(int slots);
 void conn_stor_relinq(conn_tlstor_struct *p);
 conn_tlstor_struct* conn_stor_acquire();
 void conn_stor_flush();
+#ifdef TLS1_3_VERSION
+int tls_clienthello_cb(SSL *ssl, int *ad, void *arg);
+char* read_tls_early_data(SSL *ssl);
+#endif
 #endif

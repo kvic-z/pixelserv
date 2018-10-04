@@ -18,9 +18,10 @@
 #include <time.h>               // struct timespec, clock_gettime(), difftime()
 #include <arpa/inet.h>
 #include <linux/version.h>
+#include <openssl/ssl.h>
 
 // preprocessor defines
-#define VERSION "2.1.2"
+#define VERSION "2.2.0"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
@@ -54,13 +55,17 @@
        __result; }))
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0) || ENABLE_TCP_FASTOPEN
-    #define FEAT_TFO  " flags: tfo"
-#else
-    #define FEAT_TFO
-#endif
-
-#define FEATURE_FLAGS FEAT_TFO
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0) || ENABLE_TCP_FASTOPEN
+#   define FEAT_TFO " tfo"
+# else
+#   define FEAT_TFO
+# endif
+# ifdef TLS1_3_VERSION
+#   define FEAT_TLS1_3  " tls1_3"
+# else
+#   define FEAT_TLS1_3  " no_tls1_3"
+# endif
+# define FEATURE_FLAGS " flags:" FEAT_TFO FEAT_TLS1_3
 
 #ifdef TEST
 # define TESTPRINT printf
@@ -105,13 +110,18 @@ extern volatile sig_atomic_t sle;
 extern volatile sig_atomic_t slc;
 extern volatile sig_atomic_t slu;
 extern volatile sig_atomic_t uca;
+extern volatile sig_atomic_t ucb;
 extern volatile sig_atomic_t uce;
+extern volatile sig_atomic_t ush;
 extern volatile sig_atomic_t kcc;
 extern volatile sig_atomic_t kmx;
 extern volatile sig_atomic_t kct;
 extern float kvg;
 extern volatile sig_atomic_t krq;
 extern volatile sig_atomic_t clt;
+extern volatile sig_atomic_t v13;
+extern volatile sig_atomic_t v12;
+extern volatile sig_atomic_t v10;
 
 struct Global {
     int argc;
