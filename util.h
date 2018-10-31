@@ -17,7 +17,9 @@
 #include <unistd.h>             // close(), setuid(), TEMP_FAILURE_RETRY, fork()
 #include <time.h>               // struct timespec, clock_gettime(), difftime()
 #include <arpa/inet.h>
-#include <linux/version.h>
+#ifdef linux
+#  include <linux/version.h>
+#endif
 #include <openssl/ssl.h>
 
 // preprocessor defines
@@ -55,10 +57,12 @@
        __result; }))
 #endif
 
-# if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0) || ENABLE_TCP_FASTOPEN
-#   define FEAT_TFO " tfo"
-# else
-#   define FEAT_TFO
+# define FEAT_TFO
+# ifdef linux
+#   if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0) || ENABLE_TCP_FASTOPEN
+#     undef FEAT_TFO
+#     define FEAT_TFO " tfo"
+#   endif
 # endif
 # ifdef TLS1_3_VERSION
 #   define FEAT_TLS1_3  " tls1_3"

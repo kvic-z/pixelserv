@@ -4,7 +4,6 @@
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
-#include <malloc.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <string.h>
@@ -22,6 +21,10 @@
 #include "certs.h"
 #include "logger.h"
 #include "util.h"
+
+#if defined(__GLIBC__) && !defined(__UCLIBC__)
+#  include <malloc.h>
+#endif
 
 static pthread_mutex_t *locks;
 static SSL_CTX *g_sslctx;
@@ -143,7 +146,7 @@ static int cmp_sslctx_certname(const void *k, const void *p)
 void sslctx_tbl_load(const char* pem_dir, const STACK_OF(X509_INFO) *cachain)
 {
     FILE *fp;
-    char *fname, *line;
+    char *fname = NULL, *line;
     if ((line = malloc(PIXELSERV_MAX_PATH)) == NULL || (fname = malloc(PIXELSERV_MAX_PATH)) == NULL) {
         log_msg(LGG_ERR, "%s: failed to allocate memory", __FUNCTION__);
         goto quit_load;
@@ -741,9 +744,11 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
             if ((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
                 log_msg(LGG_ERR, "%s: failed to open pipe: %s", __FUNCTION__, strerror(errno));
             else {
-                /* reuse full_pem_path as scratchpad */
-                strcpy(full_pem_path, pem_file);
+                /* reuse full_pem_path as scratchpad. use memcpy in place of strcpy.
+                strcpy overlapped buffer is not portable. */
+                memcpy(full_pem_path, pem_file, strlen(pem_file) + 1);
                 strcat(full_pem_path, ":");
+
                 if (write(fd, full_pem_path, strlen(full_pem_path)) < 0)
                   log_msg(LGG_ERR, "%s: failed to write pipe: %s", __FUNCTION__, strerror(errno));
                 close(fd);
@@ -953,7 +958,7 @@ err_quit:
 void run_benchmark(const cert_tlstor_t *ct, const char *cert)
 {
     int c, d;
-    char *cert_file, *domain;
+    char *cert_file = NULL, *domain;
     struct stat st;
     struct timespec tm;
     float r_tm0, g_tm0, tm1;

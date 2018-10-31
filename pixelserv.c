@@ -12,8 +12,9 @@
 #ifdef TEST
 #include <arpa/inet.h>
 #endif
+#ifdef linux
 #include <linux/version.h>
-#include <malloc.h>
+#endif
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <sys/resource.h>
@@ -25,6 +26,14 @@
 #include "logger.h"
 #include "socket_handler.h"
 #include "util.h"
+
+#if defined(__GLIBC__) && !defined(__UCLIBC__)
+#  include <malloc.h>
+#endif
+
+#ifndef SO_BINDTODEVICE
+#  define SO_BINDTODEVICE IP_RECVIF
+#endif
 
 #define PAGE_SIZE 4096
 #define THREAD_STACK_SIZE  9*PAGE_SIZE
@@ -392,12 +401,14 @@ int main (int argc, char* argv[])
 
     if ( ((sockfd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) < 1)
       || setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int))
-      || setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int))
+      || setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int))
 #ifdef IF_MODE
       || (use_if && (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, ifname, strlen(ifname))))
 #endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0) || ENABLE_TCP_FASTOPEN
-      || setsockopt(sockfd, SOL_TCP, TCP_FASTOPEN, &(int){ TCP_FASTOPEN_QLEN }, sizeof(int))
+#ifdef linux
+#  if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0) || ENABLE_TCP_FASTOPEN
+      || setsockopt(sockfd, IPPROTO_TCP, TCP_FASTOPEN, &(int){ TCP_FASTOPEN_QLEN }, sizeof(int))
+#  endif
 #endif
       || bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen)
       || listen(sockfd, BACKLOG)
@@ -693,6 +704,22 @@ int main (int argc, char* argv[])
       continue;
     }
 
+    /* Set socket to blocking explicitly.
+       On Linux, file descriptor attributes are not inherited from parent.
+       On macOS, the attributes are inherited from parent. */
+    int flags;
+    if ((flags = fcntl(new_fd, F_GETFL, 0)) < 0 || fcntl(new_fd, F_SETFL, flags & (~O_NONBLOCK)) < 0)
+        log_msg(LGG_WARNING, "%s fail to set new_fd to blocking", __FUNCTION__);
+
+    /* Set socket to TCP_NODELAY explicitly.
+       On Linux, socket options are not inherited from parent.
+       On macOS, the attributes are not inherited from parent. */
+    if (setsockopt(new_fd, IPPROTO_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int)) ||
+        setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&(struct timeval){ 0, 60000 },
+            sizeof(struct timeval)))  {
+        log_msg(LGG_WARNING, "%s setsockopt() failed on new_fd", __FUNCTION__);
+    }
+
     conn_tlstor->new_fd = new_fd;
     conn_tlstor->ssl = NULL;
     conn_tlstor->allow_admin = (!admin_port) ? 1 : 0;
@@ -713,14 +740,6 @@ int main (int argc, char* argv[])
       conn_tlstor->ssl = ssl;
       if (ssl_port == admin_port)
         conn_tlstor->allow_admin = 1;
-
-      /* TCP_NODELAY is not inherited from acceptance */
-      if (setsockopt(new_fd, SOL_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int)) ||
-            setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&(struct timeval){ 0, 60000 },
-              sizeof(struct timeval))) {
-        log_msg(LOG_CRIT, "Abort: %m - new_fd setsockopt");
-        exit(EXIT_FAILURE);
-      }
 
 #ifdef TLS1_3_VERSION
       SSL_CTX_set_client_hello_cb(sslctx, tls_clienthello_cb, t);
@@ -775,11 +794,6 @@ redo_ssl_accept:
                   log_msg(LGG_WARNING, "handshake failed: unknown cert. client %s:%s server %s",
                       ip_buf, port_buf, t->servername);
                   break;
-              case SSL_R_INAPPROPRIATE_FALLBACK:
-                  if (t->servername == NULL) {
-                    t->status = SSL_MISS;
-                    break;
-                  }
               case SSL_R_PARSE_TLSEXT:
                   if (t->status == SSL_MISS)
                     break;

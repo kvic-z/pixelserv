@@ -336,6 +336,14 @@ char* strstr_last(const char* const str1, const char* const str2) {
   return 0;
 }
 
+/* strstr behavior undefined if one or more parameter is null.
+   Not portable as MacOS default to crash. */
+char* strstr_first(const char* const str1, const char* const str2) {
+  if (!str1) return NULL;
+  if (!str2) return (char*)str1;
+  return strstr(str1, str2);
+}
+
 char from_hex(const char ch) {
   return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
 }
@@ -523,7 +531,7 @@ static int write_socket(int fd, const char *msg, int msg_len, SSL *ssl, char **e
       rv = ssl_write(ssl, msg, msg_len);
   } else {
     /* a blocking call, so zero should not be returned */
-    rv = send(fd, msg, msg_len, MSG_NOSIGNAL);
+    rv = send(fd, msg, msg_len, 0);
   }
   return rv;
 }
@@ -667,7 +675,7 @@ void* conn_handler( void *ptr )
 #ifdef HEX_DUMP
       hex_dump(buf, rv);
 #endif
-      char *body = strstr(buf, "\r\n\r\n");
+      char *body = strstr_first(buf, "\r\n\r\n");
       int body_len = (body) ? (rv + buf - body) : 0;
       char *req = strtok_r(buf, "\r\n", &bufptr);
       if (log_verbose >= LGG_INFO) {
@@ -680,7 +688,7 @@ void* conn_handler( void *ptr )
           }
           strcpy(req_url, req);
           /* locate and copy Host */
-          char *tmph = strstr(bufptr, "Host: "); // e.g. "Host: abc.com"
+          char *tmph = strstr_first(bufptr, "Host: "); // e.g. "Host: abc.com"
           if (tmph) {
             host[HOST_LEN_MAX] = '\0';
             strncpy(host, tmph + 6 /* strlen("Host: ") */, HOST_LEN_MAX);
@@ -691,7 +699,7 @@ void* conn_handler( void *ptr )
       }
       /* CORS */
       char *orig_hdr;
-      orig_hdr = strstr(bufptr, "Origin: ");
+      orig_hdr = strstr_first(bufptr, "Origin: ");
       if (orig_hdr) {
         cors_origin = malloc(CORS_ORIGIN_LEN_MAX);
         strncpy(cors_origin, orig_hdr + 8, CORS_ORIGIN_LEN_MAX);
@@ -717,7 +725,7 @@ void* conn_handler( void *ptr )
           int length = 0;
           int post_buf_size = 0;
           int wait_cnt = 0;
-          char *h = strstr(bufptr, "Content-Length:");
+          char *h = strstr_first(bufptr, "Content-Length:");
 
           wait_cnt = MAX_HTTP_POST_WAIT / GLOBAL(g, select_timeout);
           if (wait_cnt < 1) wait_cnt = 1;
@@ -896,7 +904,7 @@ end_post:
                 for (tok = strtok_r(NULL, "\r\n", &bufptr); tok; tok = strtok_r(NULL, "\r\n", &bufptr)) {
                   char *hkey = strtok(tok, ":");
                   char *hvalue = strtok(NULL, "\r\n");
-                  if (strstr(hkey, "Referer") && strstr(hvalue, url)) {
+                  if (strstr_first(hkey, "Referer") && strstr_first(hvalue, url)) {
                     url = NULL;
                     TESTPRINT("Not redirecting likely callback URL: %s:%s\n", hkey, hvalue);
                     break;
