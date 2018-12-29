@@ -24,6 +24,9 @@
   "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:" \
   "ECDHE-RSA-AES128-SHA:DHE-RSA-AES128-SHA:AES128-SHA"
 
+#define PIXELSERV_TLSV1_3_CIPHERS \
+  "TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"
+
 #if defined(SSL_CTX_set_ecdh_auto)
 # define PIXELSRV_SSL_HAS_ECDH_AUTO
 #endif
@@ -41,6 +44,7 @@ typedef enum {
     SSL_MISS,
     SSL_HIT,
     SSL_HIT_CLS,
+    SSL_HIT_RTT0,
     SSL_UNKNOWN
 } ssl_enum;
 
@@ -102,6 +106,6 @@ conn_tlstor_struct* conn_stor_acquire();
 void conn_stor_flush();
 #ifdef TLS1_3_VERSION
 int tls_clienthello_cb(SSL *ssl, int *ad, void *arg);
-char* read_tls_early_data(SSL *ssl);
+char* read_tls_early_data(SSL *ssl, int *err);
 #endif
 #endif

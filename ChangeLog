@@ -1,7 +1,31 @@
+2018-12-30 v2.2.1
+
+* NEW log TLS version for each access in log LEVEL 4
+* NEW support MacOS/Homebrew
+* NEW "zrt" counter on servstats page, 0-RTT aka Early Data in TLS 1.3
+* NEW a logo/favicon for pixelserv-tls by @eclp on snbforum
+* NEW save all cached certs to "CERT_PATH/prefetch" on signal SIGUSR1
+* CHANGED save all cached certs on program shutdown (previously only top 3 quarters)
+* CHANGED default "cert cache size", "-c" CLI option to 500 (previously 50)
+* CHANGED default to URL redirection disabled
+* CHANGED redefine '-R' CLI option to "enable URL redirection" (opposite of old definition)
+* CHANGED reduce "HTTP keep-alive" time, "-O" CLI option to 120s  (previously 300s)
+* CHANGED improve accuraracy in average and maximum processing time, "avg" and "tmx"
+* CHANGED improve browser compatibility for the servstats page
+* CHANGED improve CORS compatibility in request responses
+* CHANGED improve blocking of graphical ads during YouTube playback
+* CHANGED improve overall stability and robustness
+* CHANGED improve compatibility in linking static binary
+* CHANGED combine "sst" and "ssh" into a single "ssh" counter
+* CHANGED deprecate "sta," "stt" and "tmo" counters
+* CHANGED deprecate '-o SELECT_TIMEOUT' CLI option
+* CHANGED update to manpage
+* FIXED a crash bug in log LEVEL >= 4
+
 2018-10-9 v2.2.0
 
-* NEW support TLS 1.3.
-* NEW support 0-RTT in TLS 1.3.
+* NEW support TLS 1.3
+* NEW support 0-RTT in TLS 1.3
 * NEW TLS 1.3 requires OpenSSL version >= 1.1.1
 * NEW TLS 1.3 support autodetected and enabled at compile time. No special configuration needed.
 * NEW counters v13, v12, v10 - breakdown of slh & slc requests into TLS versions.

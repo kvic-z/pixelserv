@@ -181,7 +181,7 @@ quit_load:
 
 void sslctx_tbl_save(const char* pem_dir)
 {
-    #define RATIO_TO_SAVE (3.0 / 4.0)
+    #define RATIO_TO_SAVE 1
     int idx;
     char *fname;
     FILE *fp;
@@ -565,9 +565,6 @@ void *cert_generator(void *ptr) {
         if(fd == -1)
             log_msg(LGG_ERR, "%s: failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
         strcpy(buf, half_token);
-#ifdef DEBUG
-        printf("%s 1: %s\n", __FUNCTION__, buf);
-#endif
         struct pollfd pfd = { fd, POLLIN, POLLIN };
         ret = poll(&pfd, 1, 1000 * PIXEL_SSL_SESS_TIMEOUT / 4);
         if (ret <= 0) {
@@ -602,9 +599,6 @@ void *cert_generator(void *ptr) {
             half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4 - i + 1;
             buf[PIXELSERV_MAX_SERVER_NAME * 4 - i + 1] = '\0';
         }
-#ifdef DEBUG
-        printf("%s 2: %s\n", __FUNCTION__, buf);
-#endif
         if (ct->privkey == NULL || ct->issuer == NULL)
             continue;
         char *p_buf, *p_buf_sav = NULL;
@@ -813,7 +807,7 @@ static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X5
     SSL_CTX_set1_groups_list(sslctx, "X25519:P-256");
     SSL_CTX_set_min_proto_version(sslctx, TLS1_VERSION);
     SSL_CTX_set_max_proto_version(sslctx, TLS1_3_VERSION);
-    if (SSL_CTX_set_ciphersuites(sslctx, "TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256") <= 0)
+    if (SSL_CTX_set_ciphersuites(sslctx, PIXELSERV_TLSV1_3_CIPHERS) <= 0)
         log_msg(LGG_DEBUG, "%s: failed to set TLSv1.3 ciphersuites", __FUNCTION__);
 #endif
     if(SSL_CTX_use_certificate_file(sslctx, full_pem_path, SSL_FILETYPE_PEM) <= 0
@@ -890,19 +884,20 @@ int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int 
     if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len, client_ip, \
             sizeof client_ip, NULL, 0, NI_NUMERICHOST) != 0)
         perror("getnameinfo");
-    printf("** NEW CONNECTION ** FROM %s ON %s\n", client_ip, port);
+    printf("** NEW CONNECTION ** %s:%s\n", client_ip, port);
 #endif
 
     return rv;
 }
 
 #ifdef TLS1_3_VERSION
-char* read_tls_early_data(SSL *ssl)
+char* read_tls_early_data(SSL *ssl, int *err)
 {
     size_t buf_siz = PIXEL_TLS_EARLYDATA_SIZE;
     char *buf, *pbuf;
     int count = 0;
 
+    *err = SSL_ERROR_NONE;
     buf = malloc(PIXEL_TLS_EARLYDATA_SIZE + 1);
     if (!buf) {
         log_msg(LGG_DEBUG, "%s out of memory\n", __FUNCTION__);
@@ -939,7 +934,8 @@ char* read_tls_early_data(SSL *ssl)
               continue;
               /* fall through */
         default:
-            log_msg(LGG_DEBUG, "%s error read: %d count: %d\n", __FUNCTION__, SSL_get_error(ssl, 0), count);
+            *err = SSL_get_error(ssl, 0);
+            log_msg(LGG_DEBUG, "%s error: %d count: %d\n", __FUNCTION__, *err, count);
             goto err_quit;
         }
     }

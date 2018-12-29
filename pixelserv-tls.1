@@ -13,7 +13,6 @@ pixelserv-tls \- a tiny bespoke HTTP/1.1 server for adblock and accelerating web
 [\fB\-l\fR]
 [\fB\-l\fR \fILEVEL\fR]
 [\fB\-n\fR \fIIFACE\fR]
-[\fB\-o\fR \fISELECT_TIMEOUT\fR]
 [\fB\-O\fR \fIKEEPALIVE_TIME\fR]
 [\fB\-p\fR \fIHTTP_PORT\fR]
 [\fB\-R\fR]
@@ -25,16 +24,16 @@ pixelserv-tls \- a tiny bespoke HTTP/1.1 server for adblock and accelerating web
 
 .SH DESCRIPTION
 .B pixelserv-tls
-is a tiny bespoke HTTP/1.1 webserver with HTTPS and SNI support.
-It acts on behalf of hundreds of thousands of advert/tracker servers and responds to all requests with nothing to speeds up web browsing.
+is a tiny bespoke webserver supporting HTTPS and SNI.
+It acts on behalf of hundreds of thousands of advert/tracker servers and responds to all requests with nothing. It speeds up your browsing experience as well as eliminating page errors.
 
 .B pixelserv-tls
-supports TLSv1.0 and TLSv1.2 and thus could operate with a wide range of browsers and client devices.
-Server certificates for any given advert/tracker domains are generated automatically on first use and saved to disk.
+supports TLS 1.0, TLS 1.2 and TLS 1.3 and accepts a wide range of browsers and client devices. It automatically generates
+server certificate for blocked domains on their first visits and saved to disk for reuse.
 
 .B pixelserv-tls
-can log access and HTTP/1.1 POST contents to syslog.
-So it is also a useful tool to inspect and expose 'wrongly blocked' domains as well as 'rogue' domains invading user privacy.
+could log tracker URLs and uploading attemps to syslog.
+It is a useful tool for inspecting wrongly blocked domains that cause page trouble and exposing privacy breaches by rogue websites.
 
 .SH OPTIONS
 .TP
@@ -80,7 +79,7 @@ Set log level. Messages will be output to syslog. pixelserv-tls has six tiers of
 The network interface pixelserv-tls shall listen on. If omitted and no ip_addr or hostname specified, pixelserv-tls will listen on all interfaces.
 .TP
 .BR \-o " " \fISELECT_TIMEOUT\fR
-Specify the amount of time in seconds select() and recv() syscalls used in pixelserv-tls shall wait for data. After SELECT_TIMEOUT seconds and still no data from network, these syscalls will return. Default is 1 second.
+Deprecated since v2.2.1.
 .TP
 .BR \-O " " \fIKEEPALIVE_TIME\fR
 Set the minimum amount of time in seconds that a HTTP/1.1 persistent connection shall be kept alive. The connection will be closed if client side shuts down or this amount of time expires without receiving any request.
@@ -111,16 +110,18 @@ Specify the directory where the CA certificate (ca.crt) and its private key (ca.
 \'nobody' or 'USER' if '-u USER' is set should have read/write permission to CERT_PATH.
 
 .SH SUPPORTED URI/API
+.SS \fI/ca.crt\fR
+Retrieve ca.crt file located in CERT_PATH. On mobile client devices, the OS will prompt you and guide you through the installation of the CA cert.
+.SS \fI/favicon.ico\fR
+pixelserv-tls favicon.
+.SS \fI/log=LEVEL\fR
+Change the log LEVEL without restarting \fIpixelserv-tls\fR. LEVEL is an integer between 0 and 5 inclusive. The same definition as in command line option `-l LEVEL`. See above.
 .SS \fI/servstats\fR \fI/servstats.txt\fR
 Retrieve the servstats page in HTML and plain text formats respectively.
 .PP
 Example: http://<your pixelserv ip>/servstats.txt
 .PP
 This will retrieve the servstats page in plain text.
-.SS \fI/ca.crt\fR
-Retrieve ca.crt file located in CERT_PATH. On mobile client devices, the OS will prompt you and guide you through the installation of the CA cert.
-.SS \fI/log=LEVEL\fR
-Change the log LEVEL without restarting \fIpixelserv-tls\fR. LEVEL is an integer between 0 and 5 inclusive. The same definition as in command line option `-l LEVEL`. See above.
 
 .SH SERVSTATS COUNTERS
 
@@ -159,8 +160,30 @@ If TLS handshakes fail other than above reasons, this counter is incremented by 
 .BR \fIuca\fR
 When a TLS handshake fails due to the client not recognise your Pixelserv CA cert, this counter is incremented by one. If your clients do not have Pixelserv CA imported, then the error is legitimate. If your clients have Pixelserv CA imported already, it is worth further check. Often a client could be purposely coded not to honour user root CAs for dubious reasons. Users are recommended to turn on log LEVEL 2. Try to catch the client ip and server name in syslog. Check server name against reputable online sources. Check client ip and port to catch the provoking apps on client devices.
 .TP
+.BR \fIucb\fR
+Clients report "bad certificate" on the server certificate presented by pixelserv-tls and then shuts down the connection. Usually this indicates a client is proactively checking the certficiate's fingerprint against its hardcoded data. More and more apps are doing so to not exposing their upload contents to users.
+.TP
 .BR \fIuce\fR
 When a TLS handshake fails due to the client not recognise the server cert, this counter is incremented by one. Very likely such cases are of dubious nature. A client may be purposedly coded to check the server cert against stored fingerprint. If mismatch, the client refuses to proceed. This is alarming and often indicates a client attempts to connect to a rogue server. Users should turn on log LEVEL 2. Catch the client ip and server name in syslog and proceed with similar investigation steps as in \fIuca\R.. 
+.TP
+.BR \fIush\fR
+Similiar to \fIucb\fR but the clients abruptly shuts down the connection without providing any reason.
+
+.SS Other TLS related events
+.TP
+.BR \fIv13\fR " " \fIv12\fR " " \fIv10\fR
+Indicates number of HTTPS requests that are transmitted in a particular TLS version, v1.3, v1.2 and v1.0 respectively.
+.TP
+.BR \fIzrt\fR
+Indicates number of HTTPS requests that are transmitted in TLS 1.3 Early Data aka zero round-trip or 0-RTT. This significantly speeds up the first request on a resumed HTTPS connection between a client and pixelserv-tls.
+
+.SS Flags next to version string
+.TP
+.BR \fItfo\fR
+Indicates support for TCP Fast Open that is available on Linux kernel >= 3.7 and recent macOS and Windows. If this flag is missing, then TCP Fast Open is not supported in your version of pixelserv-tls.
+.TP
+.BR \fItls1_3\fR
+Indicates support for TLS 1.3 that is automatically enabled when pixelserv-tls is linked to OpenSSL >= v1.1.1. If this flag is missing, then TLS 1.3 is not available in your version of pixelserv-tls.
 
 .SH AUTHOR
 This manpage is authored by kvic (aka kvic-z on GitHub) https://kazoo.ga/pixelserv-tls/
@@ -178,7 +201,7 @@ to signify HTTPS functionality, and has since undergone extensive optimization f
 speed and lightweight.
 
 .SH COPYRIGHT
-Copyright \(co 2015\-2018 kvic aka kvic-z on GitHub
+Copyright \(co 2015\-2019 kvic aka kvic-z on GitHub
 .br
 Copyright \(co 2013\-2015 HunterZ on GitHub
 .br

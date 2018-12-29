@@ -8,7 +8,7 @@
 #define CHAR_BUF_SIZE       4095     /* initial/incremental size of msg buffer */
 #define MAX_CHAR_BUF_LOTS   32       /* max msg buffer size in unit of CHAR_BUF_SIZE */
 #define MAX_HTTP_POST_LEN   262143   /* max POST Content-Length before discarding */
-#define MAX_HTTP_POST_WAIT  5        /* 5 second */
+#define MAX_HTTP_POST_RETRY 3        /* 3 times */
 
 typedef enum {
   FAIL_GENERAL,

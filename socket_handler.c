@@ -11,17 +11,19 @@
 #include "socket_handler.h"
 #include "certs.h"
 #include "logger.h"
- 
+
 // private data for socket_handler() use
+  static const char httpcors_headers[] =
+   "Access-Control-Allow-Origin: %s\r\n"
+   "Access-Control-Allow-Credentials: true\r\n"
+   "Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept, documentReferer\r\n";
 
   static const char httpnulltext[] =
   "HTTP/1.1 200 OK\r\n"
   "Content-Type: text/html; charset=UTF-8\r\n"
-  "Access-Control-Allow-Origin: %s\r\n"
-  "Access-Control-Allow-Credentials: true\r\n"
-  "Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept, documentReferer\r\n"
   "Connection: keep-alive\r\n"
   "Content-Length: 0\r\n"
+  "%s" /* optional CORS */
   "\r\n";
 
   // HTTP 204 No Content for Google generate_204 URLs
@@ -43,7 +45,7 @@
   "\r\n";
   // split here because we care about the length of what follows
   static const char httpstats3[] =
-  "<!DOCTYPE html><html><head><title>pixelserv statistics</title><style>body {font-family:monospace;} table {min-width: 75%; border-collapse: collapse;} th { height:18px; } td {border: 1px solid #e0e0e0; background-color: #f9f9f9;} td:first-child {width: 7%;} td:nth-child(2) {width: 15%; background-color: #ebebeb; border: 1px solid #f9f9f9;}</style></head><body>";
+  "<!DOCTYPE html><html><head><link rel='icon' href='/favicon.ico' type='image/x-icon'/><meta name='viewport' content='width=device-width'><title>pixelserv statistics</title><style>body {font-family:monospace;} table {min-width: 75%; border-collapse: collapse;} th { height:18px; } td {border: 1px solid #e0e0e0; background-color: #f9f9f9;} td:first-child {width: 7%;} td:nth-child(2) {width: 15%; background-color: #ebebeb; border: 1px solid #f9f9f9;}</style></head><body>";
   // stats text goes between these two strings
   static const char httpstats4[] =
   "</body></html>\r\n";
@@ -69,11 +71,10 @@
   "HTTP/1.1 307 Temporary Redirect\r\n"
   "Location: %s\r\n"
   "Content-type: text/plain\r\n"
-  "Access-Control-Allow-Origin: %s\r\n"
-  "Access-Control-Allow-Credentials: true\r\n"
-  "Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept, documentReferer\r\n"
   "Content-length: 0\r\n"
-  "Connection: keep-alive\r\n\r\n";
+  "Connection: keep-alive\r\n"
+  "%s" /* optional CORS */
+  "\r\n";
 
   static const char httpnullpixel[] =
   "HTTP/1.1 200 OK\r\n"
@@ -231,10 +232,6 @@
   "Content-type: text/html\r\n"
   "Content-length: 11\r\n"
   "Allow: GET,OPTIONS\r\n"
-  "Access-Control-Allow-Origin: %s\r\n"
-  "Access-Control-Allow-Credentials: true\r\n"
-  "Access-Control-Allow-Headers: Access-Control-Allow-Origin,cache-control,mola-method\r\n"
-  "Access-Control-Allow-Methods: GET,HEAD,POST\r\n"
   "Connection: keep-alive\r\n"
   "\r\n"
   "GET,OPTIONS";
@@ -255,6 +252,57 @@
   "\r\n"
   "404 - Not Found";
 
+  static const char favicon_ico[] =
+  "HTTP/1.1 200 OK\r\n"
+  "Content-type: image/x-icon\r\n"
+  "Content-length: 598\r\n"
+  "Connection: keep-alive\r\n"
+  "\r\n"
+  "\x00\x00" // reserved 0
+  "\x01\x00" // ico
+  "\x01\x00" // 1 image
+  "\x10\x10\x00" // 16 x 16 x >8bpp colour
+  "\x00" // reserved 0
+  "\x01\x00" // 1 colour plane
+  "\x20\x00" // 32 bits per pixel
+  "\x40\x02\x00\x00" // size 576 bytes
+  "\x16\x00\x00\x00" // start of image 22 bytes in
+  "\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52"
+  "\x00\x00\x00\x10\x00\x00\x00\x10\x08\x06\x00\x00\x00\x1f\xf3\xff"
+  "\x61\x00\x00\x00\x06\x62\x4b\x47\x44\x00\xff\x00\xff\x00\xff\xa0"
+  "\xbd\xa7\x93\x00\x00\x01\xf5\x49\x44\x41\x54\x38\xcb\x95\x91\x4b"
+  "\x6b\x13\x51\x18\x86\x9f\x33\x33\x49\x26\x17\xab\x81\x6a\x89\x69"
+  "\x24\x44\xac\x48\x2b\x54\x2a\x12\xd1\x08\x25\xb8\xd1\xae\xf4\x3f"
+  "\x8a\x60\x41\x2b\x55\x90\xaa\x50\x5d\xc4\x45\x29\xb6\xa6\x41\x6d"
+  "\x6a\x8b\x6d\xed\x18\x72\x31\x97\x69\x3a\xc9\xcc\x1c\x17\x2d\x85"
+  "\x49\xc6\x85\x67\xf3\xc1\xe1\x7d\x9f\xf7\xbb\x88\xcd\xed\x9a\x7c"
+  "\xff\x71\x0b\xf3\xb0\xc7\xff\xbc\x48\x38\x48\x3e\x97\x41\x7b\xb5"
+  "\xf4\x8d\xc2\xca\xcf\x21\x81\x94\x00\x12\x10\xa7\x55\x08\xaf\xa6"
+  "\xd7\xb3\xd1\x3a\xe6\x70\xb2\xaa\x2a\x8c\x27\x46\x48\xa7\xce\x11"
+  "\x8d\x04\xd9\x37\x5a\x6c\xed\xd4\x19\xd4\x9a\xdd\x3e\xda\x20\x55"
+  "\x55\x15\x6e\xcf\xa4\x98\xbb\x7f\x95\x78\x3c\x8c\x6d\xbb\x28\x8a"
+  "\xe0\x73\xf1\x80\xf9\xc5\x0d\xaa\x35\x13\x71\x62\x12\x80\x36\xd8"
+  "\x76\xe6\x52\x9c\x47\x73\x93\xd4\x6a\x26\x4f\x9e\xaf\x63\x59\x36"
+  "\xd9\x99\x14\xb9\x6c\x9a\x46\xf3\x88\x67\x2f\x8b\xc8\xe3\xf9\x60"
+  "\x10\xa0\x28\x30\x75\x6d\x0c\x3d\xa4\xb2\xf0\xe6\x2b\x6b\x25\x03"
+  "\x80\x4a\xd5\x64\xec\x7c\x8c\x99\xeb\x17\x59\x5a\x2e\x53\x6f\x1c"
+  "\x9e\x76\xa1\x78\x01\x0a\xb1\x48\x10\xcb\x72\xf8\xd3\xec\x22\x00"
+  "\x55\x11\xb4\x4d\x8b\x56\xc7\x42\x55\x05\x7a\xc8\x93\xe9\x05\x38"
+  "\x8e\x4b\xa5\x66\x12\x0a\xa9\x5c\xc9\x8c\x22\x04\xb8\xae\x24\x99"
+  "\x18\x21\x9d\x8a\x63\x54\x3a\xb4\x3a\xd6\xc9\xf4\x3e\x23\x48\x29"
+  "\x59\x2f\x19\xcc\xde\xc9\x70\x73\x3a\x49\x79\xa7\xc6\x44\x66\x94"
+  "\x7c\xee\x32\x91\x70\x80\xe5\xc2\x36\xa6\xd9\xf3\x9c\xd3\x03\x10"
+  "\x42\x60\x54\xda\xac\xae\xef\x73\x2f\x9b\xe6\xf1\xc3\x49\x52\xc9"
+  "\xb3\x1c\xfc\x6e\x33\xbf\x58\x64\x6d\xc3\x18\x3a\xb9\x36\xf8\xe1"
+  "\x38\x92\x4f\xab\x7b\xdc\xba\x31\xce\x99\x58\x88\xa7\x2f\xbe\xb0"
+  "\xf9\xa3\x4a\xb3\x65\x79\xb6\xef\xbb\x83\xe3\x45\x0a\xf6\x7e\x35"
+  "\x59\x2b\x19\x5c\x18\x8d\x22\x5d\x49\xbd\xd1\xf5\x35\xfb\x02\x00"
+  "\x6c\xdb\xa5\xb0\xb2\x8b\xe3\x48\xa6\xa7\x12\xe8\xba\x86\xbf\x1d"
+  "\x34\x3f\xb0\xa2\x08\x76\x76\x1b\xbc\x7e\xf7\x1d\xcb\xea\xe3\xba"
+  "\x12\xe1\x63\x96\x80\x16\x8b\x06\x7d\xc9\xb6\xed\xf2\xf6\x43\x19"
+  "\xd7\xfd\x57\x36\x44\xf4\x00\xda\x83\xfc\x04\x7a\x48\xa3\x7b\xd4"
+  "\xf7\x8f\x10\xfe\xe6\xb0\x1e\x60\xf6\x6e\x86\xbf\x92\xfc\xd0\x99"
+  "\x74\x8d\x76\xe7\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
 
 // private functions for socket_handler() use
 #ifdef HEX_DUMP
@@ -467,6 +515,7 @@ static int read_socket(int fd, char **msg, SSL *ssl, char *early_data)
     log_msg(LGG_ERR, "Out of memory. Cannot malloc receiver buffer.");
     return -1;
   }
+
   int i, rv, msg_len = 0;
   char *bufptr = *msg;
   for (i=1; i<=MAX_CHAR_BUF_LOTS;) { /* 128K max with CHAR_BUF_SIZE == 4K */
@@ -524,8 +573,15 @@ static int write_socket(int fd, const char *msg, int msg_len, SSL *ssl, char **e
     if (*early_data) {
       log_msg(LGG_DEBUG, "%s: early data\n", __FUNCTION__);
       SSL_write_early_data(ssl, msg, msg_len, (size_t*)&rv);
-      SSL_accept(ssl); /* finish the handskae. assume it'll simply succeed */
-      *early_data = NULL; /* job done. reset to NULL. memory freed when 'buf' in conn_hanlder freed */
+
+      /* finish the handshake. assume it'll simply succeed */
+      SSL_accept(ssl);
+
+      /* job done. reset to NULL.
+         memory freed when 'buf' in conn_hanlder freed */
+
+      *early_data = NULL;
+
     } else
 #endif
       rv = ssl_write(ssl, msg, msg_len);
@@ -559,8 +615,8 @@ void get_client_ip(int socket_fd, char *ip, int ip_len, char *port, int port_len
   if (ip == NULL || ip_len <= 0 || (socket_fd < 0 && (ip[0] = '\0') == '\0'))
     return;
 
-  getpeername(socket_fd, (struct sockaddr*)&sin_addr, &sin_addr_len);
-  if(getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len,
+  if (!getpeername(socket_fd, (struct sockaddr*)&sin_addr, &sin_addr_len) &&
+      getnameinfo((struct sockaddr *)&sin_addr, sin_addr_len,
                ip, ip_len, port, port_len, NI_NUMERICHOST | NI_NUMERICSERV ) != 0) {
     ip[0] = '\0';
     log_msg(LOG_ERR, "getnameinfo failed to get client_ip");
@@ -627,13 +683,41 @@ void* conn_handler( void *ptr )
 
   // the socket is connected, but we need to perform a check for incoming data
   // since we're using blocking checks, we first want to set a timeout
-  if (setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval)) < 0) {
+  if (setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(struct timeval)) < 0)
     log_msg(LGG_DEBUG, "setsockopt(timeout) reported error: %m");
-  }
+
+  pipedata.ssl_ver = (CONN_TLSTOR(ptr, ssl)) ? SSL_version(CONN_TLSTOR(ptr, ssl)) : 0;
   pipedata.run_time = CONN_TLSTOR(ptr, init_time);
 
   /* main event loop */
   while(1) {
+
+    /* wait for requests if no early data on initial connection */
+    if (!CONN_TLSTOR(ptr, early_data)) {
+
+      struct pollfd pfd = { new_fd, POLLIN, POLLIN };
+      int selrv = poll(&pfd, 1, 1000 * GLOBAL(g, http_keepalive));
+      TESTPRINT("socket:%d selrv:%d errno:%d\n", new_fd, selrv, errno);
+
+      /* selrv -1: error; selrv 0: no data before timed out;
+         selrv > 0 and peek_socket <= 0: client disconnects */
+
+      int peekrv = peek_socket(new_fd, CONN_TLSTOR(ptr, ssl));
+      if (total_bytes == 0 && peekrv <= 0) {
+
+        /* no data in the whole session. counted as one 'cls'
+           run_time is ignorable */
+        if (CONN_TLSTOR(ptr, ssl))
+          pipedata.ssl = SSL_HIT_CLS;
+        pipedata.status = FAIL_CLOSED;
+        pipedata.rx_total = 0;
+        write_pipe(pipefd, &pipedata);
+        num_req++;
+        break; /* done with this thread */
+      }
+      if (selrv <= 0 || peekrv <=0 )
+        break; /* done with this thread */
+    }
 
     get_time(&start_time);
 
@@ -655,15 +739,11 @@ void* conn_handler( void *ptr )
         log_msg(LGG_DEBUG, "recv() error: %m");
         pipedata.status = FAIL_GENERAL;
       }
-      if (rv == 0 && CONN_TLSTOR(ptr, ssl))
-        pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
     } else {                    // got some data
       if (CONN_TLSTOR(ptr, ssl)) {
-        pipedata.ssl = SSL_HIT;
-        pipedata.ssl_ver = SSL_version(CONN_TLSTOR(ptr, ssl));
+        pipedata.ssl = CONN_TLSTOR(ptr, early_data) ? SSL_HIT_RTT0 : SSL_HIT;
       } else {
         pipedata.ssl = SSL_NOT_TLS;
-        pipedata.ssl_ver = 0;
       }
 
       TIME_CHECK("initial recv()");
@@ -697,11 +777,12 @@ void* conn_handler( void *ptr )
           }
         }
       }
+
       /* CORS */
       char *orig_hdr;
       orig_hdr = strstr_first(bufptr, "Origin: ");
       if (orig_hdr) {
-        cors_origin = malloc(CORS_ORIGIN_LEN_MAX);
+        cors_origin = realloc(cors_origin, CORS_ORIGIN_LEN_MAX);
         strncpy(cors_origin, orig_hdr + 8, CORS_ORIGIN_LEN_MAX);
         strtok(cors_origin, "\r\n");
         if (strncmp(cors_origin, "null", 4) == 0) { /* some web developers are just ... */
@@ -710,7 +791,8 @@ void* conn_handler( void *ptr )
         }
       }
 
-      char *method = strtok(req, " ");
+      char *reqptr;
+      char *method = req ? strtok_r(req, " ", &reqptr) : NULL;
 
       if (method == NULL) {
         log_msg(LGG_DEBUG, "client did not specify method");
@@ -718,17 +800,14 @@ void* conn_handler( void *ptr )
         TESTPRINT("method: '%s'\n", method);
         if (!strcmp(method, "OPTIONS")) {
           pipedata.status = SEND_OPTIONS;
-          rsize = asprintf(&aspbuf, httpoptions, cors_origin);
+          rsize = asprintf(&aspbuf, httpoptions);
           response = aspbuf;
         } else if (!strcmp(method, "POST")) {
           int recv_len = 0;
           int length = 0;
           int post_buf_size = 0;
-          int wait_cnt = 0;
+          int wait_cnt = MAX_HTTP_POST_RETRY;
           char *h = strstr_first(bufptr, "Content-Length:");
-
-          wait_cnt = MAX_HTTP_POST_WAIT / GLOBAL(g, select_timeout);
-          if (wait_cnt < 1) wait_cnt = 1;
 
           if (!h)
             goto end_post;
@@ -755,8 +834,12 @@ void* conn_handler( void *ptr )
             }
             log_msg(LGG_DEBUG, "POST socket: %d expect length: %d", new_fd, length);
 
+            pipedata.run_time += elapsed_time_msec(start_time);
+
             /* caputre POST content */
             for (; length > 0 && wait_cnt > 0;) {
+              get_time(&start_time);
+
               if (CONN_TLSTOR(ptr, ssl))
                 rv = ssl_read(CONN_TLSTOR(ptr, ssl), post_buf + recv_len, post_buf_size);
               else
@@ -781,6 +864,8 @@ void* conn_handler( void *ptr )
                     post_buf_size = length;
                   }
                 }
+                pipedata.run_time += elapsed_time_msec(start_time);
+                wait_cnt = MAX_HTTP_POST_RETRY; /* reset timeout */
               } else
                 --wait_cnt;
             }
@@ -790,8 +875,13 @@ void* conn_handler( void *ptr )
             /* body points to "\r\n\r\n" */
             if (body && body_len > 4)
               length -= body_len - 4;
+
+            pipedata.run_time += elapsed_time_msec(start_time);
+
             /* caputre POST content */
             for (; length > 0 && wait_cnt > 0;) {
+              get_time(&start_time);
+
               if (CONN_TLSTOR(ptr, ssl))
                 rv = ssl_read(CONN_TLSTOR(ptr, ssl), post_buf, CHAR_BUF_SIZE);
               else
@@ -800,12 +890,16 @@ void* conn_handler( void *ptr )
               if (rv > 0) {
                 pipedata.rx_total += rv;
                 length -= rv;
+                pipedata.run_time += elapsed_time_msec(start_time);
+                wait_cnt = MAX_HTTP_POST_RETRY; /* reset timeout */
               } else
                 --wait_cnt;
             }
             /* drained data */
             recv_len = 0;
           }
+          get_time(&start_time);
+
 end_post:
           post_buf_len = recv_len;
           pipedata.status = SEND_POST;
@@ -814,11 +908,15 @@ end_post:
           // send default from here, no matter what happens
           pipedata.status = DEFAULT_REPLY;
           // trim up to non path chars
-          char *path = strtok(NULL, " ");//, " ?#;=");     // "?;#:*<>[]='\"\\,|!~()"
+          char *path = strtok_r(NULL, " ", &reqptr);
           if (path == NULL) {
             pipedata.status = SEND_NO_URL;
             log_msg(LGG_DEBUG, "client did not specify URL for GET request");
-          } else if (!strncmp(path, "/log=", strlen("/log=")) && CONN_TLSTOR(ptr, allow_admin)) {
+          } else if (!strncmp(path, "/favicon.ico", 12)) {
+            pipedata.status = SEND_ICO;
+            response = favicon_ico;
+            rsize = sizeof favicon_ico - 1;
+          } else if (!strncmp(path, "/log=", 5) && CONN_TLSTOR(ptr, allow_admin)) {
             int v = atoi(path + strlen("/log="));
             if (v > LGG_DEBUG || v < 0)
               pipedata.status = SEND_BAD;
@@ -826,7 +924,7 @@ end_post:
               pipedata.status = ACTION_LOG_VERB;
               pipedata.verb = v;
             }
-          } else if (!strncmp(path, "/ca.crt", strlen("/ca.crt"))) {
+          } else if (!strncmp(path, "/ca.crt", 7)) {
             FILE *fp;
             char *ca_file = NULL;
             response = httpfilenotfound;
@@ -881,10 +979,17 @@ end_post:
             free(version_string);
             free(stat_string);
             response = aspbuf;
-          } else if (do_204 && !strcasecmp(path, "/generate_204")) {
+          } else if (do_204 && (!strcasecmp(path, "/generate_204") || !strcasecmp(path, "/gen_204"))) {
             pipedata.status = SEND_204;
             response = http204;
             rsize = sizeof http204 - 1;
+          } else if (!strncasecmp(path, "/pagead/imgad?", 14) ||
+                     !strncasecmp(path, "/pagead/conversion/", 19 ) ||
+                     !strncasecmp(path, "/pcs/view?xai=AKAOj", 19 ) ||
+                     !strncasecmp(path, "/daca_images/simgad/", 20)) {
+            pipedata.status = SEND_GIF;
+            response = httpnullpixel;
+            rsize = sizeof httpnullpixel - 1;
           } else {
             // pick out encoded urls (usually advert redirects)
             if (do_redirect && strcasestr(path, "=http")) {
@@ -913,11 +1018,18 @@ end_post:
               }
             }
             if (do_redirect && url) {
+              if (!cors_origin) {
+                rsize = asprintf(&aspbuf, httpredirect, url, "");
+              } else {
+                char *tmpcors = NULL;
+                asprintf(&tmpcors, httpcors_headers, cors_origin);
+                rsize = asprintf(&aspbuf, httpredirect, url, tmpcors);
+                free(tmpcors);
+              }
               pipedata.status = SEND_REDIRECT;
-              rsize = asprintf(&aspbuf, httpredirect, url, cors_origin ? cors_origin : "*");
               response = aspbuf;
-              TESTPRINT("Sending redirect: %s\n", url);
               url = NULL;
+              TESTPRINT("Sending redirect: %s\n", url);
             } else {
               char *file = strrchr(strtok(path, "?#;="), '/');
               if (file == NULL) {
@@ -979,14 +1091,22 @@ end_post:
             log_msg(LGG_DEBUG, "Sending HTTP 501 response for unknown HTTP method: %s", method);
             pipedata.status = SEND_BAD;
           }
-          TESTPRINT("Sending 501 response\n");
           response = http501;
           rsize = sizeof http501 - 1;
         }
       }
+      TESTPRINT("%s: req type %d\n", __FUNCTION__, pipedata.status);
+
       /* cors */
       if (response == httpnulltext) {
-        rsize = asprintf(&aspbuf, httpnulltext, cors_origin ? cors_origin : "*");
+        if (!cors_origin) {
+          rsize = asprintf(&aspbuf, httpnulltext, "");
+        } else {
+          char *tmpcors = NULL;
+          asprintf(&tmpcors, httpcors_headers, cors_origin);
+          rsize = asprintf(&aspbuf, httpnulltext, tmpcors);
+          free(tmpcors);
+        }
         response = aspbuf;
       }
     }
@@ -1015,16 +1135,15 @@ end_post:
       } else if (rv != rsize) {
         log_msg(LGG_ERR, "send() reported only %d of %d bytes sent; status=%d", rv, rsize, pipedata.status);
       }
+
       if (log_verbose >= LGG_INFO) {
         char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
         get_client_ip(new_fd, client_ip, sizeof client_ip, NULL, 0);
-        log_xcs(LGG_INFO, client_ip, host, (CONN_TLSTOR(ptr, ssl) != NULL), req_url, post_buf, post_buf_len);
+        log_xcs(LGG_INFO, client_ip, host, pipedata.ssl_ver, req_url, post_buf, post_buf_len);
       }
       // free memory allocated by asprintf() if any
       free(aspbuf);
       aspbuf = NULL;
-      free(cors_origin);
-      cors_origin = NULL;
     }
 
     /*** NOTE: pipedata.status should not be altered after this point ***/
@@ -1041,34 +1160,8 @@ end_post:
 
     TIME_CHECK("pipe write()");
 
-    /* wait for next request */
-
     if (pipedata.status == FAIL_CLOSED)
       break; /* goto done_with_this_thread */
-
-    struct pollfd pfd = { new_fd, POLLIN, POLLIN };
-    int selrv = poll(&pfd, 1, 1000 * GLOBAL(g, http_keepalive));
-    TESTPRINT("socket:%d selrv:%d errno:%d\n", new_fd, selrv, errno);
-
-    /* selrv -1: error; selrv 0: no data before timed out;
-       selrv > 0 and peek_socket <= 0: client disconnects */
-
-    if (selrv <= 0 || peek_socket(new_fd, CONN_TLSTOR(ptr, ssl)) <= 0) {
-      /* no data in the top and first read_socket(). counted as one 'tmo'
-         no data in the whole session. further counted as one 'cls'
-         run_time is ignorable */
-      if (total_bytes == 0) {
-        if (CONN_TLSTOR(ptr, ssl)) {
-          pipedata.ssl = SSL_HIT_CLS; /* ssl client disconnects without sending any data */
-          pipedata.ssl_ver = SSL_version(CONN_TLSTOR(ptr, ssl));
-        }
-        pipedata.status = FAIL_CLOSED;
-        pipedata.rx_total = 0;
-        write_pipe(pipefd, &pipedata);
-        num_req++;
-      }
-      break; /* done with this thread */
-    }
 
   } /* end of main event loop */
 
@@ -1095,10 +1188,11 @@ end_post:
   pipedata.krq = num_req;
   rv = write(pipefd, &pipedata, sizeof(pipedata));
 
-  free(buf);
+  free(cors_origin);
   free(req_url);
   free(post_buf);
   free(aspbuf);
+  free(buf);
   conn_stor_relinq(ptr);
   return NULL;
 }

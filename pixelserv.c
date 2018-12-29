@@ -78,8 +78,9 @@ void signal_handler(int sig)
     log_msg(LGG_CRIT, "%s", stats_string);
     free(stats_string);
 
+    sslctx_tbl_save(tls_pem);
+
     if (sig == SIGTERM) {
-      sslctx_tbl_save(tls_pem);
       log_msg(LGG_NOTICE, "exit on SIGTERM");
       exit(EXIT_SUCCESS);
     }
@@ -128,7 +129,7 @@ int main (int argc, char* argv[])
 #ifndef TEST
   int do_foreground = 0;
 #endif // !TEST
-  int do_redirect = 1;
+  int do_redirect = 0;
   int do_benchmark = 0;
   char *bm_cert = NULL;
 #ifdef DEBUG
@@ -166,7 +167,7 @@ int main (int argc, char* argv[])
         case 'f': do_foreground = 1;                          continue;
 #endif // !TEST
         case 'r': /* deprecated - ignoring */                 continue;
-        case 'R': do_redirect = 0;                            continue;
+        case 'R': do_redirect = 1;                            continue;
         // no default here because we want to move on to the next section
         case 'l':
           if ((i + 1) == argc || argv[i + 1][0] == '-') {
@@ -207,11 +208,7 @@ int main (int argc, char* argv[])
           continue;
 #endif
           case 'o':
-            errno = 0;
-            select_timeout = strtol(argv[i], NULL, 10);
-            if (errno || select_timeout <= 0) {
-              error = 1;
-            }
+            log_msg(LGG_ERR, "'-o SELECT_TIMEOUT' is deprecated. will be removed in a future version");
           continue;
           case 'O':
             errno = 0;
@@ -295,12 +292,12 @@ int main (int argc, char* argv[])
 #ifdef IF_MODE
            "\t" "-n  IFACE\t\t(default: all interfaces)" "\n"
 #endif // IF_MODE
-           "\t" "-o  SELECT_TIMEOUT\t(default: %ds)" "\n"
+           "\t" "-o  SELECT_TIMEOUT\t(deprecated; will be removed in a future version)" "\n"
            "\t" "-O  KEEPALIVE_TIME\t(for HTTP/1.1 connections; default: %ds)" "\n"
            "\t" "-p  HTTP_PORT\t\t(default: "
            DEFAULT_PORT
            ")" "\n"
-           "\t" "-R\t\t\t(disable redirect to encoded path in tracker links)" "\n"
+           "\t" "-R\t\t\t(enable redirect to encoded path in URLs)" "\n"
            "\t" "-s  STATS_HTML_URL\t(default: "
            DEFAULT_STATS_URL
            ")" "\n"
@@ -317,7 +314,7 @@ int main (int argc, char* argv[])
            "\t" "-z  CERT_PATH\t\t(default: "
            DEFAULT_PEM_PATH
            ")" "\n"
-           , VERSION, DEFAULT_CERT_CACHE_SIZE, DEFAULT_TIMEOUT, DEFAULT_KEEPALIVE,
+           , VERSION, DEFAULT_CERT_CACHE_SIZE, DEFAULT_KEEPALIVE,
            DEFAULT_THREAD_MAX);
     exit(EXIT_FAILURE);
   }
@@ -329,7 +326,12 @@ int main (int argc, char* argv[])
   }
 #endif
 
-  openlog("pixelserv-tls", LOG_PID, LOG_DAEMON);
+  openlog("pixelserv-tls",
+#ifdef DEBUG
+    LOG_PERROR |
+#endif
+    LOG_PID, LOG_DAEMON);
+
   version_string = get_version(argc, argv);
   if (version_string) {
       if (!do_benchmark) log_msg(LGG_CRIT, "%s", version_string);
@@ -616,11 +618,14 @@ int main (int argc, char* argv[])
             log_msg(LOG_DEBUG, "conn_handler reported unknown response value: %d", pipedata.status);
         }
         switch (pipedata.ssl) {
+          case SSL_HIT_RTT0:   ++zrt; /* fall through */
           case SSL_HIT:        ++slh; break;
           case SSL_HIT_CLS:    ++slc; break;
           default:             ;
         }
-        if (pipedata.ssl == SSL_HIT || pipedata.ssl == SSL_HIT_CLS) {
+        if (pipedata.ssl == SSL_HIT ||
+            pipedata.ssl == SSL_HIT_RTT0 ||
+            pipedata.ssl == SSL_HIT_CLS) {
           switch (pipedata.ssl_ver) {
 #ifdef TLS1_3_VERSION
             case TLS1_3_VERSION: ++v13; break;
@@ -704,18 +709,18 @@ int main (int argc, char* argv[])
       continue;
     }
 
-    /* Set socket to blocking explicitly.
-       On Linux, file descriptor attributes are not inherited from parent.
+    /* Set fd to blocking explicitly.
+       On Linux, fd attributes are not inherited from parent.
        On macOS, the attributes are inherited from parent. */
     int flags;
     if ((flags = fcntl(new_fd, F_GETFL, 0)) < 0 || fcntl(new_fd, F_SETFL, flags & (~O_NONBLOCK)) < 0)
         log_msg(LGG_WARNING, "%s fail to set new_fd to blocking", __FUNCTION__);
 
     /* Set socket to TCP_NODELAY explicitly.
-       On Linux, socket options are not inherited from parent.
+       On Linux, socket options are inherited from parent.
        On macOS, the attributes are not inherited from parent. */
     if (setsockopt(new_fd, IPPROTO_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int)) ||
-        setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&(struct timeval){ 0, 60000 },
+        setsockopt(new_fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&(struct timeval){ 0, 150000 },
             sizeof(struct timeval)))  {
         log_msg(LGG_WARNING, "%s setsockopt() failed on new_fd", __FUNCTION__);
     }
@@ -726,6 +731,10 @@ int main (int argc, char* argv[])
     char *server_ip = conn_tlstor->tlsext_cb_arg->servername;
     int ssl_port = is_ssl_conn(new_fd, server_ip, INET6_ADDRSTRLEN, tls_ports, num_tls_ports);
     if (ssl_port) {
+      int ssl_attempt = 5;
+      int sslerr = SSL_ERROR_NONE;
+      char ip_buf[NI_MAXHOST], port_buf[NI_MAXSERV];
+
       tlsext_cb_arg_struct *t = conn_tlstor->tlsext_cb_arg;
       SSL *ssl = NULL;
       t->tls_pem = tls_pem;
@@ -735,21 +744,28 @@ int main (int argc, char* argv[])
 
       ssl = SSL_new(sslctx);
       SSL_set_fd(ssl, new_fd);
-      int ssl_attempt = 6;
-      conn_tlstor->init_time = elapsed_time_msec(init_time);
       conn_tlstor->ssl = ssl;
       if (ssl_port == admin_port)
         conn_tlstor->allow_admin = 1;
 
 #ifdef TLS1_3_VERSION
       SSL_CTX_set_client_hello_cb(sslctx, tls_clienthello_cb, t);
-      conn_tlstor->early_data = read_tls_early_data(ssl);
-      if (conn_tlstor->early_data)
+      conn_tlstor->early_data = read_tls_early_data(ssl, &sslerr);
+      if (conn_tlstor->early_data) {
+        conn_tlstor->init_time = elapsed_time_msec(init_time);
         goto start_service_thread;
+      }
+
+      /* handle TLS error if any and skip further TLS handshake */
+      if (sslerr != SSL_ERROR_NONE)
+        goto skip_ssl_accept;
 #else
       SSL_CTX_set_tlsext_servername_arg(sslctx, t);
       conn_tlstor->early_data = NULL;
 #endif
+      conn_tlstor->init_time = elapsed_time_msec(init_time);
+
+      /* proceed or continue with TLS handshake */
 
 redo_ssl_accept:
 
@@ -758,15 +774,20 @@ redo_ssl_accept:
       int sslret = SSL_accept(ssl);
       if (sslret == 1)
         goto start_service_thread;
+      sslerr = SSL_get_error(ssl, sslret);
 
-      char ip_buf[NI_MAXHOST], port_buf[NI_MAXSERV];
-      int sslerr = SSL_get_error(ssl, sslret);
+#ifdef TLS1_3_VERSION
+
+skip_ssl_accept:
+
+#endif
       if (log_get_verb() >= LGG_WARNING && getnameinfo((struct sockaddr *)&their_addr, sin_size,
             ip_buf, sizeof ip_buf, port_buf, sizeof port_buf, NI_NUMERICHOST | NI_NUMERICSERV ) != 0) {
         ip_buf[0] = '\0';
         port_buf[0] = '\0';
         log_msg(LOG_ERR, "failed to get client_ip: %s", strerror(errno));
       }
+
       switch(sslerr) {
         case SSL_ERROR_WANT_READ:
           ssl_attempt--;

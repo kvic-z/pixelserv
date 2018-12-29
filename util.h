@@ -23,18 +23,18 @@
 #include <openssl/ssl.h>
 
 // preprocessor defines
-#define VERSION "2.2.0"
+#define VERSION "2.2.1"
 
 #define BACKLOG SOMAXCONN       // how many pending connections queue will hold
 #define DEFAULT_IP "*"          // default IP address ALL - use this in messages only
 #define DEFAULT_PORT "80"       // the default port users will be connecting to
-#define DEFAULT_TIMEOUT 10      // default timeout for select() calls, in seconds
-#define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 30)
+#define DEFAULT_TIMEOUT 1       // default timeout for select() calls, in seconds
+#define DEFAULT_KEEPALIVE (DEFAULT_TIMEOUT * 120)
                                 // default keep-alive duration for HTTP/1.1 connections, in seconds
                                 // it's the time a connection will stay active
                                 // until another request comes and refreshes the timer
 #define DEFAULT_THREAD_MAX 1200 // maximum number of concurrent service threads
-#define DEFAULT_CERT_CACHE_SIZE 50
+#define DEFAULT_CERT_CACHE_SIZE 500
                                 // default number of certificates to be cached in memory
 #define SECOND_PORT "443"
 #define MAX_PORTS 10
@@ -126,6 +126,7 @@ extern volatile sig_atomic_t clt;
 extern volatile sig_atomic_t v13;
 extern volatile sig_atomic_t v12;
 extern volatile sig_atomic_t v10;
+extern volatile sig_atomic_t zrt;
 
 struct Global {
     int argc;

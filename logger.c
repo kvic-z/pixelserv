@@ -1,6 +1,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <syslog.h>
+#include <openssl/ssl.h>
 #include "logger.h"
 
 #ifndef DEBUG
@@ -39,11 +40,23 @@ void log_msg(int verb, char *fmt, ...)
 
 void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *body, int body_len)
 {
-    if (verb > _verb)
+    if (verb > _verb || !client_ip || !host || !req)
       return;
 
+    const char* tls_ver;
+    switch (tls) {
+#ifdef TLS1_3_VERSION
+        case TLS1_3_VERSION: tls_ver = "1.3"; break;
+#endif
+        case TLS1_2_VERSION: tls_ver = "1.2"; break;
+        case TLS1_VERSION:   tls_ver = "1.0"; break;
+        case 0:
+        default:
+            tls_ver = "none";
+    }
+
     if (strlen(req) < MAX_LOG_CHUNK_SIZE)
-        syslog(LOG_CRIT + verb, "%s %s %s%s", client_ip, host, req, tls ? " secure" : "");
+        syslog(LOG_CRIT + verb, "%s %s %s tls_%s", client_ip, host, req, tls_ver);
     else {
         int num_chunks = strlen(req) / MAX_LOG_CHUNK_SIZE + 1;
         char store = req[MAX_LOG_CHUNK_SIZE];
@@ -59,7 +72,7 @@ void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *bo
               syslog(LOG_CRIT + verb, "%s", req + MAX_LOG_CHUNK_SIZE * chunk);
               req[MAX_LOG_CHUNK_SIZE * (chunk + 1)] = store;
           }
-        syslog(LOG_CRIT + verb, "%s%s", req + MAX_LOG_CHUNK_SIZE * chunk, tls ? " secure" : "");
+        syslog(LOG_CRIT + verb, "%s tls_%s", req + MAX_LOG_CHUNK_SIZE * chunk, tls_ver);
     }
 
     if (body_len > 0 && body) {
