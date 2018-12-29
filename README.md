@@ -58,6 +58,12 @@ curl -O https://raw.githubusercontent.com/kvic-z/goodies-edgemax/master/pixelser
 dpkg -i pixelserv-tls_2.0.1-1_mipsel.deb
 ````
 
+## Install on Homebrew (macOS) and Linuxbrew
+
+```
+brew install https://kazoo.ga/pixelserv-tls/pixelserv-tls.rb
+```
+
 ## Launch pixelserv-tls
 ````
 pixelserv-tls <listening ip>
