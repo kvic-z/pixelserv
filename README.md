@@ -64,6 +64,10 @@ dpkg -i pixelserv-tls_2.0.1-1_mipsel.deb
 brew install https://kazoo.ga/pixelserv-tls/pixelserv-tls.rb
 ```
 
+## Docker container
+
+See https://hub.docker.com/r/imthai/pixelserv-tls
+
 ## Launch pixelserv-tls
 ````
 pixelserv-tls <listening ip>
