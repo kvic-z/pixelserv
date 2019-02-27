@@ -659,6 +659,8 @@ void* conn_handler( void *ptr )
   unsigned int total_bytes = 0; /* number of bytes received by this thread */
   #define CORS_ORIGIN_LEN_MAX 256
   char *cors_origin = NULL;
+  char client_ip[INET6_ADDRSTRLEN]= {'\0'}; //yipst
+  char *method = NULL;
 
 #ifdef DEBUG
   int do_warning = (warning_time > 0);
@@ -688,6 +690,7 @@ void* conn_handler( void *ptr )
 
   pipedata.ssl_ver = (CONN_TLSTOR(ptr, ssl)) ? SSL_version(CONN_TLSTOR(ptr, ssl)) : 0;
   pipedata.run_time = CONN_TLSTOR(ptr, init_time);
+  get_client_ip(new_fd, client_ip, sizeof client_ip, NULL, 0);
 
   /* main event loop */
   while(1) {
@@ -792,7 +795,7 @@ void* conn_handler( void *ptr )
       }
 
       char *reqptr;
-      char *method = req ? strtok_r(req, " ", &reqptr) : NULL;
+      method = req ? strtok_r(req, " ", &reqptr) : NULL;
 
       if (method == NULL) {
         log_msg(LGG_DEBUG, "client did not specify method");
@@ -1121,14 +1124,15 @@ end_post:
     } else if (pipedata.status != FAIL_TIMEOUT && pipedata.status != FAIL_CLOSED) {
 
       // only attempt to send response if we've chosen a valid response type
+      errno = 0;
       rv = write_socket(new_fd, response, rsize, CONN_TLSTOR(ptr, ssl), &CONN_TLSTOR(ptr, early_data));
-      if (rv < 0) { // check for error message, but don't bother checking that all bytes sent
-        if (errno == EPIPE || errno == ECONNRESET) {
-          // client closed socket sometime after initial check
-          log_msg(LGG_DEBUG, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
+      if (rv < 0) {
+        if (errno == ECONNRESET || errno == EPIPE) {
+          if (CONN_TLSTOR(ptr, ssl))
+            strncpy(host, CONN_TLSTOR(ptr, tlsext_cb_arg)->servername, HOST_LEN_MAX);
+          log_msg(LGG_WARNING, "disconnected client: %s method: %s server: %s", client_ip, method, host);
           pipedata.status = FAIL_REPLY;
         } else {
-          // some other error
           log_msg(LGG_ERR, "attempt to send response for status=%d resulted in send() error: %m", pipedata.status);
           pipedata.status = FAIL_GENERAL;
         }
@@ -1137,11 +1141,9 @@ end_post:
       }
 
       if (log_verbose >= LGG_INFO) {
-        char client_ip[INET6_ADDRSTRLEN]= {'\0'};    
-        get_client_ip(new_fd, client_ip, sizeof client_ip, NULL, 0);
         log_xcs(LGG_INFO, client_ip, host, pipedata.ssl_ver, req_url, post_buf, post_buf_len);
       }
-      // free memory allocated by asprintf() if any
+
       free(aspbuf);
       aspbuf = NULL;
     }

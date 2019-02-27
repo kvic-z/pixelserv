@@ -7,7 +7,7 @@ SRCS      := util.c socket_handler.c pixelserv.c certs.c logger.c
 
 ROOT      := .
 CFLAGS    := -I$(ROOT)/openssl/include
-LDFLAGS    = -L$(ROOT)/openssl/$(ARCH) -L$(ROOT)/openssl/$(ARCH)
+LDFLAGS    = -L$(ROOT)/openssl/$(ARCH)
 SHAREDLIB := -lssl -lcrypto -lpthread
 STATICLIB  = $(ROOT)/openssl/$(ARCH)/libssl.a $(ROOT)/openssl/$(ARCH)/libcrypto.a
 
@@ -188,8 +188,8 @@ arm.ent: printver dist
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
 	$(ARMentPATH) $(ARMentCC) -isystem$(ARM_entdir)/include -I../openssl/openssl-1.1.1/include $(CFLAGS_P) \
 		-o dist/$(DISTNAME).$@.performance.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
-	$(ARMentPATH) $(ARMentCC) -isystem$(ARM_entdir)/include -I../openssl/openssl-1.1.1/include $(CFLAGS_D) \
-		-o dist/$(DISTNAME).$@.debug.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
+#	$(ARMentPATH) $(ARMentCC) -isystem$(ARM_entdir)/include -I../openssl/openssl-1.1.1/include $(CFLAGS_D) \
+#		-o dist/$(DISTNAME).$@.debug.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-ng.armv7softfloat.zip $(PFILES)
 
@@ -199,7 +199,7 @@ armv8.ent: ARCH = armv8.ent
 armv8.ent: export STAGING_DIR = $(ARMV8_entdir)
 armv8.ent: printver dist
 	@echo "=== Building aarch64 (Entware) ==="
-	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
+#	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
 	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
 	$(ARMV8PATH) $(ARMV8CC) -isystem$(ARMV8_entdir)/include -I../openssl/openssl-1.1.1/include \
 		-o dist/$(DISTNAME).$@.performance.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
