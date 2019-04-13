@@ -670,8 +670,8 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
     len = strlen(cbarg->tls_pem);
     full_pem_path[PIXELSERV_MAX_PATH] = '\0';
     strncpy(full_pem_path, cbarg->tls_pem, PIXELSERV_MAX_PATH);
-    strncat(full_pem_path, "/", PIXELSERV_MAX_PATH - len);
-    ++len;
+    full_pem_path[len++] = '/';
+    full_pem_path[len] = '\0';
 
     char *srv_name = NULL;
 #ifdef TLS1_3_VERSION
@@ -738,13 +738,14 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
             if ((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
                 log_msg(LGG_ERR, "%s: failed to open pipe: %s", __FUNCTION__, strerror(errno));
             else {
-                /* reuse full_pem_path as scratchpad. use memcpy in place of strcpy.
-                strcpy overlapped buffer is not portable. */
-                memcpy(full_pem_path, pem_file, strlen(pem_file) + 1);
-                strcat(full_pem_path, ":");
+                int i;
+                for(i=0; i< strlen(pem_file); i++)
+                    *(full_pem_path + i) = *(pem_file + i);
+                *(full_pem_path + i) = ':';
+                *(full_pem_path + i + 1) = '\0';
 
                 if (write(fd, full_pem_path, strlen(full_pem_path)) < 0)
-                  log_msg(LGG_ERR, "%s: failed to write pipe: %s", __FUNCTION__, strerror(errno));
+                    log_msg(LGG_ERR, "%s: failed to write pipe: %s", __FUNCTION__, strerror(errno));
                 close(fd);
             }
             rv = CB_ERR;
