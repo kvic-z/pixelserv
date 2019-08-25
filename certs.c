@@ -15,8 +15,8 @@
 #include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
-#include <openssl/crypto.h> 
-#include <openssl/x509v3.h> 
+#include <openssl/crypto.h>
+#include <openssl/x509v3.h>
 
 #include "certs.h"
 #include "logger.h"
@@ -380,7 +380,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     char fname[PIXELSERV_MAX_PATH];
     EVP_PKEY *key = NULL;
     X509 *x509 = NULL;
-    X509_EXTENSION *ext = NULL;
+    X509_EXTENSION *ext = X509V3_EXT_conf_nid(NULL, NULL, NID_ext_key_usage, "TLS Web Server Authentication");
     X509V3_CTX ext_ctx;
 #define SAN_STR_SIZE PIXELSERV_MAX_SERVER_NAME + 4 /* max("IP:", "DNS:") = 4 */
     char san_str[SAN_STR_SIZE];
@@ -397,8 +397,8 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     // -- generate cert
     RSA *rsa = RSA_new();
     BIGNUM *e = BN_new();
-    BN_set_word(e, RSA_F4); 
-    if (RSA_generate_key_ex(rsa, 1024, e, NULL) < 0)
+    BN_set_word(e, RSA_F4);
+    if (RSA_generate_key_ex(rsa, 2048, e, NULL) < 0)
         goto free_all;
 #ifdef DEBUG
     printf("%s: rsa key generated for [%s]\n", __FUNCTION__, pem_fn);
@@ -413,7 +413,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     ASN1_INTEGER_set(X509_get_serialNumber(x509),rand());
     X509_set_version(x509,2); // X509 v3
     X509_gmtime_adj(X509_get_notBefore(x509), 0);
-    X509_gmtime_adj(X509_get_notAfter(x509), 315360000L); // cert valid for 10yrs
+    X509_gmtime_adj(X509_get_notAfter(x509), 63072000L); // cert valid for 10yrs
     X509_set_issuer_name(x509, issuer);
     X509_NAME *name = X509_get_subject_name(x509);
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char *)pem_fn, -1, -1, 0);
@@ -459,9 +459,9 @@ free_all:
 }
 
 
-static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) { 
+static int pem_passwd_cb(char *buf, int size, int rwflag, void *u) {
     int rv = 0, fp;
-    char *fname = NULL; 
+    char *fname = NULL;
     if (asprintf(&fname, "%s/ca.key.passphrase", (char*)u) < 0)
         goto quit_cb;
 
@@ -978,7 +978,7 @@ void run_benchmark(const cert_tlstor_t *ct, const char *cert)
     if (asprintf(&cert_file, "%s/%s", ct->pem_dir, cert) > 0)
       printf("%s\n", cert);
 
-    if (asprintf(&domain, "%s", cert) > 0 && domain[0] == '_') 
+    if (asprintf(&domain, "%s", cert) > 0 && domain[0] == '_')
       domain[0] = '*';
 
     r_tm0 = 0; g_tm0 = 0;
