@@ -380,7 +380,7 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     char fname[PIXELSERV_MAX_PATH];
     EVP_PKEY *key = NULL;
     X509 *x509 = NULL;
-    X509_EXTENSION *ext = X509V3_EXT_conf_nid(NULL, NULL, NID_ext_key_usage, "TLS Web Server Authentication");
+    X509_EXTENSION *ext = NULL;
     X509V3_CTX ext_ctx;
 #define SAN_STR_SIZE PIXELSERV_MAX_SERVER_NAME + 4 /* max("IP:", "DNS:") = 4 */
     char san_str[SAN_STR_SIZE];
@@ -429,6 +429,8 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     snprintf(san_str, SAN_STR_SIZE, "%s:%s", tld_tmp, pem_fn);
     if ((ext = X509V3_EXT_conf_nid(NULL, &ext_ctx, NID_subject_alt_name, san_str)) == NULL)
         goto free_all;
+    X509_add_ext(x509, ext, -1);
+    ext = X509V3_EXT_conf_nid(NULL, NULL, NID_ext_key_usage, "TLS Web Server Authentication");
     X509_add_ext(x509, ext, -1);
     X509_set_pubkey(x509, key);
     X509_sign_ctx(x509, p_ctx);
