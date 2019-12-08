@@ -10,11 +10,10 @@ static logger_level _verb = LGG_ERR;
 static logger_level _verb = LGG_DEBUG;
 #endif
 
-static int ctrl_char(char *buf, int len) {
+static int ctrl_char(char *buf, size_t len) {
     if (strlen(buf) < len)
         return 1;
-    int i;
-    for (i=0; i<(len - 1); i++) {
+    for (size_t i=0; i<(len - 1); i++) {
         if (buf[i] >= 10 && buf[i] <= 13)
             continue;
         if (buf[i] < 32) {
@@ -27,7 +26,7 @@ static int ctrl_char(char *buf, int len) {
 void log_set_verb(logger_level verb) { _verb = verb; }
 logger_level log_get_verb() { return _verb; }
 
-void log_msg(int verb, char *fmt, ...)
+void log_msg(logger_level verb, char *fmt, ...)
 {
     if (verb > _verb)
         return;
@@ -38,7 +37,7 @@ void log_msg(int verb, char *fmt, ...)
     va_end(args);
 }
 
-void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *body, int body_len)
+void log_xcs(logger_level verb, char *client_ip, char *host, int tls, char *req, char *body, size_t body_len)
 {
     if (verb > _verb || !client_ip || !host || !req)
       return;

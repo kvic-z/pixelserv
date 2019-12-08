@@ -266,7 +266,7 @@ static int sslctx_tbl_lookup(char* cert_name, int* found_idx, int* ins_idx)
         *ins_idx = sslctx_tbl_end;
     } else {
         int idx, purge_idx = 0; // decimate the first entry if no suitable candiate
-        int _last_use = process_uptime();
+        unsigned int _last_use = process_uptime();
 
         for (idx = 0; idx < sslctx_tbl_end; idx++) {
             if (SSLCTX_TBL_get(idx, last_use) < _last_use) {
@@ -561,7 +561,7 @@ void *cert_generator(void *ptr) {
     srand((unsigned int)time(NULL));
 
     for (;;) {
-        int cnt, ret;
+        int ret;
         if(fd == -1)
             log_msg(LGG_ERR, "%s: failed to open %s: %s", PIXEL_CERT_PIPE, strerror(errno));
         strcpy(buf, half_token);
@@ -582,6 +582,7 @@ void *cert_generator(void *ptr) {
             }
             continue;
         }
+        ssize_t cnt;
         if((cnt = read(fd, buf + strlen(half_token), PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token))) == 0) {
 #ifdef DEBUG
              printf("%s: pipe EOF\n", __FUNCTION__);
@@ -590,11 +591,12 @@ void *cert_generator(void *ptr) {
             fd = open(PIXEL_CERT_PIPE, O_RDONLY | O_NONBLOCK); /* non block required */
             continue;
         }
-        if (cnt < PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token)) {
+        if (!cnt) continue;
+        if ((size_t)cnt < PIXELSERV_MAX_SERVER_NAME * 4 - strlen(half_token)) {
             buf[cnt + strlen(half_token)] = '\0';
             half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4;
         } else {
-            int i;
+            size_t i = 0;
             for (i=1; buf[PIXELSERV_MAX_SERVER_NAME * 4 - i]!=':' && i < strlen(buf); i++);
             half_token = buf + PIXELSERV_MAX_SERVER_NAME * 4 - i + 1;
             buf[PIXELSERV_MAX_SERVER_NAME * 4 - i + 1] = '\0';
@@ -738,7 +740,7 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
             if ((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
                 log_msg(LGG_ERR, "%s: failed to open pipe: %s", __FUNCTION__, strerror(errno));
             else {
-                int i;
+                size_t i = 0;
                 for(i=0; i< strlen(pem_file); i++)
                     *(full_pem_path + i) = *(pem_file + i);
                 *(full_pem_path + i) = ':';
