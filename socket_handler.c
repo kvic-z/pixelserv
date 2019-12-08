@@ -1025,8 +1025,8 @@ end_post:
                 rsize = asprintf(&aspbuf, httpredirect, url, "");
               } else {
                 char *tmpcors = NULL;
-                asprintf(&tmpcors, httpcors_headers, cors_origin);
-                rsize = asprintf(&aspbuf, httpredirect, url, tmpcors);
+                int ret = asprintf(&tmpcors, httpcors_headers, cors_origin);
+                if (ret) rsize = asprintf(&aspbuf, httpredirect, url, tmpcors);
                 free(tmpcors);
               }
               pipedata.status = SEND_REDIRECT;
@@ -1106,8 +1106,8 @@ end_post:
           rsize = asprintf(&aspbuf, httpnulltext, "");
         } else {
           char *tmpcors = NULL;
-          asprintf(&tmpcors, httpcors_headers, cors_origin);
-          rsize = asprintf(&aspbuf, httpnulltext, tmpcors);
+          int ret = asprintf(&tmpcors, httpcors_headers, cors_origin);
+          if (ret) rsize = asprintf(&aspbuf, httpnulltext, tmpcors);
           free(tmpcors);
         }
         response = aspbuf;
