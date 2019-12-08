@@ -896,7 +896,7 @@ int is_ssl_conn(int fd, char *srv_ip, int srv_ip_len, const int *ssl_ports, int 
 #ifdef TLS1_3_VERSION
 char* read_tls_early_data(SSL *ssl, int *err)
 {
-    size_t buf_siz = PIXEL_TLS_EARLYDATA_SIZE;
+    ssize_t buf_siz = PIXEL_TLS_EARLYDATA_SIZE;
     char *buf, *pbuf;
     int count = 0;
 

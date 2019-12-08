@@ -196,7 +196,7 @@ int main (int argc, char* argv[])
           continue;
           case 'l':
             if ((logger_level)atoi(argv[i]) > LGG_DEBUG
-                || (logger_level)atoi(argv[i]) < 0)
+                || atoi(argv[i]) < 0)
               error = 1;
             else
               log_set_verb((logger_level)atoi(argv[i]));
