@@ -14,7 +14,7 @@ typedef enum {
 
 void log_set_verb(logger_level verb);
 logger_level log_get_verb();
-void log_msg(int verb, char *fmt, ...);
-void log_xcs(int verb, char *client_ip, char *host, int tls, char *req, char *body, int body_len);
+void log_msg(logger_level verb, char *fmt, ...);
+void log_xcs(logger_level verb, char *client_ip, char *host, int tls, char *req, char *body, size_t body_len);
 
 #endif

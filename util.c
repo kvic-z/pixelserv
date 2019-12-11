@@ -84,7 +84,7 @@ unsigned int process_uptime()
 char* get_version(int argc, char* argv[]) {
   char* retbuf = NULL;
   char* optbuf = NULL;
-  unsigned int optlen = 0, i = 1, freeoptbuf = 0;
+  unsigned int optlen = 0, freeoptbuf = 0;
   unsigned int arglen[argc];
 
   // capture startup_time if not yet set
@@ -93,7 +93,7 @@ char* get_version(int argc, char* argv[]) {
   }
 
   // determine total size of all arguments
-  for (i = 1; i < argc; ++i) {
+  for (int i = 1; i < argc; ++i) {
     arglen[i] = strlen(argv[i]) + 1; // add 1 for leading space
     optlen += arglen[i];
   }
@@ -103,7 +103,7 @@ char* get_version(int argc, char* argv[]) {
     if (optbuf) {
       freeoptbuf = 1;
       // concatenate arguments into buffer
-      for (i = 1, optlen = 0; i < argc; ++i) {
+      for (int i = 1, optlen = 0; i < argc; ++i) {
         optbuf[optlen] = ' '; // prepend a space to each argument
         strncpy(optbuf + optlen + 1, argv[i], arglen[i]);
         optlen += arglen[i];

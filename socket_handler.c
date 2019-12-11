@@ -651,11 +651,11 @@ void* conn_handler( void *ptr )
   char* stat_string = NULL;
   int num_req = 0; // number of requests processed by this thread
   char *req_url = NULL;
-  int req_len = 0;
+  unsigned int req_len = 0;
   #define HOST_LEN_MAX 80
   char host[HOST_LEN_MAX + 1];
   char *post_buf = NULL;
-  int post_buf_len = 0;
+  size_t post_buf_len = 0;
   unsigned int total_bytes = 0; /* number of bytes received by this thread */
   #define CORS_ORIGIN_LEN_MAX 256
   char *cors_origin = NULL;
@@ -938,11 +938,12 @@ end_post:
                NULL != (fp = fopen(ca_file, "r")))
             {
               fseek(fp, 0L, SEEK_END);
-              int file_sz = ftell(fp);
-              rsize = asprintf(&aspbuf, "%s%d%s", httpcacert, file_sz, httpcacert2);
+              long file_sz = ftell(fp);
               rewind(fp);
+              rsize = asprintf(&aspbuf, "%s%ld%s", httpcacert, file_sz, httpcacert2);
               if ((aspbuf = (char*)realloc(aspbuf, rsize + file_sz + 16)) != NULL &&
-                     fread(aspbuf + rsize, 1, file_sz, fp) == file_sz) {
+                     fread(aspbuf + rsize, 1, file_sz, fp) == (size_t)file_sz) {
+                                                              // should be fairly safe to cast here
                 response = aspbuf;
                 rsize += file_sz;
                 pipedata.status = SEND_TXT;
@@ -1025,8 +1026,8 @@ end_post:
                 rsize = asprintf(&aspbuf, httpredirect, url, "");
               } else {
                 char *tmpcors = NULL;
-                asprintf(&tmpcors, httpcors_headers, cors_origin);
-                rsize = asprintf(&aspbuf, httpredirect, url, tmpcors);
+                int ret = asprintf(&tmpcors, httpcors_headers, cors_origin);
+                if (ret) rsize = asprintf(&aspbuf, httpredirect, url, tmpcors);
                 free(tmpcors);
               }
               pipedata.status = SEND_REDIRECT;
@@ -1106,8 +1107,8 @@ end_post:
           rsize = asprintf(&aspbuf, httpnulltext, "");
         } else {
           char *tmpcors = NULL;
-          asprintf(&tmpcors, httpcors_headers, cors_origin);
-          rsize = asprintf(&aspbuf, httpnulltext, tmpcors);
+          int ret = asprintf(&tmpcors, httpcors_headers, cors_origin);
+          if (ret) rsize = asprintf(&aspbuf, httpnulltext, tmpcors);
           free(tmpcors);
         }
         response = aspbuf;

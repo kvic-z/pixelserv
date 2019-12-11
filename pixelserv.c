@@ -105,7 +105,7 @@ int main (int argc, char* argv[])
   struct addrinfo hints, *servinfo;
   int error = 0;
   int pipefd[2];  // IPC pipe ends (0 = read, 1 = write)
-  response_struct pipedata = { FAIL_GENERAL, { 0 }, 0.0, 0 };
+  response_struct pipedata = { 0 };
   char* ports[MAX_PORTS + 1]; /* one extra port for admin */
   char *port = NULL;
   fd_set readfds;
@@ -196,7 +196,7 @@ int main (int argc, char* argv[])
           continue;
           case 'l':
             if ((logger_level)atoi(argv[i]) > LGG_DEBUG
-                || (logger_level)atoi(argv[i]) < 0)
+                || atoi(argv[i]) < 0)
               error = 1;
             else
               log_set_verb((logger_level)atoi(argv[i]));
