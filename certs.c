@@ -54,6 +54,10 @@ inline int sslctx_tbl_get_sess_purge() { return SSL_CTX_sess_cache_full(g_sslctx
 static int sslctx_tbl_insert(const char *cert_name, SSL_CTX *sslctx, int ins_idx);
 static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X509_INFO) *cachain);
 
+#ifdef DEBUG
+static void sslctx_tbl_dump(int idx, const char * func);
+#endif
+
 void conn_stor_init(int slots) {
     if (slots < 0) {
         log_msg(LGG_ERR, "%s invalid slots %d", __FUNCTION__, slots);
@@ -322,6 +326,25 @@ static int sslctx_tbl_cache(const char *cert_name, SSL_CTX *sslctx, int ins_idx)
     return ret;
 }
 
+static int sslctx_tbl_purge(int idx) {
+    if (idx < 0 || idx >= sslctx_tbl_end || sslctx_tbl_end <= 0)
+        return -1;
+
+    if (!SSLCTX_TBL_get(idx, cert_name))
+        free(SSLCTX_TBL_get(idx, cert_name));
+    if (!SSLCTX_TBL_get(idx, sslctx))
+        SSL_CTX_free(SSLCTX_TBL_get(idx, sslctx));
+    --sslctx_tbl_end;
+    if (idx < sslctx_tbl_end) {
+        memmove(SSLCTX_TBL_ptr(idx), SSLCTX_TBL_ptr(idx+1), sizeof(sslctx_cache_struct) * (sslctx_tbl_end - idx));
+        memset(SSLCTX_TBL_ptr(sslctx_tbl_end), 0, sizeof(sslctx_cache_struct));
+    } else {
+        memset(SSLCTX_TBL_ptr(sslctx_tbl_end), 0, sizeof(sslctx_cache_struct));
+    }
+
+    return 0;
+}
+
 #ifdef DEBUG
 static void sslctx_tbl_dump(int idx, const char * func)
 {
@@ -381,7 +404,6 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     EVP_PKEY *key = NULL;
     X509 *x509 = NULL;
     X509_EXTENSION *ext = NULL;
-    X509V3_CTX ext_ctx;
 #define SAN_STR_SIZE PIXELSERV_MAX_SERVER_NAME + 4 /* max("IP:", "DNS:") = 4 */
     char san_str[SAN_STR_SIZE];
     char *tld = NULL, *tld_tmp = NULL;
@@ -411,13 +433,12 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     if((x509 = X509_new()) == NULL)
         goto free_all;
     ASN1_INTEGER_set(X509_get_serialNumber(x509),rand());
-    X509_set_version(x509,2); // X509 v3
+    X509_set_version(x509, 2); // X509 v3
     X509_gmtime_adj(X509_get_notBefore(x509), 0);
-    X509_gmtime_adj(X509_get_notAfter(x509), 63072000L); // cert valid for 2yrs
+    X509_gmtime_adj(X509_get_notAfter(x509), 3600*24*825L); // cert valid for 825 days
     X509_set_issuer_name(x509, issuer);
     X509_NAME *name = X509_get_subject_name(x509);
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char *)pem_fn, -1, -1, 0);
-    X509V3_set_ctx_nodb(&ext_ctx);
 
     tld_tmp = strchr(pem_fn, '.');
     while(tld_tmp != NULL) {
@@ -427,10 +448,12 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     }
     tld_tmp = (dot_count == 3 && (atoi(tld) > 0 || (atoi(tld) == 0 && strlen(tld) == 1))) ? "IP" : "DNS";
     snprintf(san_str, SAN_STR_SIZE, "%s:%s", tld_tmp, pem_fn);
-    if ((ext = X509V3_EXT_conf_nid(NULL, &ext_ctx, NID_subject_alt_name, san_str)) == NULL)
+    if ((ext = X509V3_EXT_conf_nid(NULL, NULL, NID_subject_alt_name, san_str)) == NULL)
         goto free_all;
     X509_add_ext(x509, ext, -1);
-    ext = X509V3_EXT_conf_nid(NULL, NULL, NID_ext_key_usage, "TLS Web Server Authentication");
+    X509_EXTENSION_free(ext);
+    if ((ext = X509V3_EXT_conf_nid(NULL, NULL, NID_ext_key_usage, "TLS Web Server Authentication")) == NULL)
+        goto free_all;
     X509_add_ext(x509, ext, -1);
     X509_set_pubkey(x509, key);
     X509_sign_ctx(x509, p_ctx);
@@ -724,7 +747,6 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
         goto quit_cb;
     }
 
-    SSL_CTX *sslctx;
     int handle, ins_handle;
     sslctx_tbl_lookup(pem_file, &handle, &ins_handle);
 #ifdef DEBUG
@@ -733,40 +755,72 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
         sslctx_tbl_dump(handle, __FUNCTION__);
     if (ins_handle >=0) sslctx_tbl_dump(ins_handle, __FUNCTION__);
 #endif
-    if (handle < 0) {
-        struct stat st;
-        if (stat(full_pem_path, &st) != 0) {
-            int fd;
-            cbarg->status = SSL_MISS;
-            log_msg(LGG_WARNING, "%s %s missing", srv_name, pem_file);
-            if ((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
-                log_msg(LGG_ERR, "%s: failed to open pipe: %s", __FUNCTION__, strerror(errno));
-            else {
-                size_t i = 0;
-                for(i=0; i< strlen(pem_file); i++)
-                    *(full_pem_path + i) = *(pem_file + i);
-                *(full_pem_path + i) = ':';
-                *(full_pem_path + i + 1) = '\0';
 
-                if (write(fd, full_pem_path, strlen(full_pem_path)) < 0)
-                    log_msg(LGG_ERR, "%s: failed to write pipe: %s", __FUNCTION__, strerror(errno));
-                close(fd);
-            }
-            rv = CB_ERR;
+    if (handle >= 0) {
+        SSL_set_SSL_CTX(ssl, SSLCTX_TBL_get(handle, sslctx));
+        if (X509_cmp_time(X509_get_notAfter(SSL_get_certificate(ssl)), NULL) > 0) {
+            cbarg->status = SSL_HIT;
             goto quit_cb;
         }
-        if (NULL == (sslctx  = create_child_sslctx(full_pem_path, cbarg->cachain))
-            || 0 > sslctx_tbl_cache(pem_file, sslctx, ins_handle)) {
-            log_msg(LGG_ERR, "%s: fail to create sslctx or cache %s", __FUNCTION__, pem_file);
-            cbarg->status = SSL_ERR;
-            rv = CB_ERR;
-            goto quit_cb;
+        // the certificate has expired. let's re-generate
+        cbarg->status = SSL_ERR;
+        log_msg(LGG_WARNING, "Expired certificate %s", pem_file);
+        sslctx_tbl_purge(handle);
+        remove(full_pem_path);
+        goto submit_missing_cert;
+    }
+
+    struct stat st;
+    if (stat(full_pem_path, &st) != 0) {
+        int fd;
+        cbarg->status = SSL_MISS;
+        log_msg(LGG_WARNING, "%s %s missing", srv_name, pem_file);
+
+submit_missing_cert:
+
+        if ((fd = open(PIXEL_CERT_PIPE, O_WRONLY)) < 0)
+            log_msg(LGG_ERR, "%s: failed to open pipe: %s", __FUNCTION__, strerror(errno));
+        else {
+            size_t i = 0;
+            for(i=0; i< strlen(pem_file); i++)
+                *(full_pem_path + i) = *(pem_file + i);
+            *(full_pem_path + i) = ':';
+            *(full_pem_path + i + 1) = '\0';
+
+            if (write(fd, full_pem_path, strlen(full_pem_path)) < 0)
+                log_msg(LGG_ERR, "%s: failed to write pipe: %s", __FUNCTION__, strerror(errno));
+            close(fd);
         }
-    } else
-        sslctx = SSLCTX_TBL_get(handle, sslctx);
+
+        rv = CB_ERR;
+        goto quit_cb;
+    }
+
+    SSL_CTX *sslctx = NULL;
+    if (NULL == (sslctx = create_child_sslctx(full_pem_path, cbarg->cachain))) {
+        log_msg(LGG_ERR, "%s: fail to create sslctx or cache %s", __FUNCTION__, pem_file);
+        cbarg->status = SSL_ERR;
+        rv = CB_ERR;
+        goto quit_cb;
+    }
 
     SSL_set_SSL_CTX(ssl, sslctx);
+    if (X509_cmp_time(X509_get_notAfter(SSL_get_certificate(ssl)), NULL) < 0) {
+        // the certificate has expired. let's re-generate
+        cbarg->status = SSL_ERR;
+        log_msg(LGG_WARNING, "Expired certificate %s", pem_file);
+        remove(full_pem_path);
+        goto submit_missing_cert;
+    }
+
+    if (sslctx_tbl_cache(pem_file, sslctx, ins_handle) < 0) {
+        log_msg(LGG_ERR, "%s: fail to create sslctx or cache %s", __FUNCTION__, pem_file);
+        cbarg->status = SSL_ERR;
+        rv = CB_ERR;
+        goto quit_cb;
+    }
     cbarg->status = SSL_HIT;
+
 quit_cb:
     return rv;
 }

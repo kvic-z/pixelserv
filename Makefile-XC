@@ -34,7 +34,7 @@ UPX       := upx -9
 # packaging macros
 PFILES     = LICENSE README.md dist/$(DISTNAME).$(ARCH).performance.*
 PVERSION  := $(shell grep -w VERSION util.h | awk -F ' ' '{print $$NF}' | sed 's/"//g')
-PCMD      := zip
+PCMD      := bsdtar -a -cf
 
 # x86 environment
 CC32      := $(CC) -m32
@@ -58,7 +58,7 @@ ARMCC     := $(ARMPREFIX)$(CC)
 ARMSTRIP  := $(ARMPREFIX)$(STRIP)
 
 # ARMV8(Entware) environment
-ARMV8_entdir := /home/yipst/Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc-2.27
+ARMV8_entdir := ../Entware/staging_dir/toolchain-aarch64_cortex-a53_gcc-7.4.0_glibc-2.27
 ARMV8TOOLS  := $(ARMV8_entdir)/bin
 ARMV8PATH   := PATH=$(ARMV8TOOLS):$(PATH)
 ARMV8PREFIX := aarch64-openwrt-linux-
@@ -66,7 +66,7 @@ ARMV8CC     := $(ARMV8PREFIX)$(CC)
 ARMV8STRIP  := $(ARMV8PREFIX)$(STRIP)
 
 # ARM(Entware) environment
-ARM_entdir   := /home/yipst/Entware/staging_dir/toolchain-arm_cortex-a9_gcc-7.3.0_glibc-2.23_eabi
+ARM_entdir   := ../Entware/staging_dir/toolchain-arm_cortex-a9_gcc-7.4.0_glibc-2.23_eabi
 ARMentTOOLS  := $(ARM_entdir)/bin
 ARMentPATH   := PATH=$(ARMentTOOLS):$(PATH)
 ARMentPREFIX := arm-openwrt-linux-gnueabi-
@@ -186,8 +186,8 @@ arm.ent: printver dist
 	@echo "=== Building ARM (Entware) ==="
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB) 
 	$(ARMentPATH) $(ARMentCC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
-	$(ARMentPATH) $(ARMentCC) -isystem$(ARM_entdir)/include -I../openssl/openssl-1.1.1/include $(CFLAGS_P) \
-		-o dist/$(DISTNAME).$@.performance.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
+#	$(ARMentPATH) $(ARMentCC) -isystem$(ARM_entdir)/include -I../openssl/openssl-1.1.1/include $(CFLAGS_P) \
+#		-o dist/$(DISTNAME).$@.performance.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
 #	$(ARMentPATH) $(ARMentCC) -isystem$(ARM_entdir)/include -I../openssl/openssl-1.1.1/include $(CFLAGS_D) \
 #		-o dist/$(DISTNAME).$@.debug.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
@@ -199,9 +199,9 @@ armv8.ent: ARCH = armv8.ent
 armv8.ent: export STAGING_DIR = $(ARMV8_entdir)
 armv8.ent: printver dist
 	@echo "=== Building aarch64 (Entware) ==="
-#	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
+	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_D) -o dist/$(DISTNAME).$@.debug.dynamic $(OPTS) $(SRCS) $(LDFLAGS_D) $(SHAREDLIB)
 	$(ARMV8PATH) $(ARMV8CC) $(CFLAGS_P) -o dist/$(DISTNAME).$@.performance.dynamic $(OPTS) $(SRCS) $(LDFLAGS_P) $(SHAREDLIB)
-	$(ARMV8PATH) $(ARMV8CC) -isystem$(ARMV8_entdir)/include -I../openssl/openssl-1.1.1/include \
+#	$(ARMV8PATH) $(ARMV8CC) -isystem$(ARMV8_entdir)/include -I../openssl/openssl-1.1.1/include \
 		-o dist/$(DISTNAME).$@.performance.static $(OPTS) $(SRCS) $(STATICLIB) $(LDFLAGS_P) -ldl
 	rm -f dist/$(DISTNAME).$(PVERSION).$@.zip
 	$(PCMD) dist/$(DISTNAME).$(PVERSION).Entware-3.x.aarch64softfloat.zip $(PFILES)

@@ -1,3 +1,11 @@
+2019-12-13 v2.3.1
+
+* NEW check and purge expired certs on-the-fly. Generate new ones to replace the expired automatically.
+* NEW support the new TLS requirements on key size, cert valid period & etc from Debian 10 and Apple Inc.
+  Included findings & code contributed by emeidi and jackyaz.
+* CHANGED fix compilation warnings with gcc-9/clang-9 (issue #33) contributed by KiloFoxtrotPapa.
+* CHANGED add logging on LEVEL 2 when a client disconnects before a response is sent i.e. a 'cly' event
+
 2018-12-30 v2.2.1
 
 * NEW log TLS version for each access in log LEVEL 4
