@@ -43,15 +43,16 @@ makepkg -si
 
 ## Install on EdgeRouter X
 
-Pre-built binary is available as a Debian package. Source package will be available soon. See this detailed [installation guide](https://kazoo.ga/run-pixelserv-tls-on-erx/). Or simply:
+See this [installation guide](https://kazoo.ga/run-pixelserv-tls-on-erx/). Or simply:
 
 #### Pre-built binary
 ````
 sudo -i
 cd /tmp
-curl -O https://raw.githubusercontent.com/kvic-z/goodies-edgemax/master/pixelserv-tls_2.0.1-1_mipsel.deb
-dpkg -i pixelserv-tls_2.0.1-1_mipsel.deb
+curl -O https://raw.githubusercontent.com/kvic-z/goodies-edgemax/master/pixelserv-tls_2.2.1-1_mipsel.deb
+dpkg -i pixelserv-tls_2.2.1-1_mipsel.deb
 ````
+The binary is built for and tested on EdgeOS v1.x. It's not tested on EdgeOS v2.x and most likely it won't be compatible.
 
 ## Install on Homebrew (macOS) and Linuxbrew
 
@@ -59,9 +60,22 @@ dpkg -i pixelserv-tls_2.0.1-1_mipsel.deb
 brew install https://kazoo.ga/pixelserv-tls/pixelserv-tls.rb
 ```
 
-## Docker container
+## Install as a Docker container
 
 See https://hub.docker.com/r/imthai/pixelserv-tls
+
+## Install on Raspberry Pi
+
+Binary packages are available from this [Github](https://github.com/jumpsmm7/). Should work on all Raspberry Pi's running Raspbian (Debian 10). For installation issues, you may refer to this [tracker](https://github.com/kvic-z/pixelserv-tls/issues/32).
+
+#### Pre-built binary
+````
+sudo -i
+cd /tmp
+curl -O https://github.com/jumpsmm7/pixelserv-tls_2.3.1-1_armhf.deb/raw/master/pixelserv-tls_2.3.1-1_armhf.deb
+dpkg -i pixelserv-tls_2.3.1-1_armhf.deb
+````
+and follow the on-screen instructions.
 
 ## Launch pixelserv-tls
 ````
