@@ -72,7 +72,7 @@ Binary packages are available from this [Github](https://github.com/jumpsmm7/). 
 ````
 sudo -i
 cd /tmp
-curl -O https://github.com/jumpsmm7/pixelserv-tls_2.3.1-1_armhf.deb/raw/master/pixelserv-tls_2.3.1-1_armhf.deb
+wget https://github.com/jumpsmm7/pixelserv-tls_2.3.1-1_armhf.deb/raw/master/pixelserv-tls_2.3.1-1_armhf.deb
 dpkg -i pixelserv-tls_2.3.1-1_armhf.deb
 ````
 and follow the on-screen instructions.
