@@ -12,10 +12,10 @@
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <openssl/bn.h>
+#include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
-#include <openssl/crypto.h>
 #include <openssl/x509v3.h>
 
 #include "certs.h"
@@ -417,18 +417,21 @@ static void generate_cert(char* pem_fn, const char *pem_dir, X509_NAME *issuer, 
     if(pem_fn[0] == '_') pem_fn[0] = '*';
 
     // -- generate cert
-    RSA *rsa = RSA_new();
     BIGNUM *e = BN_new();
     BN_set_word(e, RSA_F4);
+#if OPENSSL_VERSION_MAJOR >= 3
+    key = EVP_RSA_gen(2048);
+    if (!key)
+        goto free_all;
+#else
+    RSA *rsa = RSA_new();
     if (RSA_generate_key_ex(rsa, 2048, e, NULL) < 0)
         goto free_all;
-#ifdef DEBUG
-    printf("%s: rsa key generated for [%s]\n", __FUNCTION__, pem_fn);
-#endif
     key = EVP_PKEY_new();
     EVP_PKEY_assign_RSA(key, rsa); // rsa will be freed when key is freed
+#endif
 #ifdef DEBUG
-    printf("%s: rsa key assigned\n", __FUNCTION__);
+    printf("%s: rsa key generated for [%s]\n", __FUNCTION__, pem_fn);
 #endif
     if((x509 = X509_new()) == NULL)
         goto free_all;
@@ -552,15 +555,9 @@ void cert_tlstor_init(const char *pem_dir, cert_tlstor_t *ct)
 
     snprintf(cert_file, PIXELSERV_MAX_PATH, "%s/ca.key", pem_dir);
     fp = fopen(cert_file, "r");
-    RSA *rsa = NULL;
-
-    if(!fp || !PEM_read_RSAPrivateKey(fp, &rsa, pem_passwd_cb, (void*)pem_dir))
+    if(!fp || !PEM_read_PrivateKey(fp, &ct->privkey, pem_passwd_cb, (void*)pem_dir))
         log_msg(LGG_ERR, "%s: failed to load ca.key", __FUNCTION__);
-    else {
-        ct->privkey = EVP_PKEY_new();
-        EVP_PKEY_assign_RSA(ct->privkey, rsa); /* rsa auto freed when key is freed */
-        fclose(fp);
-    }
+    fclose(fp);
 }
 
 void cert_tlstor_cleanup(cert_tlstor_t *c)
@@ -840,16 +837,10 @@ static SSL_SESSION *get_session(SSL *ssl, unsigned char *id, int idlen, int *do_
 
 static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X509_INFO) *cachain)
 {
+    int glist [] = { NID_X9_62_prime256v1 };
     SSL_CTX *sslctx = SSL_CTX_new(SSLv23_server_method());
-#ifdef PIXELSERV_SSL_HAS_ECDH_AUTO
-    SSL_CTX_set_ecdh_auto(sslctx, 1);
-#else
-    EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
-    if (!ecdh)
-        log_msg(LGG_ERR, "%s: cannot get ECDH curve", __FUNCTION__);
-    SSL_CTX_set_tmp_ecdh(sslctx, ecdh);
-    EC_KEY_free(ecdh);
-#endif
+    SSL_CTX_set1_groups(sslctx, glist, sizeof(glist)/sizeof(glist[0]));
+
     SSL_CTX_set_options(sslctx,
           SSL_OP_SINGLE_DH_USE |
           SSL_MODE_RELEASE_BUFFERS |
