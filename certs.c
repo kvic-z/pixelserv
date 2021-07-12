@@ -724,7 +724,7 @@ static int tls_servername_cb(SSL *ssl, int *ad, void *arg) {
         tld = pem_file + 1;
         pem_file = strchr(tld, '.');
     }
-    if (dot_count <= 1 || (dot_count == 3 && atoi(tld) > 0)) {
+    if (dot_count <= 1 || (dot_count == 2 && strlen(tld) == 2) || (dot_count == 3 && atoi(tld) > 0)) {
         pem_file = srv_name;
         strncat(full_pem_path, srv_name, PIXELSERV_MAX_PATH - len);
         len += strlen(srv_name);
