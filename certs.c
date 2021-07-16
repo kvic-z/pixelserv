@@ -837,9 +837,17 @@ static SSL_SESSION *get_session(SSL *ssl, unsigned char *id, int idlen, int *do_
 
 static SSL_CTX* create_child_sslctx(const char* full_pem_path, const STACK_OF(X509_INFO) *cachain)
 {
-    int glist [] = { NID_X9_62_prime256v1 };
     SSL_CTX *sslctx = SSL_CTX_new(SSLv23_server_method());
+#if OPENSSL_VERSION_NUMBER < 0x10101000L
+    EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+    if (!ecdh)
+        log_msg(LGG_ERR, "%s: cannot get ECDH curve", __FUNCTION__);
+    SSL_CTX_set_tmp_ecdh(sslctx, ecdh);
+    EC_KEY_free(ecdh);
+#else
+    int glist [] = { NID_X9_62_prime256v1 };
     SSL_CTX_set1_groups(sslctx, glist, sizeof(glist)/sizeof(glist[0]));
+#endif
 
     SSL_CTX_set_options(sslctx,
           SSL_OP_SINGLE_DH_USE |
